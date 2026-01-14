@@ -1,0 +1,22 @@
+[Unit]
+Description=Workspace Agent
+Documentation=https://github.com/elevo/unified-workspace-sdk
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/workspace-agent
+Restart=always
+RestartSec=5
+Environment=WORKSPACE_SERVER_URL=http://host.docker.internal:9090
+Environment=RUST_LOG=info
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/workspace /tmp
+
+[Install]
+WantedBy=multi-user.target

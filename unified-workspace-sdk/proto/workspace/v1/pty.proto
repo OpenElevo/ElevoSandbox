@@ -1,0 +1,89 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/elevo/workspace-sdk/proto/workspace/v1";
+
+// PTY service for interactive terminal sessions
+service PtyService {
+  // Create a new PTY
+  rpc CreatePty(CreatePtyRequest) returns (CreatePtyResponse);
+
+  // Resize a PTY
+  rpc ResizePty(ResizePtyRequest) returns (ResizePtyResponse);
+
+  // Kill a PTY
+  rpc KillPty(KillPtyRequest) returns (KillPtyResponse);
+}
+
+// Create PTY request
+message CreatePtyRequest {
+  // Sandbox ID
+  string sandbox_id = 1;
+
+  // Terminal columns (default: 80)
+  optional uint32 cols = 2;
+
+  // Terminal rows (default: 24)
+  optional uint32 rows = 3;
+
+  // Shell to use (optional, defaults to /bin/bash)
+  optional string shell = 4;
+
+  // Environment variables
+  map<string, string> env = 5;
+}
+
+// Create PTY response
+message CreatePtyResponse {
+  PtyInfo pty = 1;
+}
+
+// PTY information
+message PtyInfo {
+  // PTY ID
+  string id = 1;
+
+  // Sandbox ID
+  string sandbox_id = 2;
+
+  // Terminal columns
+  uint32 cols = 3;
+
+  // Terminal rows
+  uint32 rows = 4;
+}
+
+// Resize PTY request
+message ResizePtyRequest {
+  // Sandbox ID
+  string sandbox_id = 1;
+
+  // PTY ID
+  string pty_id = 2;
+
+  // New columns
+  uint32 cols = 3;
+
+  // New rows
+  uint32 rows = 4;
+}
+
+// Resize PTY response
+message ResizePtyResponse {
+  bool success = 1;
+}
+
+// Kill PTY request
+message KillPtyRequest {
+  // Sandbox ID
+  string sandbox_id = 1;
+
+  // PTY ID
+  string pty_id = 2;
+}
+
+// Kill PTY response
+message KillPtyResponse {
+  bool success = 1;
+}

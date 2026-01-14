@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  workspace-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9090:9090"  # gRPC for agents
+    environment:
+      - RUST_LOG=info
+      - DATABASE_URL=sqlite:///data/workspace.db
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - NFS_EXPORT_DIR=/data/workspaces
+      - HTTP_PORT=8080
+      - GRPC_PORT=9090
+    volumes:
+      - ./data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - workspace-data:/data/workspaces
+    networks:
+      - workspace-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  workspace-data:
+
+networks:
+  workspace-net:
+    driver: bridge

@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/elevo/workspace-sdk/proto/workspace/v1";
+
+// Process service for executing commands in sandboxes
+service ProcessService {
+  // Run a command and wait for completion
+  rpc RunCommand(RunCommandRequest) returns (RunCommandResponse);
+
+  // Run a command with streaming output
+  rpc RunCommandStream(RunCommandRequest) returns (stream ProcessEvent);
+
+  // Kill a running process
+  rpc KillProcess(KillProcessRequest) returns (KillProcessResponse);
+}
+
+// Run command request
+message RunCommandRequest {
+  // Sandbox ID
+  string sandbox_id = 1;
+
+  // Command to execute
+  string command = 2;
+
+  // Command arguments
+  repeated string args = 3;
+
+  // Environment variables
+  map<string, string> env = 4;
+
+  // Working directory (optional)
+  optional string cwd = 5;
+
+  // Timeout in milliseconds (optional, 0 = no timeout)
+  optional uint64 timeout_ms = 6;
+}
+
+// Run command response
+message RunCommandResponse {
+  CommandResult result = 1;
+}
+
+// Command result
+message CommandResult {
+  // Exit code
+  int32 exit_code = 1;
+
+  // Standard output
+  string stdout = 2;
+
+  // Standard error
+  string stderr = 3;
+}
+
+// Process event for streaming
+message ProcessEvent {
+  oneof event {
+    StdoutEvent stdout = 1;
+    StderrEvent stderr = 2;
+    ExitEvent exit = 3;
+    ErrorEvent error = 4;
+  }
+}
+
+// Stdout event
+message StdoutEvent {
+  string data = 1;
+}
+
+// Stderr event
+message StderrEvent {
+  string data = 1;
+}
+
+// Exit event
+message ExitEvent {
+  int32 code = 1;
+}
+
+// Error event
+message ErrorEvent {
+  string message = 1;
+}
+
+// Kill process request
+message KillProcessRequest {
+  // Sandbox ID
+  string sandbox_id = 1;
+
+  // Process ID to kill
+  uint32 pid = 2;
+
+  // Signal to send (default: SIGTERM = 15)
+  optional int32 signal = 3;
+}
+
+// Kill process response
+message KillProcessResponse {
+  bool success = 1;
+}

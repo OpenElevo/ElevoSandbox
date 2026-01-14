@@ -1,0 +1,19 @@
+{
+  "name": "workspace-sdk-e2e-tests",
+  "version": "0.1.0",
+  "private": true,
+  "description": "E2E tests for Workspace SDK",
+  "scripts": {
+    "test": "npx tsx test.ts",
+    "test:sandbox": "npx tsx test-sandbox.ts",
+    "test:process": "npx tsx test-process.ts"
+  },
+  "dependencies": {
+    "workspace-sdk": "file:../../sdk-typescript"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "tsx": "^4.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/elevo/workspace-sdk/proto/workspace/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// Sandbox service for managing sandbox lifecycle
+service SandboxService {
+  // Create a new sandbox
+  rpc CreateSandbox(CreateSandboxRequest) returns (CreateSandboxResponse);
+
+  // Get sandbox by ID
+  rpc GetSandbox(GetSandboxRequest) returns (GetSandboxResponse);
+
+  // List all sandboxes
+  rpc ListSandboxes(ListSandboxesRequest) returns (ListSandboxesResponse);
+
+  // Delete a sandbox
+  rpc DeleteSandbox(DeleteSandboxRequest) returns (DeleteSandboxResponse);
+}
+
+// Sandbox state enumeration
+enum SandboxState {
+  SANDBOX_STATE_UNSPECIFIED = 0;
+  SANDBOX_STATE_STARTING = 1;
+  SANDBOX_STATE_RUNNING = 2;
+  SANDBOX_STATE_STOPPING = 3;
+  SANDBOX_STATE_STOPPED = 4;
+  SANDBOX_STATE_ERROR = 5;
+}
+
+// Sandbox resource
+message Sandbox {
+  // Unique identifier
+  string id = 1;
+
+  // Optional human-readable name
+  optional string name = 2;
+
+  // Template used to create this sandbox
+  string template = 3;
+
+  // Current state
+  SandboxState state = 4;
+
+  // Environment variables
+  map<string, string> env = 5;
+
+  // Custom metadata
+  map<string, string> metadata = 6;
+
+  // NFS mount URL (if available)
+  optional string nfs_url = 7;
+
+  // Creation timestamp
+  google.protobuf.Timestamp created_at = 8;
+
+  // Last update timestamp
+  google.protobuf.Timestamp updated_at = 9;
+
+  // Timeout in seconds (0 = no timeout)
+  uint64 timeout = 10;
+
+  // Error message (if state is ERROR)
+  optional string error_message = 11;
+}
+
+// Create sandbox request
+message CreateSandboxRequest {
+  // Template to use (optional, defaults to "default")
+  optional string template = 1;
+
+  // Optional name
+  optional string name = 2;
+
+  // Environment variables
+  map<string, string> env = 3;
+
+  // Custom metadata
+  map<string, string> metadata = 4;
+
+  // Timeout in seconds (optional)
+  optional uint64 timeout = 5;
+}
+
+// Create sandbox response
+message CreateSandboxResponse {
+  Sandbox sandbox = 1;
+}
+
+// Get sandbox request
+message GetSandboxRequest {
+  string id = 1;
+}
+
+// Get sandbox response
+message GetSandboxResponse {
+  Sandbox sandbox = 1;
+}
+
+// List sandboxes request
+message ListSandboxesRequest {
+  // Filter by state (optional)
+  optional SandboxState state = 1;
+
+  // Pagination: page size
+  optional int32 page_size = 2;
+
+  // Pagination: page token
+  optional string page_token = 3;
+}
+
+// List sandboxes response
+message ListSandboxesResponse {
+  repeated Sandbox sandboxes = 1;
+
+  // Next page token (empty if no more pages)
+  string next_page_token = 2;
+
+  // Total count
+  int32 total = 3;
+}
+
+// Delete sandbox request
+message DeleteSandboxRequest {
+  string id = 1;
+
+  // Force delete even if running
+  bool force = 2;
+}
+
+// Delete sandbox response
+message DeleteSandboxResponse {
+  bool success = 1;
+}
