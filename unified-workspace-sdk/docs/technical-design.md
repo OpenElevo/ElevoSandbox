@@ -1076,3 +1076,1295 @@ await using sandbox = await client.sandbox.create({...})
 | nfsserve crate | 维护不活跃 | 准备系统模式替代方案 |
 | bollard crate | API 变更 | 锁定版本，关注更新 |
 | Docker API | 版本兼容性 | 支持多版本 API |
+
+---
+
+## 11. 测试设计
+
+### 11.1 测试架构
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          E2E 测试                                    │
+│              (完整业务流程，真实环境，SDK 调用)                        │
+│                                                                      │
+│   测试场景：创建 Sandbox → NFS 文件操作 → 命令执行 → PTY → 清理       │
+├─────────────────────────────────────────────────────────────────────┤
+│                         集成测试                                     │
+│                (多模块联合，真实 Docker/NFS)                          │
+│                                                                      │
+│   测试范围：API + Docker + NFS + gRPC + SQLite                       │
+├─────────────────────────────────────────────────────────────────────┤
+│                         单元测试                                     │
+│                   (单模块，Mock 外部依赖)                             │
+│                                                                      │
+│   测试范围：各 Service、Manager、工具函数                             │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 11.2 单元测试设计
+
+#### 11.2.1 SandboxService 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_create_sandbox_success | 有效模板、配置 | 返回 Sandbox，状态 starting | 正常创建 |
+| test_create_sandbox_invalid_template | 不存在的模板 | TemplateNotFoundError | 模板验证 |
+| test_create_sandbox_limit_exceeded | 超过最大数量 | SandboxLimitExceededError | 资源限制 |
+| test_get_sandbox_not_found | 不存在的 ID | SandboxNotFoundError | 查询失败 |
+| test_delete_sandbox_running | running 状态 | 状态变为 stopping → 删除成功 | 正常删除 |
+| test_delete_sandbox_not_found | 不存在的 ID | SandboxNotFoundError | 删除失败 |
+| test_extend_sandbox_success | 有效 ID，1800s | expires_at 增加 1800s | 延长超时 |
+| test_extend_sandbox_max_limit | 超过最大延长 | 参数错误 | 限制验证 |
+| test_batch_delete_partial_failure | 部分无效 ID | 返回成功和失败列表 | 批量删除 |
+
+**状态机测试：**
+
+| 测试用例 | 初始状态 | 触发事件 | 预期状态 |
+|---------|---------|---------|---------|
+| test_state_starting_to_running | starting | Agent 注册 | running |
+| test_state_starting_to_error_timeout | starting | 连接超时 | error |
+| test_state_running_to_stopping | running | 调用 delete | stopping |
+| test_state_running_to_error | running | Agent 断开 | error |
+| test_state_running_to_stopped | running | 超时过期 | stopped |
+
+#### 11.2.2 ProcessService 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_run_command_sync | "echo hello" | exitCode=0, stdout="hello\n" | 同步执行 |
+| test_run_command_with_env | cmd + envs | 环境变量生效 | 环境变量 |
+| test_run_command_timeout | sleep 100, timeout=1s | ProcessTimeoutError | 超时处理 |
+| test_run_command_large_output | 大输出命令 | 输出截断，truncated=true | 输出限制 |
+| test_run_command_stream | 长时间命令 | 收到多个 stdout 事件 | 流式输出 |
+| test_kill_command_sigterm | 运行中命令 | 命令终止，exit_code=-15 | 正常终止 |
+| test_kill_command_sigkill | 运行中命令 | 命令强制终止 | 强制终止 |
+| test_kill_command_not_found | 不存在的 cmdId | CommandNotFoundError | 命令不存在 |
+
+#### 11.2.3 PTYService 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_create_pty_success | cols=80, rows=24 | 返回 PTY ID 和 WS URL | 正常创建 |
+| test_create_pty_limit_exceeded | 超过限制数量 | PTYLimitExceededError | 数量限制 |
+| test_pty_input_output | 输入 "ls\n" | 收到目录列表输出 | 输入输出 |
+| test_pty_resize | 新 cols/rows | resize 成功 | 调整大小 |
+| test_pty_kill | 有效 PTY ID | PTY 关闭，WS 断开 | 关闭 PTY |
+
+#### 11.2.4 AgentConnPool 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_register_agent | sandbox_id + stream | 加入连接池 | 注册成功 |
+| test_register_agent_duplicate | 重复 sandbox_id | 替换旧连接 | 重复注册 |
+| test_get_connection_not_found | 不存在的 sandbox_id | None | 连接不存在 |
+| test_heartbeat_update | 心跳消息 | 更新 last_heartbeat | 心跳处理 |
+| test_heartbeat_timeout | 90s 无心跳 | 连接标记断开 | 超时检测 |
+| test_command_routing | CommandOutput | 路由到正确的 HTTP 连接 | 输出路由 |
+| test_connection_cleanup | 连接断开 | 清理 pending_commands | 清理逻辑 |
+
+#### 11.2.5 NfsProvider 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_add_export | sandbox_id, path | 返回 NfsExportInfo | 添加导出 |
+| test_remove_export | sandbox_id | 导出移除成功 | 移除导出 |
+| test_path_traversal_blocked | "/../../../etc" | 拒绝访问 | 路径遍历防护 |
+| test_path_normalization | "./foo/../bar" | 规范化为 "/bar" | 路径规范化 |
+
+#### 11.2.6 WebhookDispatcher 测试
+
+| 测试用例 | 输入 | 预期结果 | 覆盖场景 |
+|---------|------|---------|---------|
+| test_send_webhook_success | 事件数据 | HTTP 200，发送成功 | 正常发送 |
+| test_send_webhook_retry | 服务器 500 | 重试 3 次 | 重试机制 |
+| test_send_webhook_timeout | 响应超时 | 重试，最终失败 | 超时处理 |
+| test_webhook_signature | 事件 + secret | 正确的 HMAC 签名 | 签名验证 |
+
+### 11.3 集成测试设计
+
+#### 11.3.1 Sandbox 生命周期集成测试
+
+```
+测试环境：真实 Docker + SQLite + Mock NFS
+
+test_sandbox_full_lifecycle:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. 创建 Sandbox                                              │
+    │    - POST /api/v1/sandboxes                                  │
+    │    - 验证：DB 记录创建，容器启动，状态 starting → running     │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. 查询 Sandbox                                              │
+    │    - GET /api/v1/sandboxes/{id}                              │
+    │    - 验证：返回正确信息，NFS 路径有效                         │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. 列表查询                                                  │
+    │    - GET /api/v1/sandboxes?state=running                     │
+    │    - 验证：包含刚创建的 Sandbox                               │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. 延长超时                                                  │
+    │    - POST /api/v1/sandboxes/{id}/extend                      │
+    │    - 验证：expires_at 更新                                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 5. 获取资源统计                                              │
+    │    - GET /api/v1/sandboxes/{id}/stats                        │
+    │    - 验证：返回 CPU/Memory/Disk 数据                         │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 6. 删除 Sandbox                                              │
+    │    - DELETE /api/v1/sandboxes/{id}                           │
+    │    - 验证：容器删除，DB 记录更新，workspace 清理              │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.2 命令执行集成测试
+
+```
+test_process_execution:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 前置条件：创建 running 状态的 Sandbox                        │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 1. 同步执行简单命令                                          │
+    │    - POST /process/run {command: "echo hello"}               │
+    │    - 验证：exitCode=0, stdout 包含 "hello"                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. 同步执行带环境变量                                        │
+    │    - POST /process/run {command: "echo $FOO", envs: {FOO:x}} │
+    │    - 验证：stdout 包含 "x"                                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. 流式执行长命令                                            │
+    │    - POST /process/run {command: "for i in 1 2 3; do ..."}   │
+    │    - 验证：收到多个 SSE 事件，顺序正确                        │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. 命令超时                                                  │
+    │    - POST /process/run {command: "sleep 100", timeout: 1000} │
+    │    - 验证：收到 error 事件，进程被终止                        │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 5. 终止运行中命令                                            │
+    │    - 启动长命令，调用 POST /process/{cmdId}/kill             │
+    │    - 验证：命令终止，收到 exit 事件                          │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.3 PTY 集成测试
+
+```
+test_pty_interaction:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. 创建 PTY                                                  │
+    │    - POST /pty {cols: 80, rows: 24}                          │
+    │    - 验证：返回 pty_id 和 websocket_url                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. WebSocket 连接                                            │
+    │    - 连接返回的 websocket_url                                │
+    │    - 验证：连接成功，收到 shell 提示符                        │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. 输入输出                                                  │
+    │    - 发送 {type: "input", data: base64("ls\n")}              │
+    │    - 验证：收到目录列表输出                                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. 调整大小                                                  │
+    │    - 发送 {type: "resize", cols: 120, rows: 40}              │
+    │    - 验证：resize 成功（可通过 stty size 验证）               │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 5. 关闭 PTY                                                  │
+    │    - DELETE /pty/{ptyId}                                     │
+    │    - 验证：WebSocket 断开，收到关闭消息                       │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.4 NFS 集成测试
+
+```
+test_nfs_operations:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. NFS 挂载                                                  │
+    │    - mount -t nfs server:/{sandbox_id} /mnt/test             │
+    │    - 验证：挂载成功                                          │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. 文件写入                                                  │
+    │    - echo "test" > /mnt/test/file.txt                        │
+    │    - 验证：文件创建成功                                       │
+    ├─────────────────────────��───────────────────────────────────┤
+    │ 3. 容器内可见                                                │
+    │    - 在容器内执行 cat /workspace/file.txt                    │
+    │    - 验证：内容为 "test"                                     │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. 容器内写入                                                │
+    │    - 在容器内执行 echo "from container" > /workspace/new.txt │
+    │    - 验证：NFS 客户端可读取                                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 5. 大文件传输                                                │
+    │    - dd if=/dev/zero of=/mnt/test/large.bin bs=1M count=100  │
+    │    - 验证：传输成功，性能达标                                 │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.5 Agent 连接集成测试
+
+```
+test_agent_connection:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. Agent 注册                                                │
+    │    - 容器启动后 Agent 发送 RegisterRequest                   │
+    │    - 验证：Server 收到注册，Sandbox 状态变为 running          │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. 心跳机制                                                  │
+    │    - Agent 每 30s 发送心跳                                   │
+    │    - 验证：Server 更新 last_heartbeat                        │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. 连接断开检测                                              │
+    │    - 强制停止 Agent 进程                                     │
+    │    - 验证：90s 后 Sandbox 状态变为 error                     │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. 重连恢复                                                  │
+    │    - 重启 Agent，重新注册                                    │
+    │    - 验证：连接恢复，命令可执行                               │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.6 服务重启恢复测试
+
+```
+test_service_restart_recovery:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 1. 准备状态                                                  │
+    │    - 创建 3 个 running 状态的 Sandbox                        │
+    │    - 1 个正在执行长命令                                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. 重启 Server                                               │
+    │    - 停止 Server 进程                                        │
+    │    - 重新启动 Server                                         │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. 验证恢复                                                  │
+    │    - DB 中 Sandbox 记录保留                                  │
+    │    - 容器仍在运行的 Sandbox 等待 Agent 重连                   │
+    │    - Agent 重连后状态恢复为 running                          │
+    │    - 容器已停止的 Sandbox 标记为 stopped/error               │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+#### 11.3.7 Webhook 集成测试
+
+```
+test_webhook_events:
+    ┌─────────────────────────────────────────────────────────────┐
+    │ 前置条件：配置 Webhook URL (Mock Server)                     │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 1. sandbox.created 事件                                      │
+    │    - 创建 Sandbox                                            │
+    │    - 验证：收到 sandbox.created webhook                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 2. sandbox.running 事件                                      │
+    │    - Agent 连接就绪                                          │
+    │    - 验证：收到 sandbox.running webhook                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 3. agent.connected / disconnected 事件                       │
+    │    - Agent 连接/断开                                         │
+    │    - 验证：收到对应 webhook                                   │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 4. sandbox.deleted 事件                                      │
+    │    - 删除 Sandbox                                            │
+    │    - 验证：收到 sandbox.deleted webhook                      │
+    ├─────────────────────────────────────────────────────────────┤
+    │ 5. Webhook 重试                                              │
+    │    - Mock Server 返回 500                                    │
+    │    - 验证：重试 3 次，间隔符合指数退避                        │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+### 11.4 E2E 测试设计
+
+#### 11.4.1 测试环境
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        E2E 测试环境                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│   ┌──────────────┐      ┌──────────────┐      ┌──────────────┐  │
+│   │  Test Runner │      │   Workspace  │      │   Docker     │  │
+│   │  (pytest/    │ ───> │   Server     │ ───> │   Engine     │  │
+│   │   jest)      │      │              │      │              │  │
+│   └──────────────┘      └──────────────┘      └──────────────┘  │
+│          │                     │                     │          │
+│          │              ┌──────┴──────┐              │          │
+│          │              │             │              │          │
+│          ▼              ▼             ▼              ▼          │
+│   ┌──────────────┐ ┌─────────┐ ┌──────────┐ ┌──────────────┐   │
+│   │  SDK Client  │ │  NFS    │ │  SQLite  │ │  Sandbox     │   │
+│   │  (TS/Python) │ │  Server │ │          │ │  Containers  │   │
+│   └──────────────┘ └─────────┘ └──────────┘ └──────────────┘   │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 11.4.2 E2E 测试用例 (TypeScript)
+
+```typescript
+// e2e/sandbox.test.ts
+
+describe('Sandbox E2E Tests', () => {
+  let client: WorkspaceClient;
+
+  beforeAll(() => {
+    client = new WorkspaceClient({
+      apiUrl: process.env.WORKSPACE_API_URL,
+      apiKey: process.env.WORKSPACE_API_KEY,
+    });
+  });
+
+  describe('完整工作流测试', () => {
+    test('创建 Sandbox → 执行命令 → 删除', async () => {
+      // 1. 创建 Sandbox
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+        name: 'e2e-test-basic',
+      });
+
+      expect(sandbox.id).toMatch(/^sbx-/);
+      expect(sandbox.state).toBe('running');
+      expect(sandbox.nfs.mountCommand).toBeTruthy();
+
+      try {
+        // 2. 执行简单命令
+        const result = await sandbox.process.run('python --version');
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toContain('Python 3.11');
+
+        // 3. 执行带环境变量的命令
+        const envResult = await sandbox.process.run('echo $MY_VAR', {
+          envs: { MY_VAR: 'hello-e2e' },
+        });
+        expect(envResult.stdout.trim()).toBe('hello-e2e');
+
+      } finally {
+        // 4. 清理
+        await client.sandbox.delete(sandbox.id);
+      }
+
+      // 5. 验证删除
+      await expect(client.sandbox.get(sandbox.id))
+        .rejects.toThrow(SandboxNotFoundError);
+    });
+
+    test('流式命令执行', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+      });
+
+      try {
+        const events: StreamEvent[] = [];
+
+        // 执行会产生多行输出的命令
+        for await (const event of sandbox.process.runStream(
+          'for i in 1 2 3; do echo "line $i"; sleep 0.1; done'
+        )) {
+          events.push(event);
+        }
+
+        // 验证收到多个 stdout 事件
+        const stdoutEvents = events.filter(e => e.type === 'stdout');
+        expect(stdoutEvents.length).toBeGreaterThanOrEqual(3);
+
+        // 验证最后收到 exit 事件
+        const exitEvent = events.find(e => e.type === 'exit');
+        expect(exitEvent).toBeDefined();
+        expect(exitEvent!.exitCode).toBe(0);
+
+      } finally {
+        await client.sandbox.delete(sandbox.id);
+      }
+    });
+
+    test('命令超时处理', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+      });
+
+      try {
+        await expect(
+          sandbox.process.run('sleep 100', { timeout: 1000 })
+        ).rejects.toThrow(ProcessTimeoutError);
+
+      } finally {
+        await client.sandbox.delete(sandbox.id);
+      }
+    });
+
+    test('命令终止', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+      });
+
+      try {
+        const events: StreamEvent[] = [];
+        let commandId: string | undefined;
+
+        // 启动长时间运行的命令
+        const streamPromise = (async () => {
+          for await (const event of sandbox.process.runStream('sleep 100')) {
+            events.push(event);
+            if (!commandId && event.commandId) {
+              commandId = event.commandId;
+            }
+          }
+        })();
+
+        // 等待命令开始
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // 终止命令
+        expect(commandId).toBeDefined();
+        await sandbox.process.kill(commandId!);
+
+        await streamPromise;
+
+        // 验证收到 exit 事件
+        const exitEvent = events.find(e => e.type === 'exit');
+        expect(exitEvent).toBeDefined();
+
+      } finally {
+        await client.sandbox.delete(sandbox.id);
+      }
+    });
+  });
+
+  describe('NFS 文件操作测试', () => {
+    test('通过 NFS 写入文件，容器内执行', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+      });
+
+      try {
+        // 1. 挂载 NFS (测试环境中预挂载)
+        const mountPoint = `/tmp/e2e-${sandbox.id}`;
+        await execAsync(`mkdir -p ${mountPoint}`);
+        await execAsync(sandbox.nfs.mountCommand.replace('/mnt', mountPoint));
+
+        try {
+          // 2. 写入 Python 文件
+          const code = `
+import json
+print(json.dumps({"status": "ok", "source": "nfs"}))
+`;
+          await fs.writeFile(`${mountPoint}/test.py`, code);
+
+          // 3. 在容器内执行
+          const result = await sandbox.process.run('python /workspace/test.py');
+          expect(result.exitCode).toBe(0);
+
+          const output = JSON.parse(result.stdout);
+          expect(output.status).toBe('ok');
+          expect(output.source).toBe('nfs');
+
+        } finally {
+          await execAsync(`umount ${mountPoint}`);
+          await execAsync(`rmdir ${mountPoint}`);
+        }
+
+      } finally {
+        await client.sandbox.delete(sandbox.id);
+      }
+    });
+  });
+
+  describe('PTY 交互测试', () => {
+    test('PTY 创建和基本交互', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+      });
+
+      try {
+        // 1. 创建 PTY
+        const pty = await sandbox.pty.create({
+          cols: 80,
+          rows: 24,
+        });
+        expect(pty.id).toBeTruthy();
+        expect(pty.websocketUrl).toContain('/ws');
+
+        // 2. 连接 WebSocket
+        const ws = new WebSocket(pty.websocketUrl);
+        const outputs: string[] = [];
+
+        await new Promise<void>((resolve, reject) => {
+          ws.onopen = () => {
+            // 发送命令
+            ws.send(JSON.stringify({
+              type: 'input',
+              data: Buffer.from('echo "pty-test"\n').toString('base64'),
+            }));
+          };
+
+          ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'output') {
+              outputs.push(Buffer.from(msg.data, 'base64').toString());
+            }
+          };
+
+          // 等待输出
+          setTimeout(() => {
+            ws.close();
+            resolve();
+          }, 2000);
+
+          ws.onerror = reject;
+        });
+
+        // 3. 验证输出
+        const allOutput = outputs.join('');
+        expect(allOutput).toContain('pty-test');
+
+        // 4. 关闭 PTY
+        await sandbox.pty.kill(pty.id);
+
+      } finally {
+        await client.sandbox.delete(sandbox.id);
+      }
+    });
+  });
+
+  describe('资源管理测试', () => {
+    test('资源自动清理 (using)', async () => {
+      let sandboxId: string;
+
+      {
+        await using sandbox = await client.sandbox.create({
+          template: 'python:3.11',
+        });
+        sandboxId = sandbox.id;
+
+        const result = await sandbox.process.run('echo test');
+        expect(result.exitCode).toBe(0);
+      }
+      // 退出作用域后自动删除
+
+      // 验证已删除
+      await expect(client.sandbox.get(sandboxId))
+        .rejects.toThrow(SandboxNotFoundError);
+    });
+
+    test('批量删除', async () => {
+      // 创建多个 Sandbox
+      const sandboxes = await Promise.all([
+        client.sandbox.create({ template: 'python:3.11' }),
+        client.sandbox.create({ template: 'python:3.11' }),
+        client.sandbox.create({ template: 'python:3.11' }),
+      ]);
+
+      const ids = sandboxes.map(s => s.id);
+
+      // 批量删除
+      const result = await client.sandbox.batchDelete(ids);
+
+      expect(result.succeeded).toHaveLength(3);
+      expect(result.failed).toHaveLength(0);
+
+      // 验证全部删除
+      for (const id of ids) {
+        await expect(client.sandbox.get(id))
+          .rejects.toThrow(SandboxNotFoundError);
+      }
+    });
+
+    test('超时自动清理', async () => {
+      const sandbox = await client.sandbox.create({
+        template: 'python:3.11',
+        timeout_seconds: 5, // 5 秒超时
+      });
+
+      // 等待超时
+      await new Promise(resolve => setTimeout(resolve, 70000)); // 等待清理任务执行
+
+      // 验证已清理
+      const info = await client.sandbox.get(sandbox.id);
+      expect(info.state).toBe('stopped');
+    }, 80000);
+  });
+
+  describe('错误处理测试', () => {
+    test('无效模板', async () => {
+      await expect(
+        client.sandbox.create({ template: 'nonexistent:latest' })
+      ).rejects.toThrow(TemplateNotFoundError);
+    });
+
+    test('未授权访问', async () => {
+      const invalidClient = new WorkspaceClient({
+        apiUrl: process.env.WORKSPACE_API_URL,
+        apiKey: 'invalid-key',
+      });
+
+      await expect(
+        invalidClient.sandbox.create({ template: 'python:3.11' })
+      ).rejects.toThrow(UnauthorizedError);
+    });
+
+    test('Sandbox 不存在', async () => {
+      await expect(
+        client.sandbox.get('sbx-nonexistent')
+      ).rejects.toThrow(SandboxNotFoundError);
+    });
+  });
+});
+```
+
+#### 11.4.3 E2E 测试用例 (Python)
+
+```python
+# e2e/test_sandbox.py
+
+import pytest
+import asyncio
+import os
+from workspace_sdk import WorkspaceClient, CreateSandboxParams
+from workspace_sdk.errors import (
+    SandboxNotFoundError,
+    TemplateNotFoundError,
+    ProcessTimeoutError,
+    UnauthorizedError,
+)
+
+
+@pytest.fixture
+async def client():
+    return WorkspaceClient(
+        api_url=os.environ["WORKSPACE_API_URL"],
+        api_key=os.environ["WORKSPACE_API_KEY"],
+    )
+
+
+class TestSandboxE2E:
+    """Sandbox E2E 测试"""
+
+    @pytest.mark.asyncio
+    async def test_full_workflow(self, client):
+        """完整工作流：创建 → 执行 → 删除"""
+        # 1. 创建 Sandbox
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(
+                template="python:3.11",
+                name="e2e-test-python",
+            )
+        )
+
+        assert sandbox.id.startswith("sbx-")
+        assert sandbox.state == "running"
+
+        try:
+            # 2. 执行命令
+            result = await sandbox.process.run("python --version")
+            assert result.exit_code == 0
+            assert "Python 3.11" in result.stdout
+
+            # 3. 带环境变量执行
+            env_result = await sandbox.process.run(
+                "echo $TEST_VAR",
+                envs={"TEST_VAR": "hello-python"}
+            )
+            assert env_result.stdout.strip() == "hello-python"
+
+        finally:
+            # 4. 清理
+            await client.sandbox.delete(sandbox.id)
+
+        # 5. 验证删除
+        with pytest.raises(SandboxNotFoundError):
+            await client.sandbox.get(sandbox.id)
+
+    @pytest.mark.asyncio
+    async def test_stream_execution(self, client):
+        """流式命令执行"""
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            events = []
+            async for event in sandbox.process.run_stream(
+                'for i in 1 2 3; do echo "line $i"; sleep 0.1; done'
+            ):
+                events.append(event)
+
+            # 验证收到多个事件
+            stdout_events = [e for e in events if e.type == "stdout"]
+            assert len(stdout_events) >= 3
+
+            # 验证 exit 事件
+            exit_events = [e for e in events if e.type == "exit"]
+            assert len(exit_events) == 1
+            assert exit_events[0].exit_code == 0
+
+        finally:
+            await client.sandbox.delete(sandbox.id)
+
+    @pytest.mark.asyncio
+    async def test_command_timeout(self, client):
+        """命令超时处理"""
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            with pytest.raises(ProcessTimeoutError):
+                await sandbox.process.run("sleep 100", timeout=1000)
+
+        finally:
+            await client.sandbox.delete(sandbox.id)
+
+    @pytest.mark.asyncio
+    async def test_command_kill(self, client):
+        """命令终止"""
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            events = []
+            command_id = None
+
+            async def collect_events():
+                nonlocal command_id
+                async for event in sandbox.process.run_stream("sleep 100"):
+                    events.append(event)
+                    if command_id is None and hasattr(event, 'command_id'):
+                        command_id = event.command_id
+
+            # 启动命令
+            task = asyncio.create_task(collect_events())
+
+            # 等待命令开始
+            await asyncio.sleep(0.5)
+
+            # 终止命令
+            assert command_id is not None
+            await sandbox.process.kill(command_id)
+
+            await task
+
+            # 验证收到 exit 事件
+            exit_events = [e for e in events if e.type == "exit"]
+            assert len(exit_events) == 1
+
+        finally:
+            await client.sandbox.delete(sandbox.id)
+
+
+class TestPTYE2E:
+    """PTY E2E 测试"""
+
+    @pytest.mark.asyncio
+    async def test_pty_basic_interaction(self, client):
+        """PTY 基本交互"""
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            # 创建 PTY
+            pty = await sandbox.pty.create(cols=80, rows=24)
+            assert pty.id
+            assert pty.websocket_url
+
+            # 通过 WebSocket 交互
+            import websockets
+
+            outputs = []
+            async with websockets.connect(pty.websocket_url) as ws:
+                # 发送命令
+                await ws.send(json.dumps({
+                    "type": "input",
+                    "data": base64.b64encode(b"echo pty-test\n").decode()
+                }))
+
+                # 收集输出
+                try:
+                    async for msg in asyncio.timeout(2):
+                        data = json.loads(msg)
+                        if data["type"] == "output":
+                            outputs.append(
+                                base64.b64decode(data["data"]).decode()
+                            )
+                except asyncio.TimeoutError:
+                    pass
+
+            # 验证输出
+            all_output = "".join(outputs)
+            assert "pty-test" in all_output
+
+            # 关闭 PTY
+            await sandbox.pty.kill(pty.id)
+
+        finally:
+            await client.sandbox.delete(sandbox.id)
+
+
+class TestResourceManagement:
+    """资源管理测试"""
+
+    @pytest.mark.asyncio
+    async def test_batch_delete(self, client):
+        """批量删除"""
+        # 创建多个 Sandbox
+        sandboxes = await asyncio.gather(*[
+            client.sandbox.create(CreateSandboxParams(template="python:3.11"))
+            for _ in range(3)
+        ])
+
+        ids = [s.id for s in sandboxes]
+
+        # 批量删除
+        result = await client.sandbox.batch_delete(ids)
+
+        assert len(result.succeeded) == 3
+        assert len(result.failed) == 0
+
+        # 验证全部删除
+        for sandbox_id in ids:
+            with pytest.raises(SandboxNotFoundError):
+                await client.sandbox.get(sandbox_id)
+
+    @pytest.mark.asyncio
+    async def test_sandbox_stats(self, client):
+        """资源统计"""
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            # 执行一些操作产生资源使用
+            await sandbox.process.run("dd if=/dev/zero of=/tmp/test bs=1M count=10")
+
+            # 获取统计
+            stats = await client.sandbox.stats(sandbox.id)
+
+            assert stats.cpu.usage >= 0
+            assert stats.memory.usage > 0
+            assert stats.disk.usage > 0
+
+        finally:
+            await client.sandbox.delete(sandbox.id)
+
+
+class TestErrorHandling:
+    """错误处理测试"""
+
+    @pytest.mark.asyncio
+    async def test_invalid_template(self, client):
+        """无效模板"""
+        with pytest.raises(TemplateNotFoundError):
+            await client.sandbox.create(
+                CreateSandboxParams(template="nonexistent:latest")
+            )
+
+    @pytest.mark.asyncio
+    async def test_unauthorized(self):
+        """未授权访问"""
+        invalid_client = WorkspaceClient(
+            api_url=os.environ["WORKSPACE_API_URL"],
+            api_key="invalid-key",
+        )
+
+        with pytest.raises(UnauthorizedError):
+            await invalid_client.sandbox.create(
+                CreateSandboxParams(template="python:3.11")
+            )
+
+    @pytest.mark.asyncio
+    async def test_sandbox_not_found(self, client):
+        """Sandbox 不存在"""
+        with pytest.raises(SandboxNotFoundError):
+            await client.sandbox.get("sbx-nonexistent")
+```
+
+### 11.5 性能测试设计
+
+#### 11.5.1 性能测试场景
+
+| 测试场景 | 目标指标 | 测试方法 |
+|---------|---------|---------|
+| Sandbox 创建延迟 | P99 < 5s | 串行创建 100 个，统计延迟分布 |
+| 并发创建能力 | 50 并发成功 | 同时创建 50 个 Sandbox |
+| 命令执行 QPS | > 100/s | 压测简单命令 (echo) |
+| 流式输出吞吐 | > 10MB/s | 大量输出命令测试 |
+| NFS 读写吞吐 | > 100MB/s | dd 读写测试 |
+| PTY 响应延迟 | P99 < 50ms | 输入到输出延迟 |
+| 长连接稳定性 | 24h 无断开 | 持续运行测试 |
+
+#### 11.5.2 性能测试脚本
+
+```python
+# perf/test_performance.py
+
+import asyncio
+import time
+import statistics
+from dataclasses import dataclass
+
+
+@dataclass
+class PerfResult:
+    min_ms: float
+    max_ms: float
+    avg_ms: float
+    p50_ms: float
+    p95_ms: float
+    p99_ms: float
+    success_rate: float
+
+
+async def test_sandbox_creation_latency(client, count=100) -> PerfResult:
+    """Sandbox 创建延迟测试"""
+    latencies = []
+    failures = 0
+
+    for i in range(count):
+        start = time.perf_counter()
+        try:
+            sandbox = await client.sandbox.create(
+                CreateSandboxParams(template="python:3.11")
+            )
+            latency = (time.perf_counter() - start) * 1000
+            latencies.append(latency)
+
+            # 清理
+            await client.sandbox.delete(sandbox.id)
+        except Exception as e:
+            failures += 1
+            print(f"Creation {i} failed: {e}")
+
+    return PerfResult(
+        min_ms=min(latencies),
+        max_ms=max(latencies),
+        avg_ms=statistics.mean(latencies),
+        p50_ms=statistics.median(latencies),
+        p95_ms=statistics.quantiles(latencies, n=20)[18],
+        p99_ms=statistics.quantiles(latencies, n=100)[98],
+        success_rate=(count - failures) / count * 100,
+    )
+
+
+async def test_concurrent_creation(client, concurrency=50) -> PerfResult:
+    """并发创建测试"""
+
+    async def create_and_delete():
+        start = time.perf_counter()
+        sandbox = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+        latency = (time.perf_counter() - start) * 1000
+        await client.sandbox.delete(sandbox.id)
+        return latency
+
+    tasks = [create_and_delete() for _ in range(concurrency)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    latencies = [r for r in results if isinstance(r, float)]
+    failures = len([r for r in results if isinstance(r, Exception)])
+
+    return PerfResult(
+        min_ms=min(latencies) if latencies else 0,
+        max_ms=max(latencies) if latencies else 0,
+        avg_ms=statistics.mean(latencies) if latencies else 0,
+        p50_ms=statistics.median(latencies) if latencies else 0,
+        p95_ms=statistics.quantiles(latencies, n=20)[18] if len(latencies) >= 20 else 0,
+        p99_ms=statistics.quantiles(latencies, n=100)[98] if len(latencies) >= 100 else 0,
+        success_rate=(concurrency - failures) / concurrency * 100,
+    )
+
+
+async def test_command_execution_qps(client, duration_seconds=60) -> dict:
+    """命令执行 QPS 测试"""
+    sandbox = await client.sandbox.create(
+        CreateSandboxParams(template="python:3.11")
+    )
+
+    try:
+        success_count = 0
+        failure_count = 0
+        start_time = time.perf_counter()
+
+        while (time.perf_counter() - start_time) < duration_seconds:
+            try:
+                result = await sandbox.process.run("echo test")
+                if result.exit_code == 0:
+                    success_count += 1
+                else:
+                    failure_count += 1
+            except Exception:
+                failure_count += 1
+
+        elapsed = time.perf_counter() - start_time
+
+        return {
+            "qps": success_count / elapsed,
+            "total_requests": success_count + failure_count,
+            "success_rate": success_count / (success_count + failure_count) * 100,
+        }
+
+    finally:
+        await client.sandbox.delete(sandbox.id)
+```
+
+### 11.6 安全测试设计
+
+#### 11.6.1 安全测试用例
+
+| 测试类别 | 测试用例 | 预期结果 |
+|---------|---------|---------|
+| **路径遍历** | NFS 访问 `/../../../etc/passwd` | 拒绝访问 |
+| | NFS 访问 `/workspace/../../../etc/shadow` | 拒绝访问 |
+| | 符号链接指向外部 | 拒绝访问 |
+| **命令注入** | 命令包含 `; rm -rf /` | 在沙箱内执行，不影响宿主机 |
+| | 命令包含 `$(cat /etc/passwd)` | 只能访问容器内文件 |
+| | 命令包含 `\`whoami\`` | 返回容器内用户 |
+| **资源耗尽** | Fork 炸弹 `:(){ :\|:& };:` | 被 cgroup 限制 |
+| | 内存耗尽 `stress --vm 1 --vm-bytes 10G` | 被 OOM kill |
+| | 磁盘填满 `dd if=/dev/zero of=/workspace/huge` | 被磁盘限制 |
+| **认证绕过** | 无 API Key 访问 | 401 Unauthorized |
+| | 错误 API Key 访问 | 401 Unauthorized |
+| | 访问其他 Sandbox | 403 Forbidden |
+| **容器逃逸** | 挂载宿主机目录 | 失败 |
+| | 访问 Docker socket | 失败 |
+| | 提权尝试 | 失败 |
+
+#### 11.6.2 安全测试脚本
+
+```python
+# security/test_security.py
+
+class TestPathTraversal:
+    """路径遍历测试"""
+
+    @pytest.mark.asyncio
+    async def test_nfs_path_traversal(self, mounted_sandbox):
+        """NFS 路径遍历攻击"""
+        mount_point = mounted_sandbox["mount_point"]
+
+        # 尝试访问 /etc/passwd
+        traversal_paths = [
+            "../../../etc/passwd",
+            "..%2f..%2f..%2fetc%2fpasswd",
+            "....//....//....//etc/passwd",
+        ]
+
+        for path in traversal_paths:
+            target = os.path.join(mount_point, path)
+            # 应该无法读取或路径被规范化到沙箱内
+            assert not os.path.exists(target) or \
+                   os.path.realpath(target).startswith(mount_point)
+
+
+class TestCommandInjection:
+    """命令注入测试"""
+
+    @pytest.mark.asyncio
+    async def test_command_injection_semicolon(self, sandbox):
+        """分号注入"""
+        # 即使注入成功，也只影响容器内
+        result = await sandbox.process.run("echo hello; whoami")
+        assert "root" not in result.stdout or "sandbox" in result.stdout
+
+    @pytest.mark.asyncio
+    async def test_command_injection_backtick(self, sandbox):
+        """反引号注入"""
+        result = await sandbox.process.run("echo `cat /etc/hostname`")
+        # 应该是容器的 hostname，不是宿主机
+        assert result.exit_code == 0
+
+
+class TestResourceExhaustion:
+    """资源耗尽测试"""
+
+    @pytest.mark.asyncio
+    async def test_fork_bomb(self, sandbox):
+        """Fork 炸弹"""
+        # 应该被 cgroup 限制
+        result = await sandbox.process.run(
+            ":(){ :|:& };:",
+            timeout=5000
+        )
+        # 命令应该失败或被终止
+        assert result.exit_code != 0 or "resource" in result.stderr.lower()
+
+    @pytest.mark.asyncio
+    async def test_memory_exhaustion(self, sandbox):
+        """内存耗尽"""
+        result = await sandbox.process.run(
+            "python -c 'x = \"a\" * (1024**3)'",  # 尝试分配 1GB
+            timeout=10000
+        )
+        # 应该被 OOM kill 或返回错误
+        assert result.exit_code != 0
+
+
+class TestAuthentication:
+    """认证测试"""
+
+    @pytest.mark.asyncio
+    async def test_no_api_key(self):
+        """无 API Key"""
+        client = WorkspaceClient(
+            api_url=os.environ["WORKSPACE_API_URL"],
+            api_key="",
+        )
+        with pytest.raises(UnauthorizedError):
+            await client.sandbox.list()
+
+    @pytest.mark.asyncio
+    async def test_invalid_api_key(self):
+        """无效 API Key"""
+        client = WorkspaceClient(
+            api_url=os.environ["WORKSPACE_API_URL"],
+            api_key="invalid-key-12345",
+        )
+        with pytest.raises(UnauthorizedError):
+            await client.sandbox.list()
+
+    @pytest.mark.asyncio
+    async def test_cross_sandbox_access(self, client):
+        """跨 Sandbox 访问"""
+        sandbox1 = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+        sandbox2 = await client.sandbox.create(
+            CreateSandboxParams(template="python:3.11")
+        )
+
+        try:
+            # sandbox1 不应该能访问 sandbox2 的文件
+            result = await sandbox1.process.run(
+                f"cat /data/workspaces/{sandbox2.id}/test.txt"
+            )
+            assert result.exit_code != 0  # 应该失败
+
+        finally:
+            await client.sandbox.delete(sandbox1.id)
+            await client.sandbox.delete(sandbox2.id)
+```
+
+### 11.7 测试执行与 CI 集成
+
+#### 11.7.1 测试目录结构
+
+```
+tests/
+├── unit/                      # 单元测试
+│   ├── test_sandbox_service.rs
+│   ├── test_process_service.rs
+│   ├── test_pty_service.rs
+│   ├── test_agent_conn_pool.rs
+│   ├── test_nfs_provider.rs
+│   └── test_webhook_dispatcher.rs
+│
+├── integration/               # 集成测试
+│   ├── test_sandbox_lifecycle.rs
+│   ├── test_process_execution.rs
+│   ├── test_pty_interaction.rs
+│   ├── test_nfs_operations.rs
+│   ├── test_agent_connection.rs
+│   ├── test_webhook_events.rs
+│   └── test_service_recovery.rs
+│
+├── e2e/                       # E2E 测试
+│   ├── typescript/
+│   │   ├── sandbox.test.ts
+│   │   ├── process.test.ts
+│   │   ├── pty.test.ts
+│   │   └── errors.test.ts
+│   └── python/
+│       ├── test_sandbox.py
+│       ├── test_process.py
+│       ├── test_pty.py
+│       └── test_errors.py
+│
+├── perf/                      # 性能测试
+│   ├── test_creation_latency.py
+│   ├── test_command_qps.py
+│   └── test_nfs_throughput.py
+│
+├── security/                  # 安全测试
+│   ├── test_path_traversal.py
+│   ├── test_command_injection.py
+│   ├── test_resource_exhaustion.py
+│   └── test_authentication.py
+│
+└── fixtures/                  # 测试数据
+    ├── docker-compose.test.yml
+    └── test_files/
+```
+
+#### 11.7.2 CI Pipeline
+
+```yaml
+# .github/workflows/test.yml
+
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests
+        run: cargo test --lib
+
+  integration-tests:
+    runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:dind
+        options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start test environment
+        run: docker-compose -f tests/fixtures/docker-compose.test.yml up -d
+      - name: Run integration tests
+        run: cargo test --test '*'
+
+  e2e-tests-typescript:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+      - name: Install dependencies
+        run: cd sdk-typescript && npm install
+      - name: Run E2E tests
+        run: npm run test:e2e
+
+  e2e-tests-python:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - name: Install dependencies
+        run: cd sdk-python && pip install -e ".[test]"
+      - name: Run E2E tests
+        run: pytest tests/e2e/python/
+
+  security-tests:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run security tests
+        run: pytest tests/security/
+
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run performance tests
+        run: pytest tests/perf/ --benchmark
+```
