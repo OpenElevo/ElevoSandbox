@@ -76,6 +76,13 @@ pub struct Config {
     /// MCP server mode: "disabled", "stdio", or "sse"
     #[serde(default = "default_mcp_mode")]
     pub mcp_mode: String,
+
+    /// MCP profile: "executor", "developer", or "full"
+    /// - executor: minimal (1 tool) - process_run only
+    /// - developer: common dev tools (6 tools) - process_run + file ops
+    /// - full: all tools (14 tools) - sandbox + process + file ops
+    #[serde(default = "default_mcp_profile")]
+    pub mcp_profile: String,
 }
 
 fn default_http_host() -> String {
@@ -133,6 +140,10 @@ fn default_agent_server_addr() -> String {
 
 fn default_mcp_mode() -> String {
     "disabled".to_string()
+}
+
+fn default_mcp_profile() -> String {
+    "developer".to_string()
 }
 
 impl Config {
@@ -207,6 +218,9 @@ impl Config {
         if let Ok(val) = std::env::var("WORKSPACE_MCP_MODE") {
             config.mcp_mode = val;
         }
+        if let Ok(val) = std::env::var("WORKSPACE_MCP_PROFILE") {
+            config.mcp_profile = val;
+        }
 
         Ok(config)
     }
@@ -242,6 +256,7 @@ impl Default for Config {
             docker_network: None,
             sandbox_extra_hosts: Vec::new(),
             mcp_mode: default_mcp_mode(),
+            mcp_profile: default_mcp_profile(),
         }
     }
 }

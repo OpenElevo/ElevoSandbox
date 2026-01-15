@@ -128,8 +128,12 @@ async fn main() -> anyhow::Result<()> {
 
     // Check if MCP mode is enabled (stdio mode runs exclusively)
     if config.mcp_mode == "stdio" {
-        info!("Running in MCP stdio mode");
-        return api::mcp::serve_stdio(state).await;
+        let profile = api::mcp::McpProfile::from_str(&config.mcp_profile);
+        info!(
+            "Running in MCP stdio mode with profile: {}",
+            profile.description()
+        );
+        return api::mcp::serve_stdio(state, profile).await;
     }
 
     // Build HTTP router

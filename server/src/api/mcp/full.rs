@@ -1,7 +1,13 @@
-//! MCP Server Handler implementation
+//! Full MCP Handler
 //!
-//! This module implements the MCP ServerHandler trait for the workspace service,
-//! providing tool definitions for sandbox, process, and filesystem operations.
+//! Complete MCP handler with all available tools.
+//! Use this profile when the AI needs full control over sandbox lifecycle,
+//! process management, and file operations.
+//!
+//! Tools: sandbox_create, sandbox_get, sandbox_list, sandbox_delete,
+//!        process_run, process_kill,
+//!        file_read, file_write, file_list, file_mkdir, file_remove,
+//!        file_move, file_copy, file_info (14 tools)
 
 use std::collections::HashMap;
 
@@ -9,23 +15,23 @@ use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
-    schemars, tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router,
 };
-use serde::Deserialize;
 use tracing::{error, info};
 
 use crate::AppState;
 use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
-use crate::service::process::RunCommandOptions;
+use super::types::*;
+use super::common::{run_command, format_command_result};
 
-/// MCP Handler for workspace operations
+/// Full MCP Handler - complete tool set
 #[derive(Clone)]
-pub struct WorkspaceMcpHandler {
+pub struct FullMcpHandler {
     state: AppState,
     tool_router: ToolRouter<Self>,
 }
 
-impl WorkspaceMcpHandler {
+impl FullMcpHandler {
     pub fn new(state: AppState) -> Self {
         Self {
             state,
@@ -39,236 +45,29 @@ impl WorkspaceMcpHandler {
         sandbox_id: &str,
         command: &str,
         args: Vec<String>,
-        env: HashMap<String, String>,
-        cwd: Option<String>,
-        timeout_ms: u64,
     ) -> Result<crate::domain::types::CommandResult, crate::Error> {
-        let opts = RunCommandOptions {
-            command: command.to_string(),
+        run_command(
+            &self.state,
+            sandbox_id,
+            command,
             args,
-            env,
-            cwd,
-            timeout_ms,
-        };
-        self.state.process_service.run(sandbox_id, opts).await
+            HashMap::new(),
+            None,
+            30000,
+        )
+        .await
     }
 }
 
-// ============================================================================
-// Tool Parameter Types
-// ============================================================================
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SandboxCreateParams {
-    /// Docker template image to use (default: workspace-test:latest)
-    #[schemars(description = "Docker template image to use")]
-    pub template: Option<String>,
-
-    /// Human-readable name for the sandbox
-    #[schemars(description = "Human-readable name for the sandbox")]
-    pub name: Option<String>,
-
-    /// Environment variables to set in the sandbox
-    #[schemars(description = "Environment variables to set in the sandbox")]
-    pub env: Option<HashMap<String, String>>,
-
-    /// Custom metadata for the sandbox
-    #[schemars(description = "Custom metadata for the sandbox")]
-    pub metadata: Option<HashMap<String, String>>,
-
-    /// Timeout in seconds for the sandbox
-    #[schemars(description = "Timeout in seconds for the sandbox")]
-    pub timeout: Option<u64>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SandboxGetParams {
-    /// ID of the sandbox to retrieve
-    #[schemars(description = "ID of the sandbox to retrieve")]
-    pub sandbox_id: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SandboxListParams {
-    /// Filter by sandbox state (optional)
-    #[schemars(description = "Filter by sandbox state: starting, running, stopping, stopped, error")]
-    pub state: Option<String>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SandboxDeleteParams {
-    /// ID of the sandbox to delete
-    #[schemars(description = "ID of the sandbox to delete")]
-    pub sandbox_id: String,
-
-    /// Force delete even if sandbox is running
-    #[schemars(description = "Force delete even if sandbox is running")]
-    pub force: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ProcessRunParams {
-    /// ID of the sandbox to run command in
-    #[schemars(description = "ID of the sandbox to run command in")]
-    pub sandbox_id: String,
-
-    /// Command to execute
-    #[schemars(description = "Command to execute")]
-    pub command: String,
-
-    /// Command arguments
-    #[schemars(description = "Command arguments")]
-    pub args: Option<Vec<String>>,
-
-    /// Environment variables for the command
-    #[schemars(description = "Environment variables for the command")]
-    pub env: Option<HashMap<String, String>>,
-
-    /// Working directory for the command
-    #[schemars(description = "Working directory for the command")]
-    pub cwd: Option<String>,
-
-    /// Timeout in seconds for the command
-    #[schemars(description = "Timeout in seconds for the command")]
-    pub timeout: Option<i64>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct ProcessKillParams {
-    /// ID of the sandbox containing the process
-    #[schemars(description = "ID of the sandbox containing the process")]
-    pub sandbox_id: String,
-
-    /// Process ID to kill
-    #[schemars(description = "Process ID to kill")]
-    pub pid: u32,
-
-    /// Signal to send (default: 15/SIGTERM)
-    #[schemars(description = "Signal to send (default: 15/SIGTERM)")]
-    pub signal: Option<i32>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileReadParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path to the file to read
-    #[schemars(description = "Path to the file to read")]
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileWriteParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path to write the file to
-    #[schemars(description = "Path to write the file to")]
-    pub path: String,
-
-    /// Content to write to the file
-    #[schemars(description = "Content to write to the file")]
-    pub content: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileListParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path to the directory to list
-    #[schemars(description = "Path to the directory to list")]
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileMkdirParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path of the directory to create
-    #[schemars(description = "Path of the directory to create")]
-    pub path: String,
-
-    /// Create parent directories if they don't exist
-    #[schemars(description = "Create parent directories if they don't exist")]
-    pub recursive: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileRemoveParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path to the file or directory to remove
-    #[schemars(description = "Path to the file or directory to remove")]
-    pub path: String,
-
-    /// Remove directories recursively
-    #[schemars(description = "Remove directories recursively")]
-    pub recursive: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileMoveParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Source path
-    #[schemars(description = "Source path")]
-    pub src: String,
-
-    /// Destination path
-    #[schemars(description = "Destination path")]
-    pub dst: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileCopyParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Source path
-    #[schemars(description = "Source path")]
-    pub src: String,
-
-    /// Destination path
-    #[schemars(description = "Destination path")]
-    pub dst: String,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct FileInfoParams {
-    /// ID of the sandbox
-    #[schemars(description = "ID of the sandbox")]
-    pub sandbox_id: String,
-
-    /// Path to get info for
-    #[schemars(description = "Path to get info for")]
-    pub path: String,
-}
-
-// ============================================================================
-// Tool Router Implementation
-// ============================================================================
-
 #[tool_router]
-impl WorkspaceMcpHandler {
-    // ------------------------------------------------------------------------
+impl FullMcpHandler {
+    // ========================================================================
     // Sandbox Tools
-    // ------------------------------------------------------------------------
+    // ========================================================================
 
     #[tool(description = "Create a new sandbox environment. Returns the sandbox ID and details.")]
     async fn sandbox_create(&self, Parameters(params): Parameters<SandboxCreateParams>) -> String {
-        info!("MCP: sandbox_create called");
+        info!("MCP[full]: sandbox_create called");
 
         let create_params = CreateSandboxParams {
             template: params.template,
@@ -290,7 +89,7 @@ impl WorkspaceMcpHandler {
                 serde_json::to_string_pretty(&response).unwrap_or_default()
             }
             Err(e) => {
-                error!("MCP: sandbox_create failed: {}", e);
+                error!("MCP[full]: sandbox_create failed: {}", e);
                 format!("Failed to create sandbox: {}", e)
             }
         }
@@ -298,7 +97,7 @@ impl WorkspaceMcpHandler {
 
     #[tool(description = "Get details of a sandbox by ID.")]
     async fn sandbox_get(&self, Parameters(params): Parameters<SandboxGetParams>) -> String {
-        info!("MCP: sandbox_get called for {}", params.sandbox_id);
+        info!("MCP[full]: sandbox_get called for {}", params.sandbox_id);
 
         match self.state.sandbox_service.get(&params.sandbox_id).await {
             Ok(sandbox) => {
@@ -314,7 +113,7 @@ impl WorkspaceMcpHandler {
                 serde_json::to_string_pretty(&response).unwrap_or_default()
             }
             Err(e) => {
-                error!("MCP: sandbox_get failed: {}", e);
+                error!("MCP[full]: sandbox_get failed: {}", e);
                 format!("Failed to get sandbox: {}", e)
             }
         }
@@ -322,9 +121,8 @@ impl WorkspaceMcpHandler {
 
     #[tool(description = "List all sandboxes, optionally filtered by state.")]
     async fn sandbox_list(&self, Parameters(params): Parameters<SandboxListParams>) -> String {
-        info!("MCP: sandbox_list called");
+        info!("MCP[full]: sandbox_list called");
 
-        // Parse state string to SandboxState enum
         let state = params.state.as_deref().and_then(|s| match s.to_lowercase().as_str() {
             "starting" => Some(SandboxState::Starting),
             "running" => Some(SandboxState::Running),
@@ -351,7 +149,7 @@ impl WorkspaceMcpHandler {
                 serde_json::to_string_pretty(&response).unwrap_or_default()
             }
             Err(e) => {
-                error!("MCP: sandbox_list failed: {}", e);
+                error!("MCP[full]: sandbox_list failed: {}", e);
                 format!("Failed to list sandboxes: {}", e)
             }
         }
@@ -359,52 +157,45 @@ impl WorkspaceMcpHandler {
 
     #[tool(description = "Delete a sandbox by ID.")]
     async fn sandbox_delete(&self, Parameters(params): Parameters<SandboxDeleteParams>) -> String {
-        info!("MCP: sandbox_delete called for {}", params.sandbox_id);
+        info!("MCP[full]: sandbox_delete called for {}", params.sandbox_id);
 
         let force = params.force.unwrap_or(false);
         match self.state.sandbox_service.delete(&params.sandbox_id, force).await {
             Ok(_) => format!("Sandbox {} deleted successfully", params.sandbox_id),
             Err(e) => {
-                error!("MCP: sandbox_delete failed: {}", e);
+                error!("MCP[full]: sandbox_delete failed: {}", e);
                 format!("Failed to delete sandbox: {}", e)
             }
         }
     }
 
-    // ------------------------------------------------------------------------
+    // ========================================================================
     // Process Tools
-    // ------------------------------------------------------------------------
+    // ========================================================================
 
     #[tool(description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr.")]
     async fn process_run(&self, Parameters(params): Parameters<ProcessRunParams>) -> String {
         info!(
-            "MCP: process_run called in {} with command: {}",
+            "MCP[full]: process_run in {} with command: {}",
             params.sandbox_id, params.command
         );
 
         let timeout_ms = params.timeout.map(|t| (t * 1000) as u64).unwrap_or(0);
 
-        match self
-            .run_cmd(
-                &params.sandbox_id,
-                &params.command,
-                params.args.unwrap_or_default(),
-                params.env.unwrap_or_default(),
-                params.cwd,
-                timeout_ms,
-            )
-            .await
+        match run_command(
+            &self.state,
+            &params.sandbox_id,
+            &params.command,
+            params.args.unwrap_or_default(),
+            params.env.unwrap_or_default(),
+            params.cwd,
+            timeout_ms,
+        )
+        .await
         {
-            Ok(result) => {
-                let response = serde_json::json!({
-                    "exit_code": result.exit_code,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                });
-                serde_json::to_string_pretty(&response).unwrap_or_default()
-            }
+            Ok(result) => format_command_result(&result),
             Err(e) => {
-                error!("MCP: process_run failed: {}", e);
+                error!("MCP[full]: process_run failed: {}", e);
                 format!("Failed to run command: {}", e)
             }
         }
@@ -413,11 +204,11 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Kill a running process in a sandbox.")]
     async fn process_kill(&self, Parameters(params): Parameters<ProcessKillParams>) -> String {
         info!(
-            "MCP: process_kill called in {} for pid {}",
+            "MCP[full]: process_kill in {} for pid {}",
             params.sandbox_id, params.pid
         );
 
-        let signal = params.signal.unwrap_or(15); // SIGTERM
+        let signal = params.signal.unwrap_or(15);
         match self
             .state
             .process_service
@@ -426,32 +217,25 @@ impl WorkspaceMcpHandler {
         {
             Ok(_) => format!("Process {} killed with signal {}", params.pid, signal),
             Err(e) => {
-                error!("MCP: process_kill failed: {}", e);
+                error!("MCP[full]: process_kill failed: {}", e);
                 format!("Failed to kill process: {}", e)
             }
         }
     }
 
-    // ------------------------------------------------------------------------
-    // FileSystem Tools
-    // ------------------------------------------------------------------------
+    // ========================================================================
+    // File Tools
+    // ========================================================================
 
     #[tool(description = "Read the contents of a file in a sandbox.")]
     async fn file_read(&self, Parameters(params): Parameters<FileReadParams>) -> String {
         info!(
-            "MCP: file_read called in {} for {}",
+            "MCP[full]: file_read in {} for {}",
             params.sandbox_id, params.path
         );
 
         match self
-            .run_cmd(
-                &params.sandbox_id,
-                "cat",
-                vec![params.path.clone()],
-                HashMap::new(),
-                None,
-                30000,
-            )
+            .run_cmd(&params.sandbox_id, "cat", vec![params.path.clone()])
             .await
         {
             Ok(result) => {
@@ -462,7 +246,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_read failed: {}", e);
+                error!("MCP[full]: file_read failed: {}", e);
                 format!("Failed to read file: {}", e)
             }
         }
@@ -471,7 +255,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Write content to a file in a sandbox.")]
     async fn file_write(&self, Parameters(params): Parameters<FileWriteParams>) -> String {
         info!(
-            "MCP: file_write called in {} for {}",
+            "MCP[full]: file_write in {} for {}",
             params.sandbox_id, params.path
         );
 
@@ -482,14 +266,7 @@ impl WorkspaceMcpHandler {
         );
 
         match self
-            .run_cmd(
-                &params.sandbox_id,
-                "bash",
-                vec!["-c".to_string(), script],
-                HashMap::new(),
-                None,
-                30000,
-            )
+            .run_cmd(&params.sandbox_id, "bash", vec!["-c".to_string(), script])
             .await
         {
             Ok(result) => {
@@ -500,7 +277,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_write failed: {}", e);
+                error!("MCP[full]: file_write failed: {}", e);
                 format!("Failed to write file: {}", e)
             }
         }
@@ -509,7 +286,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "List files in a directory in a sandbox.")]
     async fn file_list(&self, Parameters(params): Parameters<FileListParams>) -> String {
         info!(
-            "MCP: file_list called in {} for {}",
+            "MCP[full]: file_list in {} for {}",
             params.sandbox_id, params.path
         );
 
@@ -518,9 +295,6 @@ impl WorkspaceMcpHandler {
                 &params.sandbox_id,
                 "ls",
                 vec!["-la".to_string(), params.path.clone()],
-                HashMap::new(),
-                None,
-                30000,
             )
             .await
         {
@@ -532,7 +306,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_list failed: {}", e);
+                error!("MCP[full]: file_list failed: {}", e);
                 format!("Failed to list directory: {}", e)
             }
         }
@@ -541,27 +315,17 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Create a directory in a sandbox.")]
     async fn file_mkdir(&self, Parameters(params): Parameters<FileMkdirParams>) -> String {
         info!(
-            "MCP: file_mkdir called in {} for {}",
+            "MCP[full]: file_mkdir in {} for {}",
             params.sandbox_id, params.path
         );
 
         let mut args = vec![];
-        if params.recursive.unwrap_or(false) {
+        if params.recursive.unwrap_or(true) {
             args.push("-p".to_string());
         }
         args.push(params.path.clone());
 
-        match self
-            .run_cmd(
-                &params.sandbox_id,
-                "mkdir",
-                args,
-                HashMap::new(),
-                None,
-                30000,
-            )
-            .await
-        {
+        match self.run_cmd(&params.sandbox_id, "mkdir", args).await {
             Ok(result) => {
                 if result.exit_code == 0 {
                     format!("Directory {} created", params.path)
@@ -570,7 +334,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_mkdir failed: {}", e);
+                error!("MCP[full]: file_mkdir failed: {}", e);
                 format!("Failed to create directory: {}", e)
             }
         }
@@ -579,7 +343,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Remove a file or directory in a sandbox.")]
     async fn file_remove(&self, Parameters(params): Parameters<FileRemoveParams>) -> String {
         info!(
-            "MCP: file_remove called in {} for {}",
+            "MCP[full]: file_remove in {} for {}",
             params.sandbox_id, params.path
         );
 
@@ -589,17 +353,7 @@ impl WorkspaceMcpHandler {
         }
         args.push(params.path.clone());
 
-        match self
-            .run_cmd(
-                &params.sandbox_id,
-                "rm",
-                args,
-                HashMap::new(),
-                None,
-                30000,
-            )
-            .await
-        {
+        match self.run_cmd(&params.sandbox_id, "rm", args).await {
             Ok(result) => {
                 if result.exit_code == 0 {
                     format!("Removed {}", params.path)
@@ -608,7 +362,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_remove failed: {}", e);
+                error!("MCP[full]: file_remove failed: {}", e);
                 format!("Failed to remove: {}", e)
             }
         }
@@ -617,7 +371,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Move or rename a file in a sandbox.")]
     async fn file_move(&self, Parameters(params): Parameters<FileMoveParams>) -> String {
         info!(
-            "MCP: file_move called in {} from {} to {}",
+            "MCP[full]: file_move in {} from {} to {}",
             params.sandbox_id, params.src, params.dst
         );
 
@@ -626,9 +380,6 @@ impl WorkspaceMcpHandler {
                 &params.sandbox_id,
                 "mv",
                 vec![params.src.clone(), params.dst.clone()],
-                HashMap::new(),
-                None,
-                30000,
             )
             .await
         {
@@ -640,7 +391,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_move failed: {}", e);
+                error!("MCP[full]: file_move failed: {}", e);
                 format!("Failed to move: {}", e)
             }
         }
@@ -649,7 +400,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Copy a file in a sandbox.")]
     async fn file_copy(&self, Parameters(params): Parameters<FileCopyParams>) -> String {
         info!(
-            "MCP: file_copy called in {} from {} to {}",
+            "MCP[full]: file_copy in {} from {} to {}",
             params.sandbox_id, params.src, params.dst
         );
 
@@ -658,9 +409,6 @@ impl WorkspaceMcpHandler {
                 &params.sandbox_id,
                 "cp",
                 vec!["-r".to_string(), params.src.clone(), params.dst.clone()],
-                HashMap::new(),
-                None,
-                30000,
             )
             .await
         {
@@ -672,7 +420,7 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_copy failed: {}", e);
+                error!("MCP[full]: file_copy failed: {}", e);
                 format!("Failed to copy: {}", e)
             }
         }
@@ -681,7 +429,7 @@ impl WorkspaceMcpHandler {
     #[tool(description = "Get information about a file in a sandbox.")]
     async fn file_info(&self, Parameters(params): Parameters<FileInfoParams>) -> String {
         info!(
-            "MCP: file_info called in {} for {}",
+            "MCP[full]: file_info in {} for {}",
             params.sandbox_id, params.path
         );
 
@@ -691,14 +439,7 @@ impl WorkspaceMcpHandler {
         );
 
         match self
-            .run_cmd(
-                &params.sandbox_id,
-                "bash",
-                vec!["-c".to_string(), script],
-                HashMap::new(),
-                None,
-                30000,
-            )
+            .run_cmd(&params.sandbox_id, "bash", vec!["-c".to_string(), script])
             .await
         {
             Ok(result) => {
@@ -709,25 +450,22 @@ impl WorkspaceMcpHandler {
                 }
             }
             Err(e) => {
-                error!("MCP: file_info failed: {}", e);
+                error!("MCP[full]: file_info failed: {}", e);
                 format!("Failed to get file info: {}", e)
             }
         }
     }
 }
 
-// ============================================================================
-// ServerHandler Implementation
-// ============================================================================
-
 #[tool_handler]
-impl ServerHandler for WorkspaceMcpHandler {
+impl ServerHandler for FullMcpHandler {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Workspace SDK MCP Server - Manage sandboxed development environments, \
-                execute commands, and access files. Use sandbox_create to start, \
-                process_run to execute commands, and file_* tools for file operations."
+                "Workspace SDK MCP Server (Full) - Complete sandbox management, \
+                process execution, and file operations. Use sandbox_* tools to manage \
+                sandbox lifecycle, process_* for command execution, and file_* for \
+                file system operations."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
