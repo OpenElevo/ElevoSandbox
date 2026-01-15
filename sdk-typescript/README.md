@@ -5,11 +5,11 @@ TypeScript/JavaScript SDK for the Elevo Workspace service. Provides a fully type
 ## Installation
 
 ```bash
-npm install @anthropic/workspace-sdk
+npm install @elevo/workspace-sdk
 # or
-yarn add @anthropic/workspace-sdk
+yarn add @elevo/workspace-sdk
 # or
-pnpm add @anthropic/workspace-sdk
+pnpm add @elevo/workspace-sdk
 ```
 
 ### Dependencies
@@ -22,7 +22,7 @@ pnpm add @anthropic/workspace-sdk
 ## Quick Start
 
 ```typescript
-import { WorkspaceClient } from '@anthropic/workspace-sdk';
+import { WorkspaceClient } from '@elevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -61,7 +61,7 @@ await client.sandbox.delete(sandbox.id, true);
 ### Client Initialization
 
 ```typescript
-import { WorkspaceClient } from '@anthropic/workspace-sdk';
+import { WorkspaceClient } from '@elevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -77,7 +77,7 @@ console.log(`Server status: ${health.status}`);
 ### Sandbox Service
 
 ```typescript
-import { CreateSandboxParams, SandboxState } from '@anthropic/workspace-sdk';
+import { CreateSandboxParams, SandboxState } from '@elevo/workspace-sdk';
 
 // Create a sandbox
 const sandbox = await client.sandbox.create({
@@ -110,7 +110,7 @@ const readySandbox = await client.sandbox.waitForState('sandbox-id', 'running');
 ### Process Service
 
 ```typescript
-import { RunCommandOptions, ProcessEvent } from '@anthropic/workspace-sdk';
+import { RunCommandOptions, ProcessEvent } from '@elevo/workspace-sdk';
 
 // Run a command and wait for completion
 const result = await client.process.run(sandboxId, 'ls', {
@@ -151,7 +151,7 @@ await client.process.kill(sandboxId, pid, 15); // SIGTERM
 ### PTY Service
 
 ```typescript
-import { PtyOptions, PtyHandle } from '@anthropic/workspace-sdk';
+import { PtyOptions, PtyHandle } from '@elevo/workspace-sdk';
 
 // Create and connect to PTY
 const pty = await client.pty.connect(sandboxId, {
@@ -184,7 +184,7 @@ await pty.kill();
 ### FileSystem Service
 
 ```typescript
-import { FileInfo } from '@anthropic/workspace-sdk';
+import { FileInfo } from '@elevo/workspace-sdk';
 
 // Read file as Buffer
 const content: Buffer = await client.filesystem.read(sandboxId, '/workspace/config.json');
@@ -238,7 +238,7 @@ import {
   ProcessTimeoutError,
   PtyNotFoundError,
   AgentNotConnectedError,
-} from '@anthropic/workspace-sdk';
+} from '@elevo/workspace-sdk';
 
 try {
   const sandbox = await client.sandbox.get('invalid-id');
@@ -319,7 +319,7 @@ interface FileInfo {
 ## Concurrent Usage
 
 ```typescript
-import { WorkspaceClient } from '@anthropic/workspace-sdk';
+import { WorkspaceClient } from '@elevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -354,7 +354,7 @@ await Promise.all(
 ## Timeout Handling
 
 ```typescript
-import { WorkspaceClient } from '@anthropic/workspace-sdk';
+import { WorkspaceClient } from '@elevo/workspace-sdk';
 
 // Client-level timeout
 const client = new WorkspaceClient({
@@ -392,10 +392,10 @@ The SDK supports both ESM and CommonJS:
 
 ```typescript
 // ESM
-import { WorkspaceClient } from '@anthropic/workspace-sdk';
+import { WorkspaceClient } from '@elevo/workspace-sdk';
 
 // CommonJS
-const { WorkspaceClient } = require('@anthropic/workspace-sdk');
+const { WorkspaceClient } = require('@elevo/workspace-sdk');
 ```
 
 ## Examples
