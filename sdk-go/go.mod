@@ -1,4 +1,4 @@
-module github.com/anthropic/workspace-sdk-go
+module git.easyops.local/elevo/elevo-workspace/sdk-go
 
 go 1.21
 

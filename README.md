@@ -1,292 +1,257 @@
 # Elevo Workspace
 
-统一工作空间 SDK 接口设计文档，用于内部 Agent 开发平台的 Sandbox/Workspace 服务实现。
+Elevo Workspace 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
 
----
-
-## 文档结构
+## 项目结构
 
 ```
 elevo-workspace/
-├── docs/
-│   ├── api/                          # API 接口文档
-│   │   ├── 00-rest-api.md            # REST API 规范
-│   │   ├── 01-sandbox.md             # Sandbox 服务
-���   │   ├── 02-filesystem.md          # FileSystem 服务
-│   │   ├── 03-process.md             # Process 服务
-│   │   ├── 04-pty.md                 # PTY 服务
-│   │   ├── 05-git.md                 # Git 服务
-│   │   ├── 06-lsp.md                 # LSP 服务
-│   │   └── 07-storage.md             # Snapshot 和 Volume 服务
-│   └── types/
-│       └── common.md                 # 通用类型定义
-├── server/                           # Rust 服务端
-├── agent/                            # Rust Agent
-├── sdk-go/                           # Go SDK
-├── sdk-python/                       # Python SDK
-├── sdk-typescript/                   # TypeScript SDK
-└── README.md                         # 本文件
+├── server/                 # Rust 服务端 (HTTP API + MCP)
+├── agent/                  # Rust Agent (运行在容器内)
+├── sdk-go/                 # Go SDK
+├── sdk-python/             # Python SDK
+├── sdk-typescript/         # TypeScript SDK
+├── docker/                 # Docker 配置
+├── images/                 # 容器镜像
+├── proto/                  # gRPC Proto 定义
+├── scripts/                # 构建和部署脚本
+├── tests/                  # 测试
+└── docs/                   # 文档
 ```
 
----
+## 已实现功能
 
-## 服务概览
-
-| 服务 | 描述 | 文档 |
+| 服务 | 描述 | 状态 |
 |-----|------|------|
-| **Sandbox** | 沙盒生命周期管理 | [01-sandbox.md](docs/api/01-sandbox.md) |
-| **FileSystem** | 文件系统操作 | [02-filesystem.md](docs/api/02-filesystem.md) |
-| **Process** | 进程/命令执行 | [03-process.md](docs/api/03-process.md) |
-| **PTY** | 伪终端交互 | [04-pty.md](docs/api/04-pty.md) |
-| **Git** | Git 版本控制 | [05-git.md](docs/api/05-git.md) |
-| **LSP** | 语言服务协议 | [06-lsp.md](docs/api/06-lsp.md) |
-| **Snapshot** | 快照管理 | [07-storage.md](docs/api/07-storage.md) |
-| **Volume** | 持久化存储卷 | [07-storage.md](docs/api/07-storage.md) |
-
----
+| **Sandbox** | 沙盒生命周期管理 (创建/删除/列表) | ✅ 已实现 |
+| **FileSystem** | 文件系统操作 (读/写/列表/创建目录/删除) | ✅ 已实现 |
+| **Process** | 进程执行 (同步/流式输出) | ✅ 已实现 |
+| **PTY** | 伪终端交互 (WebSocket) | ✅ 已实现 |
+| **MCP** | Model Context Protocol 支持 | ✅ 已实现 |
+| Git | Git 版本控制 | ⏳ 规划中 |
+| LSP | 语言服务协议 | ⏳ 规划中 |
+| Snapshot | 快照管理 | ⏳ 规划中 |
 
 ## 快速开始
 
-### TypeScript SDK
+### 启动服务
 
-```typescript
-import { WorkspaceClient } from '@workspace-sdk/typescript'
+```bash
+# 开发环境
+cd server && cargo run
 
-async function main() {
-  // 创建客户端
-  const client = new WorkspaceClient({
-    apiUrl: 'https://api.example.com',
-    apiKey: process.env.WORKSPACE_API_KEY
-  })
+# 生产环境 (Docker)
+docker-compose -f docker/docker-compose.prod.yml up -d
+```
 
-  // 创建 Sandbox
-  const sandbox = await client.sandbox.create({
-    name: 'my-sandbox',
-    template: 'python:3.11',
-    resources: { cpu: 2, memoryMB: 4096 }
-  })
+### 环境变量
 
-  try {
-    // 文件操作
-    await sandbox.fs.write('/app/main.py', 'print("Hello World")')
+```bash
+# 服务配置
+WORKSPACE_HTTP_PORT=8080
+WORKSPACE_GRPC_PORT=9090
+WORKSPACE_DATABASE_URL=sqlite://data/workspace.db
+
+# Docker 配置
+WORKSPACE_DOCKER_HOST=unix:///var/run/docker.sock
+WORKSPACE_DOCKER_NETWORK=workspace-network
+
+# NFS 配置 (可选)
+WORKSPACE_NFS_ENABLED=false
+WORKSPACE_NFS_SERVER=nfs.example.com
+WORKSPACE_NFS_PATH=/exports/workspace
+
+# MCP 配置
+WORKSPACE_MCP_ENABLED=true
+WORKSPACE_MCP_PROFILE=developer  # executor / developer / full
+```
+
+### MCP Profile
+
+MCP 支持三种 profile，适用于不同场景：
+
+| Profile | 工具数量 | 适用场景 |
+|---------|---------|---------|
+| `executor` | 1 | 仅执行脚本，sandbox 由程序管理 |
+| `developer` | 6 | 常规开发，包含文件和进程操作 |
+| `full` | 14 | 完整功能，包含所有 sandbox 管理 |
+
+**executor** (1 tool):
+- `process_run` - 执行命令
+
+**developer** (6 tools):
+- `process_run` - 执行命令
+- `file_read` - 读取文件
+- `file_write` - 写入文件
+- `file_list` - 列出目录
+- `file_mkdir` - 创建目录
+- `file_remove` - 删除文件/目录
+
+**full** (14 tools):
+- 所有 sandbox_* 操作
+- 所有 process_* 操作
+- 所有 file_* 操作
+
+## SDK 使用
+
+### Go SDK
+
+```bash
+go get git.easyops.local/elevo/elevo-workspace/sdk-go
+```
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    workspace "git.easyops.local/elevo/elevo-workspace/sdk-go"
+)
+
+func main() {
+    client := workspace.NewClient("http://localhost:8080")
+    ctx := context.Background()
+
+    // 创建 sandbox
+    sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
+        Template: "workspace-test:latest",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Sandbox.Delete(ctx, sandbox.ID, true)
 
     // 执行命令
-    const result = await sandbox.process.run('python /app/main.py')
-    console.log(result.stdout) // Hello World
-
-    // Git 操作
-    await sandbox.git.init('/app')
-    await sandbox.git.add('/app', ['.'])
-    await sandbox.git.commit('/app', { message: 'Initial commit' })
-
-  } finally {
-    await sandbox.delete()
-  }
+    result, err := client.Process.Run(ctx, sandbox.ID, "echo", &workspace.RunCommandOptions{
+        Args: []string{"Hello", "World"},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Output: %s", result.Stdout)
 }
 ```
 
 ### Python SDK
 
+```bash
+pip install -e sdk-python
+```
+
 ```python
 from workspace_sdk import WorkspaceClient
 
-def main():
-    client = WorkspaceClient()
+client = WorkspaceClient(base_url="http://localhost:8080")
 
-    # 使用上下文管理器自动清理
-    with client.sandbox.create(
-        name='my-sandbox',
-        template='python:3.11',
-        resources={'cpu': 2, 'memory_mb': 4096}
-    ) as sandbox:
-        # 文件操作
-        sandbox.fs.write('/app/main.py', 'print("Hello World")')
+# 创建 sandbox
+sandbox = client.sandbox.create(template="workspace-test:latest")
 
-        # 执行命令
-        result = sandbox.process.run('python /app/main.py')
-        print(result.stdout)  # Hello World
-
-        # Git 操作
-        sandbox.git.init('/app')
-        sandbox.git.add('/app', ['.'])
-        sandbox.git.commit('/app', message='Initial commit')
-
-if __name__ == '__main__':
-    main()
+try:
+    # 执行命令
+    result = client.process.run(sandbox.id, "echo", args=["Hello", "World"])
+    print(result.stdout)
+finally:
+    client.sandbox.delete(sandbox.id, force=True)
 ```
 
----
+### TypeScript SDK
 
-## 核心功能
+```typescript
+import { WorkspaceClient } from '@elevo/workspace-sdk'
 
-### 1. Sandbox 生命周期
+const client = new WorkspaceClient({ baseUrl: 'http://localhost:8080' })
+
+// 创建 sandbox
+const sandbox = await client.sandbox.create({
+  template: 'workspace-test:latest'
+})
+
+try {
+  // 执行命令
+  const result = await client.process.run(sandbox.id, 'echo', {
+    args: ['Hello', 'World']
+  })
+  console.log(result.stdout)
+} finally {
+  await client.sandbox.delete(sandbox.id, { force: true })
+}
+```
+
+## 架构
 
 ```
-┌─────────┐    create    ┌──────────┐
-│ (none)  │─────────────►│ creating │
-└─────────┘              └────┬─────┘
-                              │
-                              ▼
-┌─────────┐    stop     ┌──────────┐
-│ stopped │◄────────────│ running  │
-└────┬────┘             └────┬─────┘
-     │                       │
-     │ start                 │ pause
-     │                       ▼
-     │               ┌──────────┐
-     └──────────────►│  paused  │
-                     └──────────┘
-```
-
-### 2. 文件系统操作
-
-- 读写文件（文本/二进制/流）
-- 目录操作（创建/列出/删除）
-- 文件搜索（glob/grep）
-- 实时监听变化
-
-### 3. 进程执行
-
-- 同步执行命令
-- 异步进程管理
-- 代码执行（多语言）
-- 会话管理
-
-### 4. 交互式终端
-
-- 完整 PTY 支持
-- xterm.js 集成
-- 特殊键处理
-
-### 5. Git 集成
-
-- 克隆/初始化仓库
-- 分支管理
-- 提交/推送/拉取
-- 差异查看
-
-### 6. 语言服务 (LSP)
-
-- 自动补全
-- 转到定义
-- 查找引用
-- 代码诊断
-- 重命名
-
-### 7. 持久化存储
-
-- 快照创建/恢复
-- 卷挂载/共享
-- 数据持久化
-
----
-
-## 架构图
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Client SDK                               │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │  TypeScript  │  │    Python    │  │     Sync     │           │
-│  │     SDK      │  │  Async SDK   │  │  Python SDK  │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-└────────────────────────────┬────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                      Client SDK                              │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐          │
+│  │     Go      │  │   Python    │  │  TypeScript │          │
+│  └─────────────┘  └─────────────┘  └─────────────┘          │
+└────────────────────────────┬────────────────────────────────┘
                              │
-                    REST API / WebSocket
+                    HTTP API / WebSocket / MCP
                              │
                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                       API Gateway                                │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  认证  │  限流  │  路由  │  日志  │  指标                │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└────────────────────────────┬────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Workspace Server (Rust)                   │
+│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
+│  │ Sandbox │ │   FS    │ │ Process │ │   PTY   │           │
+│  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
+│  ┌─────────────────────────────────────────────┐           │
+│  │              MCP Handler                     │           │
+│  │  (executor / developer / full profiles)     │           │
+│  └─────────────────────────────────────────────┘           │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+                        gRPC (内部)
                              │
                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Service Layer                               │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐   │
-│  │ Sandbox │ │   FS    │ │ Process │ │   PTY   │ │   Git   │   │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘   │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐                            │
-│  │   LSP   │ │Snapshot │ │ Volume  │                            │
-│  └─────────┘ └─────────┘ └─────────┘                            │
-└────────────────────────────┬────────────────────────────────────┘
-                             │
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                     Container Runtime                            │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Docker  │  Kubernetes  │  Firecracker  │  ...          │    │
-│  └─────────────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Docker Container                          │
+│  ┌─────────────────────────────────────────────┐           │
+│  │           Workspace Agent (Rust)             │           │
+│  │  - 进程执行                                   │           │
+│  │  - PTY 管理                                   │           │
+│  │  - 文件操作                                   │           │
+│  └─────────────────────────────────────────────┘           │
+└─────────────────────────────────────────────────────────────┘
 ```
 
----
+## 开发
 
-## 功能对比
+### 构建
 
-本 SDK 设计参考了 E2B 和 Daytona 两个项目的接口设计：
+```bash
+# 构建所有组件
+./scripts/build.sh
 
-| 功能 | E2B | Daytona | Elevo Workspace |
-|-----|-----|---------|-------------|
-| Sandbox 管理 | ✓ | ✓ | ✓ |
-| 文件系统 | ✓ | ✓ | ✓ |
-| 进程执行 | ✓ | ✓ | ✓ |
-| PTY 终端 | ✓ | ✓ | ✓ |
-| Git 集成 | ✗ | ✓ | ✓ |
-| LSP 支持 | ✗ | ✓ | ✓ |
-| 快照 | ✗ | ✓ | ✓ |
-| 持久化卷 | ✗ | ✓ | ✓ |
-| 网络隔离 | ✓ | ✗ | ✓ |
-| 代码执行 | ✓ | ✓ | ✓ |
-| 会话管理 | ✗ | ✓ | ✓ |
+# 仅构建 server
+cd server && cargo build --release
 
----
+# 仅构建 agent
+cd agent && cargo build --release
+```
 
-## 实现建议
+### 测试
 
-### 后端实现
+```bash
+# 运行测试
+./scripts/test.sh
 
-1. **容器运行时**: 推荐使用 Kubernetes 或 Firecracker
-2. **API 框架**: Go (Gin/Echo) 或 Node.js (Fastify)
-3. **WebSocket**: 使用 gorilla/websocket 或 socket.io
-4. **数据库**: PostgreSQL (元数据) + Redis (缓存)
-5. **消息队列**: Kafka 或 NATS (事件通知)
+# 集成测试
+./scripts/run-integration-tests.sh
+```
 
-### SDK 生成
+### 部署
 
-1. 使用 OpenAPI Generator 从 `openapi.yaml` 生成基础代码
-2. 手动实现 WebSocket 和流式操作
-3. 添加重试、超时、错误处理逻辑
+```bash
+# 构建并推送镜像
+./scripts/build-and-push.sh
 
-### 测试策略
-
-1. 单元测试: 各服务接口测试
-2. 集成测试: 完整工作流测试
-3. 压力测试: 并发创建/执行测试
-4. E2E 测试: SDK 端到端测试
-
----
-
-## 错误码速查
-
-| 范围 | 类别 |
-|-----|------|
-| 1000-1999 | 认证和授权 |
-| 2000-2999 | Sandbox |
-| 3000-3999 | FileSystem |
-| 4000-4099 | Process |
-| 4100-4199 | PTY |
-| 5000-5999 | Git |
-| 6000-6999 | LSP |
-| 7000-7099 | Snapshot |
-| 7100-7199 | Volume |
-| 9000-9999 | 系统 |
-
-详见 [通用类型定义](docs/types/common.md#5-错误码)
-
----
+# 部署
+./scripts/deploy.sh
+```
 
 ## 许可证
 

@@ -5,7 +5,7 @@ Go SDK for the Elevo Workspace service. Provides a simple, idiomatic Go API for 
 ## Installation
 
 ```bash
-go get github.com/anthropic/workspace-sdk-go
+go get git.easyops.local/elevo/elevo-workspace/sdk-go
 ```
 
 ## Quick Start
@@ -18,7 +18,7 @@ import (
     "fmt"
     "log"
 
-    workspace "github.com/anthropic/workspace-sdk-go"
+    workspace "git.easyops.local/elevo/elevo-workspace/sdk-go"
 )
 
 func main() {
