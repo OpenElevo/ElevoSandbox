@@ -1,0 +1,26 @@
+[package]
+name = "mcp-client-test"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "mcp-test"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# MCP Protocol
+rmcp = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
