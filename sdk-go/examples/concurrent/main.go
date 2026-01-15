@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	workspace "github.com/anthropic/workspace-sdk-go"
+	workspace "git.easyops.local/elevo/elevo-workspace/sdk-go"
 )
 
 func main() {
