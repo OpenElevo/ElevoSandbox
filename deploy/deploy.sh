@@ -20,6 +20,8 @@ fi
 CONTAINER_NAME="${CONTAINER_NAME:-elevo-workspace-server}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 GRPC_PORT="${GRPC_PORT:-9090}"
+NFS_PORT="${NFS_PORT:-2049}"
+NFS_HOST="${NFS_HOST:-}"
 WORKSPACE_HOST_DIR="${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}"
 SERVER_IMAGE="${SERVER_IMAGE:-docker.easyops.local/elevo/workspace-server:latest}"
 BASE_IMAGE="${BASE_IMAGE:-docker.easyops.local/elevo/workspace-base:latest}"
@@ -85,11 +87,18 @@ start() {
 
     log_info "启动服务..."
 
+    # 构建 NFS_HOST 环境变量
+    NFS_HOST_ENV=""
+    if [ -n "$NFS_HOST" ]; then
+        NFS_HOST_ENV="-e WORKSPACE_NFS_HOST=$NFS_HOST"
+    fi
+
     docker run -d \
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
         -p "${HTTP_PORT}:8080" \
         -p "${GRPC_PORT}:9090" \
+        -p "${NFS_PORT}:2049" \
         -v /var/run/docker.sock:/var/run/docker.sock:ro \
         -v "${WORKSPACE_HOST_DIR}:/data/workspaces" \
         -e RUST_LOG="${LOG_LEVEL},workspace_server=${LOG_LEVEL}" \
@@ -103,6 +112,8 @@ start() {
         -e WORKSPACE_MAX_IDLE_TIME="$MAX_IDLE_TIME" \
         -e WORKSPACE_MCP_MODE="$MCP_MODE" \
         -e WORKSPACE_MCP_PATH="$MCP_PATH" \
+        -e WORKSPACE_NFS_PORT=2049 \
+        $NFS_HOST_ENV \
         --add-host=host.docker.internal:host-gateway \
         "$SERVER_IMAGE"
 
@@ -116,6 +127,7 @@ start() {
         echo "=========================================="
         echo "  HTTP API: http://localhost:${HTTP_PORT}"
         echo "  gRPC:     localhost:${GRPC_PORT}"
+        echo "  NFS:      localhost:${NFS_PORT}"
         echo "  Health:   http://localhost:${HTTP_PORT}/api/v1/health"
         if [ "$MCP_MODE" = "http" ]; then
             echo ""

@@ -23,6 +23,7 @@ pub struct NfsManager {
     mode: NfsMode,
     base_dir: PathBuf,
     port: u16,
+    host: String,
     /// Map of sandbox_id -> exported path
     exports: Arc<RwLock<HashMap<String, PathBuf>>>,
     /// Server handle (if running)
@@ -40,11 +41,12 @@ pub enum NfsMode {
 
 impl NfsManager {
     /// Create a new NFS manager
-    pub fn new(mode: NfsMode, base_dir: PathBuf, port: u16) -> Self {
+    pub fn new(mode: NfsMode, base_dir: PathBuf, port: u16, host: String) -> Self {
         Self {
             mode,
             base_dir,
             port,
+            host,
             exports: Arc::new(RwLock::new(HashMap::new())),
             server_handle: Arc::new(RwLock::new(None)),
         }
@@ -104,7 +106,7 @@ impl NfsManager {
         let mut exports = self.exports.write().await;
         exports.insert(sandbox_id.to_string(), workspace_path.to_path_buf());
 
-        let nfs_url = format!("nfs://127.0.0.1:{}/{}", self.port, sandbox_id);
+        let nfs_url = format!("nfs://{}:{}/{}", self.host, self.port, sandbox_id);
         info!("Exported sandbox {} at {}", sandbox_id, nfs_url);
 
         Ok(nfs_url)
@@ -122,7 +124,7 @@ impl NfsManager {
     pub async fn get_nfs_url(&self, sandbox_id: &str) -> Option<String> {
         let exports = self.exports.read().await;
         if exports.contains_key(sandbox_id) {
-            Some(format!("nfs://127.0.0.1:{}/{}", self.port, sandbox_id))
+            Some(format!("nfs://{}:{}/{}", self.host, self.port, sandbox_id))
         } else {
             None
         }

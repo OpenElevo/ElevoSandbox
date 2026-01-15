@@ -48,6 +48,11 @@ pub struct Config {
     #[serde(default = "default_nfs_port")]
     pub nfs_port: u16,
 
+    /// NFS host address for external access (used in nfs_url)
+    /// If not set, defaults to 127.0.0.1
+    #[serde(default)]
+    pub nfs_host: Option<String>,
+
     /// Base image for sandboxes
     #[serde(default = "default_base_image")]
     pub base_image: String,
@@ -197,6 +202,9 @@ impl Config {
                 config.nfs_port = port;
             }
         }
+        if let Ok(val) = std::env::var("WORKSPACE_NFS_HOST") {
+            config.nfs_host = Some(val);
+        }
         if let Ok(val) = std::env::var("WORKSPACE_BASE_IMAGE") {
             config.base_image = val;
         }
@@ -245,6 +253,11 @@ impl Config {
             .unwrap_or(&self.workspace_dir);
         format!("{}/{}", base, sandbox_id)
     }
+
+    /// Get the NFS host address for external access
+    pub fn get_nfs_host(&self) -> &str {
+        self.nfs_host.as_deref().unwrap_or("127.0.0.1")
+    }
 }
 
 impl Default for Config {
@@ -260,6 +273,7 @@ impl Default for Config {
             workspace_host_dir: None,
             nfs_mode: default_nfs_mode(),
             nfs_port: default_nfs_port(),
+            nfs_host: None,
             base_image: default_base_image(),
             max_idle_time: default_max_idle_time(),
             agent_timeout: default_agent_timeout(),

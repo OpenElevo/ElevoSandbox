@@ -90,6 +90,7 @@ async fn main() -> anyhow::Result<()> {
         nfs_mode,
         PathBuf::from(&config.workspace_dir),
         config.nfs_port,
+        config.get_nfs_host().to_string(),
     ));
 
     // Start NFS server if embedded mode
