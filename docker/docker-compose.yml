@@ -5,20 +5,37 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.server
+    container_name: workspace-server
     ports:
       - "8080:8080"  # HTTP API
       - "9090:9090"  # gRPC for agents
     environment:
-      - RUST_LOG=info
-      - DATABASE_URL=sqlite:///data/workspace.db
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      - NFS_EXPORT_DIR=/data/workspaces
-      - HTTP_PORT=8080
-      - GRPC_PORT=9090
+      - RUST_LOG=info,workspace_server=debug
+      - WORKSPACE_DATABASE_URL=sqlite:/data/workspace.db?mode=rwc
+      - WORKSPACE_DOCKER_SOCKET=/var/run/docker.sock
+      # Path inside the server container where workspaces are stored
+      - WORKSPACE_WORKSPACE_DIR=/data/workspaces
+      # Path on the HOST machine that maps to /data/workspaces in this container
+      # This is needed because sandbox containers mount from the host, not from this container
+      - WORKSPACE_WORKSPACE_HOST_DIR=${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}
+      - WORKSPACE_NFS_MODE=embedded
+      - WORKSPACE_NFS_PORT=2049
+      - WORKSPACE_BASE_IMAGE=workspace-base:latest
+      - WORKSPACE_AGENT_TIMEOUT=30
+      # Agent connection address - use host.docker.internal for cross-container communication
+      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:9090
+      # Extra hosts for sandbox containers to resolve host.docker.internal
+      - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
     volumes:
-      - ./data:/data
+      # Mount Docker socket to control host's Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock
-      - workspace-data:/data/workspaces
+      # Persistent data (database, etc.)
+      - workspace-data:/data
+      # Workspace directories - MUST be a bind mount to a host path
+      # so that sandbox containers can also mount from the same host path
+      - ${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}:/data/workspaces
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - workspace-net
     healthcheck:
@@ -26,9 +43,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+    restart: unless-stopped
 
 volumes:
   workspace-data:
+    driver: local
 
 networks:
   workspace-net:

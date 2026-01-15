@@ -39,6 +39,8 @@ pub struct CreateContainerOpts {
     pub memory_limit: Option<i64>,
     /// CPU quota (100000 = 1 CPU)
     pub cpu_quota: Option<i64>,
+    /// Extra hosts to add (e.g., "host.docker.internal:host-gateway")
+    pub extra_hosts: Vec<String>,
 }
 
 /// Container statistics
@@ -166,6 +168,11 @@ impl DockerManager {
             network_mode: opts.network_mode,
             memory: opts.memory_limit,
             cpu_quota: opts.cpu_quota,
+            extra_hosts: if opts.extra_hosts.is_empty() {
+                None
+            } else {
+                Some(opts.extra_hosts)
+            },
             ..Default::default()
         };
 

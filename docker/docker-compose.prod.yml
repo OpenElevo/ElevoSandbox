@@ -1,0 +1,97 @@
+# Elevo Workspace - Production Docker Compose
+# Usage: docker-compose -f docker-compose.prod.yml up -d
+
+version: '3.8'
+
+services:
+  workspace-server:
+    image: docker.easyops.local/elevo/workspace-server:latest
+    container_name: elevo-workspace-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # HTTP API
+      - "9090:9090"  # gRPC for agents
+    environment:
+      # Logging
+      - RUST_LOG=info,workspace_server=info
+
+      # Database - SQLite stored in /data volume
+      - WORKSPACE_DATABASE_URL=sqlite:/data/workspace.db?mode=rwc
+
+      # Docker socket for controlling containers
+      - WORKSPACE_DOCKER_SOCKET=/var/run/docker.sock
+
+      # Workspace storage paths
+      # Path inside this container
+      - WORKSPACE_WORKSPACE_DIR=/data/workspaces
+      # Path on the HOST machine (sandbox containers mount from here)
+      - WORKSPACE_WORKSPACE_HOST_DIR=${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}
+
+      # NFS Configuration (embedded mode)
+      - WORKSPACE_NFS_MODE=embedded
+      - WORKSPACE_NFS_PORT=2049
+
+      # Base image for sandbox containers
+      - WORKSPACE_BASE_IMAGE=docker.easyops.local/elevo/workspace-base:latest
+
+      # Agent configuration
+      - WORKSPACE_AGENT_TIMEOUT=60
+      # Agent connection address - sandbox containers use this to connect back
+      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:9090
+
+      # Extra hosts for sandbox containers
+      - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
+
+      # Sandbox lifecycle
+      - WORKSPACE_MAX_IDLE_TIME=7200
+
+      # MCP disabled in production by default
+      - WORKSPACE_MCP_MODE=disabled
+
+    volumes:
+      # Docker socket - required for creating sandbox containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+      # Persistent data volume
+      - elevo-workspace-data:/data
+
+      # Workspace directories - MUST be bind mount to host path
+      # This allows sandbox containers to also access the same files
+      - ${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}:/data/workspaces
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    networks:
+      - elevo-workspace-net
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+    # Resource limits (adjust based on expected load)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+volumes:
+  elevo-workspace-data:
+    driver: local
+
+networks:
+  elevo-workspace-net:
+    driver: bridge

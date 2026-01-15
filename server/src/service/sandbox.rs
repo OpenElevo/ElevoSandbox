@@ -74,14 +74,17 @@ impl SandboxService {
             self.config.agent_server_addr.clone(),
         );
 
+        // Use host path for volume mounting if configured (for Docker-in-Docker scenarios)
+        let volume_host_path = self.config.get_sandbox_workspace_host_path(&sandbox_id);
         let mut volumes = HashMap::new();
-        volumes.insert(
-            workspace_dir.to_string_lossy().to_string(),
-            "/workspace".to_string(),
-        );
+        volumes.insert(volume_host_path, "/workspace".to_string());
 
         let mut labels = HashMap::new();
         labels.insert(SANDBOX_LABEL_KEY.to_string(), sandbox_id.clone());
+
+        // Determine network mode
+        let network_mode = self.config.docker_network.clone()
+            .or_else(|| Some("bridge".to_string()));
 
         let container_opts = CreateContainerOpts {
             name: format!("workspace-{}", &sandbox_id[..8]),
@@ -91,9 +94,10 @@ impl SandboxService {
             working_dir: Some("/workspace".to_string()),
             cmd: None, // Let the image decide the entrypoint
             labels,
-            network_mode: Some("bridge".to_string()),
+            network_mode,
             memory_limit: None,
             cpu_quota: None,
+            extra_hosts: self.config.sandbox_extra_hosts.clone(),
         };
 
         // Create container
