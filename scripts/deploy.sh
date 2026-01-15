@@ -12,6 +12,10 @@ WORKSPACE_HOST_DIR="${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 GRPC_PORT="${GRPC_PORT:-9090}"
 
+# MCP Configuration
+MCP_MODE="${MCP_MODE:-http}"           # disabled, stdio, http
+MCP_PATH="${MCP_PATH:-/mcp}"           # HTTP endpoint path prefix
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -85,6 +89,8 @@ start() {
         -e WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway \
         -e WORKSPACE_AGENT_TIMEOUT=60 \
         -e WORKSPACE_MAX_IDLE_TIME=7200 \
+        -e WORKSPACE_MCP_MODE="$MCP_MODE" \
+        -e WORKSPACE_MCP_PATH="$MCP_PATH" \
         --add-host=host.docker.internal:host-gateway \
         "$SERVER_IMAGE"
 
@@ -99,6 +105,13 @@ start() {
         echo "  HTTP API: http://localhost:${HTTP_PORT}"
         echo "  gRPC:     localhost:${GRPC_PORT}"
         echo "  Health:   http://localhost:${HTTP_PORT}/api/v1/health"
+        if [ "$MCP_MODE" = "http" ]; then
+            echo ""
+            echo "  MCP Endpoints:"
+            echo "    - http://localhost:${HTTP_PORT}${MCP_PATH}/executor   (1 tool)"
+            echo "    - http://localhost:${HTTP_PORT}${MCP_PATH}/developer  (6 tools)"
+            echo "    - http://localhost:${HTTP_PORT}${MCP_PATH}/full       (14 tools)"
+        fi
         echo ""
     else
         log_warn "Service started but health check failed. Check logs with: $0 logs"
@@ -206,6 +219,18 @@ usage() {
     echo "  WORKSPACE_HOST_DIR  Host directory for workspaces (default: /var/lib/elevo-workspace/workspaces)"
     echo "  HTTP_PORT           HTTP API port (default: 8080)"
     echo "  GRPC_PORT           gRPC port (default: 9090)"
+    echo "  MCP_MODE            MCP mode: disabled, http (default: http)"
+    echo "  MCP_PATH            MCP HTTP endpoint path prefix (default: /mcp)"
+    echo ""
+    echo "Examples:"
+    echo "  # Start with default settings (MCP enabled)"
+    echo "  $0 start"
+    echo ""
+    echo "  # Start with custom ports and workspace directory"
+    echo "  HTTP_PORT=9000 GRPC_PORT=9001 WORKSPACE_HOST_DIR=/data/workspace $0 start"
+    echo ""
+    echo "  # Start without MCP"
+    echo "  MCP_MODE=disabled $0 start"
     echo ""
 }
 
