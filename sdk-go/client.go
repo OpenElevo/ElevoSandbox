@@ -18,6 +18,10 @@ type ClientOptions struct {
 	Timeout time.Duration
 	// HTTPClient is an optional custom HTTP client
 	HTTPClient *http.Client
+	// NfsHost is the NFS server host for mounting workspaces
+	NfsHost string
+	// NfsPort is the NFS server port (default: 2049)
+	NfsPort int
 }
 
 // Client is the main workspace client
@@ -31,6 +35,7 @@ type Client struct {
 	Process    *ProcessService
 	Pty        *PtyService
 	FileSystem *FileSystemService
+	Nfs        *NfsService
 }
 
 // NewClient creates a new workspace client
@@ -63,6 +68,7 @@ func NewClient(apiURL string, opts ...ClientOptions) *Client {
 	c.Process = &ProcessService{client: c}
 	c.Pty = &PtyService{client: c}
 	c.FileSystem = &FileSystemService{client: c}
+	c.Nfs = NewNfsService(opt.NfsHost, opt.NfsPort)
 
 	return c
 }

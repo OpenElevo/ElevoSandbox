@@ -9,6 +9,7 @@ from workspace_sdk.services.sandbox import SandboxService
 from workspace_sdk.services.process import ProcessService
 from workspace_sdk.services.pty import PtyService
 from workspace_sdk.services.filesystem import FileSystemService
+from workspace_sdk.services.nfs import NfsService
 from workspace_sdk.errors import parse_error_response
 
 
@@ -20,6 +21,8 @@ class WorkspaceClient:
         api_url: str,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        nfs_host: Optional[str] = None,
+        nfs_port: int = 2049,
     ):
         """
         Initialize the workspace client.
@@ -28,10 +31,14 @@ class WorkspaceClient:
             api_url: Base URL of the workspace server
             api_key: Optional API key for authentication
             timeout: Request timeout in seconds (default: 30)
+            nfs_host: NFS server host for mounting workspaces (optional)
+            nfs_port: NFS server port (default: 2049)
         """
         self._api_url = api_url
         self._api_key = api_key
         self._timeout = timeout
+        self._nfs_host = nfs_host
+        self._nfs_port = nfs_port
         self._client: Optional[httpx.Client] = None
 
         # Services will be initialized when context manager is entered
@@ -39,6 +46,7 @@ class WorkspaceClient:
         self.process: ProcessService
         self.pty: PtyService
         self.filesystem: FileSystemService
+        self.nfs: NfsService
 
     def __enter__(self) -> "WorkspaceClient":
         """Enter context manager"""
@@ -57,6 +65,7 @@ class WorkspaceClient:
         self.process = ProcessService(self._client, self._api_url)
         self.pty = PtyService(self._client, self._api_url)
         self.filesystem = FileSystemService(self._client, self._api_url)
+        self.nfs = NfsService(self._nfs_host, self._nfs_port)
 
         return self
 
@@ -79,6 +88,8 @@ class WorkspaceClient:
         api_url: str,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        nfs_host: Optional[str] = None,
+        nfs_port: int = 2049,
     ) -> "WorkspaceClient":
         """
         Factory method to create a WorkspaceClient.
@@ -87,4 +98,4 @@ class WorkspaceClient:
             with WorkspaceClient.create("http://localhost:8080") as client:
                 sandbox = client.sandbox.create()
         """
-        return WorkspaceClient(api_url, api_key, timeout)
+        return WorkspaceClient(api_url, api_key, timeout, nfs_host, nfs_port)

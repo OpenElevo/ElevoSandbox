@@ -28,6 +28,7 @@ elevo-workspace/
 | **Process** | 进程执行 (同步/流式输出) | ✅ 已实现 |
 | **PTY** | 伪终端交互 (WebSocket) | ✅ 已实现 |
 | **MCP** | Model Context Protocol 支持 | ✅ 已实现 |
+| **NFS** | 网络文件系统共享 | ✅ 已实现 |
 | Git | Git 版本控制 | ⏳ 规划中 |
 | LSP | 语言服务协议 | ⏳ 规划中 |
 | Snapshot | 快照管理 | ⏳ 规划中 |
@@ -56,15 +57,57 @@ WORKSPACE_DATABASE_URL=sqlite://data/workspace.db
 WORKSPACE_DOCKER_HOST=unix:///var/run/docker.sock
 WORKSPACE_DOCKER_NETWORK=workspace-network
 
-# NFS 配置 (可选)
-WORKSPACE_NFS_ENABLED=false
-WORKSPACE_NFS_SERVER=nfs.example.com
-WORKSPACE_NFS_PATH=/exports/workspace
+# NFS 配置
+WORKSPACE_NFS_PORT=2049           # NFS 服务端口
+WORKSPACE_NFS_HOST=172.30.0.188   # NFS 外部访问地址 (用于返回给客户端的 nfs_url)
 
 # MCP 配置
-WORKSPACE_MCP_ENABLED=true
-WORKSPACE_MCP_PROFILE=developer  # executor / developer / full
+WORKSPACE_MCP_MODE=http           # disabled / stdio / http
+WORKSPACE_MCP_PATH=/mcp           # HTTP 模式下的端点路径前缀
+WORKSPACE_MCP_PROFILE=developer   # executor / developer / full
 ```
+
+### NFS 文件共享
+
+每个 Sandbox 的 `/workspace` 目录可以通过 NFS 挂载到本地，实现文件双向同步。
+
+**服务端配置**
+
+```bash
+# 设置 NFS 外部访问地址
+export WORKSPACE_NFS_HOST=172.30.0.188
+export WORKSPACE_NFS_PORT=2049
+```
+
+**客户端挂载**
+
+```bash
+# 创建 sandbox
+SANDBOX_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/sandboxes \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-sandbox"}' | jq -r '.id')
+
+# 挂载 NFS (需要 nfs-common 包)
+sudo mkdir -p /mnt/workspace
+sudo mount -t nfs -o nfsvers=3,tcp,nolock,port=2049,mountport=2049 \
+  172.30.0.188:/${SANDBOX_ID} /mnt/workspace
+
+# 现在可以直接读写 /mnt/workspace，与 sandbox 内的 /workspace 同步
+echo "Hello" > /mnt/workspace/test.txt
+
+# 在 sandbox 中验证
+curl -s -X POST "http://172.30.0.188:8081/api/v1/sandboxes/${SANDBOX_ID}/process/run" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "cat", "args": ["/workspace/test.txt"]}'
+
+# 卸载
+sudo umount /mnt/workspace
+```
+
+**注意事项**
+- 需要指定 `port=2049,mountport=2049` 参数，因为服务未实现 portmapper
+- 推荐使用 NFSv3 (`nfsvers=3`)
+- 使用 `nolock` 选项避免锁服务依赖
 
 ### MCP Profile
 

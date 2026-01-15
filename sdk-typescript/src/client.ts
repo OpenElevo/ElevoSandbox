@@ -7,6 +7,7 @@ import { SandboxService } from './services/sandbox';
 import { ProcessService } from './services/process';
 import { PtyService } from './services/pty';
 import { FileSystemService } from './services/filesystem';
+import { NfsService } from './services/nfs';
 import { WorkspaceError, parseErrorResponse } from './errors';
 
 /**
@@ -19,6 +20,10 @@ export interface WorkspaceClientOptions {
   apiKey?: string;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
+  /** NFS server host for mounting workspaces (optional) */
+  nfsHost?: string;
+  /** NFS server port (default: 2049) */
+  nfsPort?: number;
 }
 
 /**
@@ -36,6 +41,8 @@ export class WorkspaceClient {
   public readonly pty: PtyService;
   /** FileSystem service for file operations */
   public readonly filesystem: FileSystemService;
+  /** NFS service for mounting sandbox workspaces */
+  public readonly nfs: NfsService;
 
   constructor(options: WorkspaceClientOptions) {
     this.options = {
@@ -66,6 +73,7 @@ export class WorkspaceClient {
     this.process = new ProcessService(this.httpClient, this.options.apiUrl);
     this.pty = new PtyService(this.httpClient, this.options.apiUrl);
     this.filesystem = new FileSystemService(this.httpClient, this.options.apiUrl);
+    this.nfs = new NfsService(this.options.nfsHost, this.options.nfsPort ?? 2049);
   }
 
   /**
