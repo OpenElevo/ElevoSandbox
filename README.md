@@ -92,6 +92,59 @@ MCP 支持三种 profile，适用于不同场景：
 - 所有 process_* 操作
 - 所有 file_* 操作
 
+### MCP 使用
+
+MCP 服务通过 stdio 方式运行，可以集成到支持 MCP 协议的 AI 客户端中。
+
+**Claude Desktop 配置**
+
+编辑 `~/.config/claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "elevo-workspace": {
+      "command": "/path/to/workspace-server",
+      "args": ["--mcp"],
+      "env": {
+        "WORKSPACE_MCP_PROFILE": "developer",
+        "WORKSPACE_DOCKER_HOST": "unix:///var/run/docker.sock"
+      }
+    }
+  }
+}
+```
+
+**Docker 方式运行 MCP**
+
+```json
+{
+  "mcpServers": {
+    "elevo-workspace": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-e", "WORKSPACE_MCP_PROFILE=developer",
+        "your-registry/elevo-workspace-server:latest",
+        "--mcp"
+      ]
+    }
+  }
+}
+```
+
+**可用工具 (developer profile)**
+
+| 工具 | 描述 |
+|-----|------|
+| `process_run` | 在 sandbox 中执行命令 |
+| `file_read` | 读取文件内容 |
+| `file_write` | 写入文件内容 |
+| `file_list` | 列出目录内容 |
+| `file_mkdir` | 创建目录 |
+| `file_remove` | 删除文件或目录 |
+
 ## SDK 使用
 
 ### Go SDK
