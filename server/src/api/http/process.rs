@@ -33,6 +33,7 @@ pub struct CommandResultResponse {
 /// Process event for SSE streaming
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(dead_code)]
 pub enum ProcessEventResponse {
     Stdout { data: String },
     Stderr { data: String },

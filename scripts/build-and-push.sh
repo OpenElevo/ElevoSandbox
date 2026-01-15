@@ -104,6 +104,8 @@ fi
 # Copy binaries to local target for Docker build
 log_info "Copying binaries to project target directory..."
 mkdir -p target/release
+# Remove old binaries if they exist (may be owned by root from previous Docker builds)
+rm -f target/release/workspace-server target/release/workspace-agent 2>/dev/null || sudo rm -f target/release/workspace-server target/release/workspace-agent
 cp "${CACHE_DIR}/target/release/workspace-server" target/release/
 cp "${CACHE_DIR}/target/release/workspace-agent" target/release/
 

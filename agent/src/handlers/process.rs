@@ -13,7 +13,6 @@ pub enum ProcessOutput {
     Stdout(String),
     Stderr(String),
     Exit(i32),
-    Error(String),
 }
 
 /// Run a command and stream output

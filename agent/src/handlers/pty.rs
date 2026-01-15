@@ -8,7 +8,6 @@ use tokio::sync::{Mutex, RwLock};
 
 /// PTY instance
 pub struct PtyInstance {
-    pub id: String,
     pub master: Mutex<Box<dyn MasterPty + Send>>,
 }
 
@@ -63,7 +62,6 @@ impl PtyManager {
         let _child = pair.slave.spawn_command(cmd)?;
 
         let instance = Arc::new(PtyInstance {
-            id: id.clone(),
             master: Mutex::new(pair.master),
         });
 
@@ -112,24 +110,5 @@ impl PtyManager {
         writer.write_all(data)?;
 
         Ok(())
-    }
-
-    /// Read data from a PTY (non-blocking)
-    pub async fn read(&self, id: &str, buf: &mut [u8]) -> anyhow::Result<usize> {
-        let ptys = self.ptys.read().await;
-
-        let pty = ptys.get(id).ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
-
-        let master = pty.master.lock().await;
-        use std::io::Read;
-        let mut reader = master.try_clone_reader()?;
-        let n = reader.read(buf)?;
-
-        Ok(n)
-    }
-
-    /// Get the number of active PTYs
-    pub async fn count(&self) -> usize {
-        self.ptys.read().await.len()
     }
 }

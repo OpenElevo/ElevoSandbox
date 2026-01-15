@@ -85,9 +85,7 @@ pub struct AgentConnPool {
 
 /// Represents a connection to an agent
 pub struct AgentConnection {
-    pub sandbox_id: String,
     pub tx: mpsc::Sender<AgentMessageType>,
-    pub connected_at: std::time::Instant,
     pub last_heartbeat: RwLock<std::time::Instant>,
 }
 
@@ -117,9 +115,7 @@ impl AgentConnPool {
         self.connections.insert(
             sandbox_id.clone(),
             AgentConnection {
-                sandbox_id: sandbox_id.clone(),
                 tx,
-                connected_at: now,
                 last_heartbeat: RwLock::new(now),
             },
         );

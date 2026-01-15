@@ -443,24 +443,9 @@ impl ConnectionManager {
                 process::ProcessOutput::Exit(code) => {
                     exit_code = code;
                 }
-                process::ProcessOutput::Error(msg) => {
-                    return Err(anyhow::anyhow!(msg));
-                }
             }
         }
 
         Ok((exit_code, stdout, stderr))
-    }
-
-    /// Check if connected
-    pub async fn is_connected(&self) -> bool {
-        *self.connected.read().await
-    }
-
-    /// Shutdown the connection manager
-    pub async fn shutdown(&self) {
-        if let Some(tx) = &self.shutdown_tx {
-            let _ = tx.send(()).await;
-        }
     }
 }

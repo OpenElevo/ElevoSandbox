@@ -34,6 +34,7 @@ pub struct ReadFileResponse {
 /// Write file request
 #[derive(Debug, Deserialize)]
 pub struct WriteFileRequest {
+    #[allow(dead_code)]
     pub content: String,
 }
 
@@ -41,6 +42,7 @@ pub struct WriteFileRequest {
 #[derive(Debug, Deserialize)]
 pub struct MkdirRequest {
     pub path: String,
+    #[allow(dead_code)]
     pub recursive: Option<bool>,
 }
 
@@ -61,6 +63,7 @@ pub struct PathQuery {
 #[derive(Debug, Deserialize)]
 pub struct DeleteQuery {
     pub path: String,
+    #[allow(dead_code)]
     pub recursive: Option<String>,
 }
 

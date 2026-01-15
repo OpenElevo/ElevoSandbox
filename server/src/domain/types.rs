@@ -2,26 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// File type
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FileType {
-    File,
-    Directory,
-    Symlink,
-}
-
-/// File information
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileInfo {
-    pub name: String,
-    pub path: String,
-    #[serde(rename = "type")]
-    pub file_type: FileType,
-    pub size: u64,
-    pub modified_at: Option<String>,
-}
-
 /// Command result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandResult {
