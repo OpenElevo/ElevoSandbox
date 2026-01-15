@@ -94,7 +94,75 @@ MCP 支持三种 profile，适用于不同场景：
 
 ### MCP 使用
 
-MCP 服务通过 stdio 方式运行，可以集成到支持 MCP 协议的 AI 客户端中。
+MCP 支持两种传输模式：
+
+#### HTTP 模式 (推荐)
+
+HTTP 模式通过网络提供 MCP 服务，其他 Agent/大模型可以直接使用 MCP client 调用。
+
+**启动服务**
+
+```bash
+# 设置环境变量
+export WORKSPACE_MCP_MODE=http
+export WORKSPACE_MCP_PATH=/mcp
+
+# 启动服务
+cargo run
+```
+
+服务启动后，提供三个 MCP 端点，适用于不同场景：
+
+| 端点 | 工具数 | 适用场景 |
+|-----|-------|---------|
+| `http://localhost:8080/mcp/executor` | 1 | 仅执行脚本，sandbox 由程序管理 |
+| `http://localhost:8080/mcp/developer` | 6 | 常规开发，包含文件和进程操作 |
+| `http://localhost:8080/mcp/full` | 14 | 完整功能，包含所有 sandbox 管理 |
+
+**MCP Client 调用示例**
+
+```python
+# Python MCP Client 示例
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async def main():
+    # 根据需要选择端点
+    # - /mcp/executor  - 仅执行命令
+    # - /mcp/developer - 执行命令 + 文件操作
+    # - /mcp/full      - 完整功能
+    async with streamablehttp_client("http://localhost:8080/mcp/developer") as (read, write):
+        async with ClientSession(read, write) as session:
+            # 初始化
+            await session.initialize()
+
+            # 列出可用工具
+            tools = await session.list_tools()
+            print(f"Available tools: {[t.name for t in tools.tools]}")
+
+            # 调用工具
+            result = await session.call_tool(
+                "process_run",
+                arguments={
+                    "sandbox_id": "your-sandbox-id",
+                    "command": "echo",
+                    "args": ["Hello, World!"]
+                }
+            )
+            print(result)
+```
+
+**环境变量**
+
+| 变量 | 默认值 | 说明 |
+|-----|-------|------|
+| `WORKSPACE_MCP_MODE` | `disabled` | MCP 模式: `disabled`, `stdio`, `http` |
+| `WORKSPACE_MCP_PATH` | `/mcp` | HTTP 模式下的端点路径前缀 |
+| `WORKSPACE_MCP_PROFILE` | `developer` | stdio 模式下的工具集 |
+
+#### Stdio 模式
+
+Stdio 模式用于本地 CLI 集成，如 Claude Desktop。
 
 **Claude Desktop 配置**
 
@@ -105,30 +173,11 @@ MCP 服务通过 stdio 方式运行，可以集成到支持 MCP 协议的 AI 客
   "mcpServers": {
     "elevo-workspace": {
       "command": "/path/to/workspace-server",
-      "args": ["--mcp"],
       "env": {
+        "WORKSPACE_MCP_MODE": "stdio",
         "WORKSPACE_MCP_PROFILE": "developer",
         "WORKSPACE_DOCKER_HOST": "unix:///var/run/docker.sock"
       }
-    }
-  }
-}
-```
-
-**Docker 方式运行 MCP**
-
-```json
-{
-  "mcpServers": {
-    "elevo-workspace": {
-      "command": "docker",
-      "args": [
-        "run", "-i", "--rm",
-        "-v", "/var/run/docker.sock:/var/run/docker.sock",
-        "-e", "WORKSPACE_MCP_PROFILE=developer",
-        "your-registry/elevo-workspace-server:latest",
-        "--mcp"
-      ]
     }
   }
 }

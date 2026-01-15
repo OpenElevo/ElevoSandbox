@@ -137,7 +137,18 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Build HTTP router
-    let app = api::http::create_router(state.clone());
+    let mut app = api::http::create_router(state.clone());
+
+    // Add MCP HTTP endpoints if enabled
+    if config.mcp_mode == "http" {
+        let mcp_path = config.mcp_path.clone();
+        info!("MCP HTTP endpoints enabled at {}/<profile>", mcp_path);
+        info!("  - {}/executor  (1 tool: process_run)", mcp_path);
+        info!("  - {}/developer (6 tools: process + file ops)", mcp_path);
+        info!("  - {}/full      (14 tools: all operations)", mcp_path);
+        let mcp_router = api::mcp::create_mcp_router(state.clone());
+        app = app.nest(&mcp_path, mcp_router);
+    }
 
     // Start HTTP server
     let http_server = axum::serve(

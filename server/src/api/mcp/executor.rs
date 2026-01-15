@@ -6,8 +6,6 @@
 //!
 //! Tools: process_run (1 tool)
 
-use std::collections::HashMap;
-
 use rmcp::{
     ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},

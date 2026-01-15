@@ -3,6 +3,11 @@
 //! This module provides MCP server functionality, allowing AI assistants
 //! to interact with the workspace service through standardized tools.
 //!
+//! ## Transport Modes
+//!
+//! - **stdio**: Standard input/output mode for local CLI usage
+//! - **http**: HTTP/SSE mode for network access (Streamable HTTP)
+//!
 //! ## Profiles
 //!
 //! Different profiles are available for different use cases:
@@ -30,10 +35,14 @@ pub use executor::ExecutorMcpHandler;
 pub use developer::DeveloperMcpHandler;
 pub use full::FullMcpHandler;
 
-// Backwards compatibility alias
-pub type WorkspaceMcpHandler = FullMcpHandler;
+use std::sync::Arc;
 
+use axum::Router;
 use rmcp::transport::stdio;
+use rmcp::transport::streamable_http_server::{
+    session::local::LocalSessionManager,
+    StreamableHttpServerConfig, StreamableHttpService,
+};
 use rmcp::ServiceExt;
 use tracing::info;
 
@@ -111,9 +120,74 @@ pub async fn serve_stdio(state: AppState, profile: McpProfile) -> anyhow::Result
     Ok(())
 }
 
-/// Start MCP server in stdio mode with default profile (developer)
+/// Create MCP HTTP router with all three profile endpoints
 ///
-/// This is kept for backwards compatibility
-pub async fn serve_stdio_default(state: AppState) -> anyhow::Result<()> {
-    serve_stdio(state, McpProfile::Developer).await
+/// Endpoints:
+/// - /executor - Minimal (1 tool: process_run)
+/// - /developer - Development (6 tools)
+/// - /full - Complete (14 tools)
+pub fn create_mcp_router(state: AppState) -> Router {
+    info!("Creating MCP HTTP router with all profiles");
+
+    Router::new()
+        .nest("/executor", create_executor_router(state.clone()))
+        .nest("/developer", create_developer_router(state.clone()))
+        .nest("/full", create_full_router(state))
+}
+
+fn create_executor_router(state: AppState) -> Router {
+    let session_manager = Arc::new(LocalSessionManager::default());
+    let config = StreamableHttpServerConfig::default();
+
+    let mcp_service = StreamableHttpService::new(
+        move || Ok(ExecutorMcpHandler::new(state.clone())),
+        session_manager,
+        config,
+    );
+
+    Router::new().route(
+        "/",
+        axum::routing::any(move |req: axum::extract::Request| {
+            let service = mcp_service.clone();
+            async move { service.handle(req).await }
+        }),
+    )
+}
+
+fn create_developer_router(state: AppState) -> Router {
+    let session_manager = Arc::new(LocalSessionManager::default());
+    let config = StreamableHttpServerConfig::default();
+
+    let mcp_service = StreamableHttpService::new(
+        move || Ok(DeveloperMcpHandler::new(state.clone())),
+        session_manager,
+        config,
+    );
+
+    Router::new().route(
+        "/",
+        axum::routing::any(move |req: axum::extract::Request| {
+            let service = mcp_service.clone();
+            async move { service.handle(req).await }
+        }),
+    )
+}
+
+fn create_full_router(state: AppState) -> Router {
+    let session_manager = Arc::new(LocalSessionManager::default());
+    let config = StreamableHttpServerConfig::default();
+
+    let mcp_service = StreamableHttpService::new(
+        move || Ok(FullMcpHandler::new(state.clone())),
+        session_manager,
+        config,
+    );
+
+    Router::new().route(
+        "/",
+        axum::routing::any(move |req: axum::extract::Request| {
+            let service = mcp_service.clone();
+            async move { service.handle(req).await }
+        }),
+    )
 }
