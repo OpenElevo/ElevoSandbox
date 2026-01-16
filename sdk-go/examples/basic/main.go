@@ -23,7 +23,7 @@ func main() {
 
 	ctx := context.Background()
 
-	fmt.Println("=== Workspace SDK Basic Example ===\n")
+	fmt.Println("=== Workspace SDK Basic Example ===")
 
 	// 1. Create a sandbox
 	fmt.Println("1. Creating sandbox...")

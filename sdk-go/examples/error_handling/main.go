@@ -22,7 +22,7 @@ func main() {
 
 	ctx := context.Background()
 
-	fmt.Println("=== Error Handling Example ===\n")
+	fmt.Println("=== Error Handling Example ===")
 
 	// 1. Handle not found error
 	fmt.Println("1. Handling non-existent sandbox error...")
