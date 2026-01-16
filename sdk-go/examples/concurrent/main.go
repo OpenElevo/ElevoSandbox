@@ -23,7 +23,7 @@ func main() {
 
 	ctx := context.Background()
 
-	fmt.Println("=== Concurrent Operations Example ===\n")
+	fmt.Println("=== Concurrent Operations Example ===")
 
 	// Create multiple sandboxes concurrently
 	numSandboxes := 3
