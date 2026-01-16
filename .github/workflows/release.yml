@@ -13,8 +13,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  SERVER_IMAGE: ghcr.io/${{ github.repository_owner }}/elevosandbox-server
-  BASE_IMAGE: ghcr.io/${{ github.repository_owner }}/elevosandbox-base
 
 jobs:
   build-and-push:
@@ -27,6 +25,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set image names
+        id: images
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "server_image=ghcr.io/${OWNER}/elevosandbox-server" >> $GITHUB_OUTPUT
+          echo "base_image=ghcr.io/${OWNER}/elevosandbox-base" >> $GITHUB_OUTPUT
 
       - name: Log in to Container Registry
         uses: docker/login-action@v3
@@ -68,23 +73,23 @@ jobs:
 
       - name: Build and push server image
         run: |
-          docker build -t ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version }} \
-                       -t ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version_short }} \
-                       -t ${{ env.SERVER_IMAGE }}:latest \
+          docker build -t ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version }} \
+                       -t ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version_short }} \
+                       -t ${{ steps.images.outputs.server_image }}:latest \
                        -f docker/Dockerfile.server .
-          docker push ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version }}
-          docker push ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version_short }}
-          docker push ${{ env.SERVER_IMAGE }}:latest
+          docker push ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version }}
+          docker push ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version_short }}
+          docker push ${{ steps.images.outputs.server_image }}:latest
 
       - name: Build and push base image
         run: |
-          docker build -t ${{ env.BASE_IMAGE }}:${{ steps.version.outputs.version }} \
-                       -t ${{ env.BASE_IMAGE }}:${{ steps.version.outputs.version_short }} \
-                       -t ${{ env.BASE_IMAGE }}:latest \
+          docker build -t ${{ steps.images.outputs.base_image }}:${{ steps.version.outputs.version }} \
+                       -t ${{ steps.images.outputs.base_image }}:${{ steps.version.outputs.version_short }} \
+                       -t ${{ steps.images.outputs.base_image }}:latest \
                        -f images/workspace-base/Dockerfile .
-          docker push ${{ env.BASE_IMAGE }}:${{ steps.version.outputs.version }}
-          docker push ${{ env.BASE_IMAGE }}:${{ steps.version.outputs.version_short }}
-          docker push ${{ env.BASE_IMAGE }}:latest
+          docker push ${{ steps.images.outputs.base_image }}:${{ steps.version.outputs.version }}
+          docker push ${{ steps.images.outputs.base_image }}:${{ steps.version.outputs.version_short }}
+          docker push ${{ steps.images.outputs.base_image }}:latest
 
   create-release:
     name: Create GitHub Release
@@ -106,6 +111,13 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Set image names
+        id: images
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "server_image=ghcr.io/${OWNER}/elevosandbox-server" >> $GITHUB_OUTPUT
+          echo "base_image=ghcr.io/${OWNER}/elevosandbox-base" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
@@ -119,10 +131,10 @@ jobs:
 
             ```bash
             # Pull the server image
-            docker pull ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version }}
+            docker pull ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version }}
 
             # Pull the base image
-            docker pull ${{ env.BASE_IMAGE }}:${{ steps.version.outputs.version }}
+            docker pull ${{ steps.images.outputs.base_image }}:${{ steps.version.outputs.version }}
             ```
 
             ## Quick Start
@@ -134,7 +146,7 @@ jobs:
               -p 8080:8080 \
               -p 9090:9090 \
               -v /var/run/docker.sock:/var/run/docker.sock:ro \
-              ${{ env.SERVER_IMAGE }}:${{ steps.version.outputs.version }}
+              ${{ steps.images.outputs.server_image }}:${{ steps.version.outputs.version }}
             ```
 
             See [deployment documentation](https://github.com/${{ github.repository }}/blob/main/docs/deployment.md) for more details.
