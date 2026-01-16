@@ -9,19 +9,18 @@
 use std::collections::HashMap;
 
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use tracing::{error, info};
 
-use crate::AppState;
+use super::common::{format_command_result, run_command};
 use super::types::{
-    ProcessRunParams, FileReadParams, FileWriteParams,
-    FileListParams, FileMkdirParams, FileRemoveParams,
+    FileListParams, FileMkdirParams, FileReadParams, FileRemoveParams, FileWriteParams,
+    ProcessRunParams,
 };
-use super::common::{run_command, format_command_result};
+use crate::AppState;
 
 /// Developer MCP Handler - common development tools
 #[derive(Clone)]
@@ -64,7 +63,9 @@ impl DeveloperMcpHandler {
     // Process Tools
     // ------------------------------------------------------------------------
 
-    #[tool(description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr.")]
+    #[tool(
+        description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr."
+    )]
     async fn process_run(&self, Parameters(params): Parameters<ProcessRunParams>) -> String {
         info!(
             "MCP[developer]: process_run in {} with command: {}",

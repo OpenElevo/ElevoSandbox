@@ -210,10 +210,16 @@ mod tests {
             metadata: None,
         };
 
-        let workspace = repo.create(params).await.expect("Failed to create workspace");
+        let workspace = repo
+            .create(params)
+            .await
+            .expect("Failed to create workspace");
         assert_eq!(workspace.name, Some("test-workspace".to_string()));
 
-        let fetched = repo.get(&workspace.id).await.expect("Failed to get workspace");
+        let fetched = repo
+            .get(&workspace.id)
+            .await
+            .expect("Failed to get workspace");
         assert_eq!(fetched.id, workspace.id);
         assert_eq!(fetched.name, workspace.name);
     }
@@ -232,8 +238,12 @@ mod tests {
             metadata: None,
         };
 
-        repo.create(params1).await.expect("Failed to create workspace 1");
-        repo.create(params2).await.expect("Failed to create workspace 2");
+        repo.create(params1)
+            .await
+            .expect("Failed to create workspace 1");
+        repo.create(params2)
+            .await
+            .expect("Failed to create workspace 2");
 
         let all = repo.list().await.expect("Failed to list workspaces");
         assert_eq!(all.len(), 2);
@@ -249,14 +259,23 @@ mod tests {
             metadata: None,
         };
 
-        let workspace = repo.create(params).await.expect("Failed to create workspace");
+        let workspace = repo
+            .create(params)
+            .await
+            .expect("Failed to create workspace");
 
         repo.update_nfs_url(&workspace.id, "nfs://localhost:2049/test")
             .await
             .expect("Failed to update nfs_url");
 
-        let fetched = repo.get(&workspace.id).await.expect("Failed to get workspace");
-        assert_eq!(fetched.nfs_url, Some("nfs://localhost:2049/test".to_string()));
+        let fetched = repo
+            .get(&workspace.id)
+            .await
+            .expect("Failed to get workspace");
+        assert_eq!(
+            fetched.nfs_url,
+            Some("nfs://localhost:2049/test".to_string())
+        );
     }
 
     #[tokio::test]
@@ -269,9 +288,14 @@ mod tests {
             metadata: None,
         };
 
-        let workspace = repo.create(params).await.expect("Failed to create workspace");
+        let workspace = repo
+            .create(params)
+            .await
+            .expect("Failed to create workspace");
 
-        repo.delete(&workspace.id).await.expect("Failed to delete workspace");
+        repo.delete(&workspace.id)
+            .await
+            .expect("Failed to delete workspace");
 
         let result = repo.get(&workspace.id).await;
         assert!(matches!(result, Err(Error::WorkspaceNotFound(_))));

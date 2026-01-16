@@ -8,11 +8,11 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
+use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::docker::{CreateContainerOpts, DockerManager};
 use crate::infra::sqlite::SandboxRepository;
 use crate::infra::workspace_repository::WorkspaceRepository;
-use crate::error::{Error, Result};
 use crate::Config;
 
 /// Label key for identifying workspace sandboxes
@@ -47,7 +47,10 @@ impl SandboxService {
 
     /// Create a new sandbox
     pub async fn create(&self, params: CreateSandboxParams) -> Result<Sandbox> {
-        info!("Creating sandbox with template: {:?}, workspace_id: {}", params.template, params.workspace_id);
+        info!(
+            "Creating sandbox with template: {:?}, workspace_id: {}",
+            params.template, params.workspace_id
+        );
 
         // Verify workspace exists
         let workspace = self.workspace_repo.get(&params.workspace_id).await?;
@@ -61,13 +64,19 @@ impl SandboxService {
         if !workspace_dir.exists() {
             error!("Workspace directory does not exist: {:?}", workspace_dir);
             self.repository
-                .update_state(&sandbox_id, SandboxState::Error, Some("Workspace directory not found"))
+                .update_state(
+                    &sandbox_id,
+                    SandboxState::Error,
+                    Some("Workspace directory not found"),
+                )
                 .await?;
             return Err(Error::Internal("Workspace directory not found".to_string()));
         }
 
         // Build container options
-        let template = params.template.unwrap_or_else(|| self.config.base_image.clone());
+        let template = params
+            .template
+            .unwrap_or_else(|| self.config.base_image.clone());
         let mut env = params.env.unwrap_or_default();
 
         // Add sandbox ID and server address to environment
@@ -88,7 +97,10 @@ impl SandboxService {
         labels.insert("workspace.workspace.id".to_string(), workspace.id.clone());
 
         // Determine network mode
-        let network_mode = self.config.docker_network.clone()
+        let network_mode = self
+            .config
+            .docker_network
+            .clone()
             .or_else(|| Some("bridge".to_string()));
 
         let container_opts = CreateContainerOpts {
@@ -135,7 +147,11 @@ impl SandboxService {
 
         // Wait for agent to connect
         let agent_timeout = Duration::from_secs(self.config.agent_timeout);
-        match self.agent_pool.wait_for_connection(&sandbox_id, agent_timeout).await {
+        match self
+            .agent_pool
+            .wait_for_connection(&sandbox_id, agent_timeout)
+            .await
+        {
             Ok(_) => {
                 info!("Agent connected for sandbox: {}", sandbox_id);
                 self.repository
@@ -250,7 +266,8 @@ impl SandboxService {
             });
         }
 
-        let container_id = sandbox.container_id
+        let container_id = sandbox
+            .container_id
             .ok_or_else(|| Error::Internal("No container ID".to_string()))?;
 
         let stats = self.docker.get_container_stats(&container_id).await?;

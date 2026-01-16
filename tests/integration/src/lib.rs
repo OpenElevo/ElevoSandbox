@@ -60,8 +60,7 @@ impl Default for CreateSandboxRequest {
     fn default() -> Self {
         Self {
             template: Some(
-                std::env::var("WORKSPACE_BASE_IMAGE")
-                    .unwrap_or_else(|_| "rust:1.85".to_string()),
+                std::env::var("WORKSPACE_BASE_IMAGE").unwrap_or_else(|_| "rust:1.85".to_string()),
             ),
             name: None,
             env: None,

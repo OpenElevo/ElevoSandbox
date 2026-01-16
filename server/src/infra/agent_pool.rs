@@ -145,13 +145,22 @@ impl AgentConnPool {
     }
 
     /// Send a handshake acknowledgment
-    pub async fn send_handshake_ack(&self, sandbox_id: &str, success: bool, error: Option<String>) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+    pub async fn send_handshake_ack(
+        &self,
+        sandbox_id: &str,
+        success: bool,
+        error: Option<String>,
+    ) -> Result<()> {
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let msg = AgentMessageType::HandshakeAck { success, error };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
@@ -159,7 +168,9 @@ impl AgentConnPool {
 
     /// Send a heartbeat acknowledgment
     pub async fn send_heartbeat_ack(&self, sandbox_id: &str, timestamp: u64) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         // Update last heartbeat time
@@ -167,7 +178,9 @@ impl AgentConnPool {
 
         let msg = AgentMessageType::HeartbeatAck { timestamp };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
@@ -184,14 +197,17 @@ impl AgentConnPool {
         timeout_ms: u64,
         stream: bool,
     ) -> Result<AgentCommandResponse> {
-        let conn = self.connections.get(sandbox_id)
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let correlation_id = Uuid::new_v4().to_string();
 
         // Create oneshot channel for response
         let (response_tx, response_rx) = oneshot::channel();
-        self.pending_requests.insert(correlation_id.clone(), response_tx);
+        self.pending_requests
+            .insert(correlation_id.clone(), response_tx);
 
         // Send command request
         let msg = AgentMessageType::RunCommand {
@@ -206,7 +222,9 @@ impl AgentConnPool {
 
         if conn.tx.send(msg).await.is_err() {
             self.pending_requests.remove(&correlation_id);
-            return Err(Error::AgentCommunicationError("Failed to send command".to_string()));
+            return Err(Error::AgentCommunicationError(
+                "Failed to send command".to_string(),
+            ));
         }
 
         drop(conn); // Release the reference before awaiting
@@ -225,7 +243,9 @@ impl AgentConnPool {
             }
             Ok(Err(_)) => {
                 self.pending_requests.remove(&correlation_id);
-                Err(Error::AgentCommunicationError("Response channel closed".to_string()))
+                Err(Error::AgentCommunicationError(
+                    "Response channel closed".to_string(),
+                ))
             }
             Err(_) => {
                 self.pending_requests.remove(&correlation_id);
@@ -236,7 +256,9 @@ impl AgentConnPool {
 
     /// Kill a process on an agent
     pub async fn kill_process(&self, sandbox_id: &str, pid: u32, signal: i32) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let correlation_id = Uuid::new_v4().to_string();
@@ -247,7 +269,9 @@ impl AgentConnPool {
             signal,
         };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
@@ -263,7 +287,9 @@ impl AgentConnPool {
         shell: Option<String>,
         env: HashMap<String, String>,
     ) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let correlation_id = Uuid::new_v4().to_string();
@@ -277,15 +303,25 @@ impl AgentConnPool {
             env,
         };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
     }
 
     /// Resize a PTY on an agent
-    pub async fn resize_pty(&self, sandbox_id: &str, pty_id: &str, cols: u32, rows: u32) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+    pub async fn resize_pty(
+        &self,
+        sandbox_id: &str,
+        pty_id: &str,
+        cols: u32,
+        rows: u32,
+    ) -> Result<()> {
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let correlation_id = Uuid::new_v4().to_string();
@@ -297,7 +333,9 @@ impl AgentConnPool {
             rows,
         };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
@@ -305,7 +343,9 @@ impl AgentConnPool {
 
     /// Kill a PTY on an agent
     pub async fn kill_pty(&self, sandbox_id: &str, pty_id: &str) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let correlation_id = Uuid::new_v4().to_string();
@@ -315,15 +355,24 @@ impl AgentConnPool {
             pty_id: pty_id.to_string(),
         };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
     }
 
     /// Send PTY input to an agent
-    pub async fn send_pty_input(&self, sandbox_id: &str, pty_id: &str, data: Vec<u8>) -> Result<()> {
-        let conn = self.connections.get(sandbox_id)
+    pub async fn send_pty_input(
+        &self,
+        sandbox_id: &str,
+        pty_id: &str,
+        data: Vec<u8>,
+    ) -> Result<()> {
+        let conn = self
+            .connections
+            .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
         let msg = AgentMessageType::PtyInput {
@@ -331,7 +380,9 @@ impl AgentConnPool {
             data,
         };
 
-        conn.tx.send(msg).await
+        conn.tx
+            .send(msg)
+            .await
             .map_err(|_| Error::AgentCommunicationError("Failed to send message".to_string()))?;
 
         Ok(())
@@ -371,14 +422,22 @@ impl AgentConnPool {
             };
             let _ = sender.send(converted);
         } else {
-            warn!("Received response for unknown correlation_id: {}", correlation_id);
+            warn!(
+                "Received response for unknown correlation_id: {}",
+                correlation_id
+            );
         }
     }
 
     /// Handle PTY output from an agent
     pub fn handle_pty_output(&self, sandbox_id: &str, pty_id: &str, data: Vec<u8>) {
         // TODO: Forward PTY output to WebSocket connections
-        debug!("PTY output for {}:{}: {} bytes", sandbox_id, pty_id, data.len());
+        debug!(
+            "PTY output for {}:{}: {} bytes",
+            sandbox_id,
+            pty_id,
+            data.len()
+        );
     }
 
     /// Handle a response from an agent (internal version)
@@ -387,12 +446,19 @@ impl AgentConnPool {
         if let Some((_, sender)) = self.pending_requests.remove(correlation_id) {
             let _ = sender.send(response);
         } else {
-            warn!("Received response for unknown correlation_id: {}", correlation_id);
+            warn!(
+                "Received response for unknown correlation_id: {}",
+                correlation_id
+            );
         }
     }
 
     /// Wait for an agent to connect
-    pub async fn wait_for_connection(&self, sandbox_id: &str, timeout_duration: Duration) -> Result<()> {
+    pub async fn wait_for_connection(
+        &self,
+        sandbox_id: &str,
+        timeout_duration: Duration,
+    ) -> Result<()> {
         let start = std::time::Instant::now();
         let check_interval = Duration::from_millis(100);
 
@@ -408,7 +474,10 @@ impl AgentConnPool {
 
     /// Get all connected sandbox IDs
     pub fn get_connected_sandboxes(&self) -> Vec<String> {
-        self.connections.iter().map(|entry| entry.key().clone()).collect()
+        self.connections
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 
     /// Check for stale connections

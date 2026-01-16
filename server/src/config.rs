@@ -226,7 +226,8 @@ impl Config {
         }
         if let Ok(val) = std::env::var("WORKSPACE_SANDBOX_EXTRA_HOSTS") {
             // Parse comma-separated list of extra hosts
-            config.sandbox_extra_hosts = val.split(',')
+            config.sandbox_extra_hosts = val
+                .split(',')
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();
@@ -247,7 +248,8 @@ impl Config {
     /// Get the host path for a sandbox workspace directory
     /// This is the path that should be mounted into sandbox containers
     pub fn get_sandbox_workspace_host_path(&self, sandbox_id: &str) -> String {
-        let base = self.workspace_host_dir
+        let base = self
+            .workspace_host_dir
             .as_ref()
             .map(|s| s.as_str())
             .unwrap_or(&self.workspace_dir);

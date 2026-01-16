@@ -12,17 +12,16 @@
 use std::collections::HashMap;
 
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use tracing::{error, info};
 
-use crate::AppState;
-use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
+use super::common::{format_command_result, run_command};
 use super::types::*;
-use super::common::{run_command, format_command_result};
+use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
+use crate::AppState;
 
 /// Full MCP Handler - complete tool set
 #[derive(Clone)]
@@ -65,9 +64,14 @@ impl FullMcpHandler {
     // Sandbox Tools
     // ========================================================================
 
-    #[tool(description = "Create a new sandbox environment bound to a workspace. Returns the sandbox ID and details.")]
+    #[tool(
+        description = "Create a new sandbox environment bound to a workspace. Returns the sandbox ID and details."
+    )]
     async fn sandbox_create(&self, Parameters(params): Parameters<SandboxCreateParams>) -> String {
-        info!("MCP[full]: sandbox_create called for workspace {}", params.workspace_id);
+        info!(
+            "MCP[full]: sandbox_create called for workspace {}",
+            params.workspace_id
+        );
 
         let create_params = CreateSandboxParams {
             workspace_id: params.workspace_id,
@@ -124,14 +128,17 @@ impl FullMcpHandler {
     async fn sandbox_list(&self, Parameters(params): Parameters<SandboxListParams>) -> String {
         info!("MCP[full]: sandbox_list called");
 
-        let state = params.state.as_deref().and_then(|s| match s.to_lowercase().as_str() {
-            "starting" => Some(SandboxState::Starting),
-            "running" => Some(SandboxState::Running),
-            "stopping" => Some(SandboxState::Stopping),
-            "stopped" => Some(SandboxState::Stopped),
-            "error" => Some(SandboxState::Error),
-            _ => None,
-        });
+        let state = params
+            .state
+            .as_deref()
+            .and_then(|s| match s.to_lowercase().as_str() {
+                "starting" => Some(SandboxState::Starting),
+                "running" => Some(SandboxState::Running),
+                "stopping" => Some(SandboxState::Stopping),
+                "stopped" => Some(SandboxState::Stopped),
+                "error" => Some(SandboxState::Error),
+                _ => None,
+            });
 
         match self.state.sandbox_service.list(state).await {
             Ok(sandboxes) => {
@@ -161,7 +168,12 @@ impl FullMcpHandler {
         info!("MCP[full]: sandbox_delete called for {}", params.sandbox_id);
 
         let force = params.force.unwrap_or(false);
-        match self.state.sandbox_service.delete(&params.sandbox_id, force).await {
+        match self
+            .state
+            .sandbox_service
+            .delete(&params.sandbox_id, force)
+            .await
+        {
             Ok(_) => format!("Sandbox {} deleted successfully", params.sandbox_id),
             Err(e) => {
                 error!("MCP[full]: sandbox_delete failed: {}", e);
@@ -174,7 +186,9 @@ impl FullMcpHandler {
     // Process Tools
     // ========================================================================
 
-    #[tool(description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr.")]
+    #[tool(
+        description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr."
+    )]
     async fn process_run(&self, Parameters(params): Parameters<ProcessRunParams>) -> String {
         info!(
             "MCP[full]: process_run in {} with command: {}",

@@ -28,10 +28,10 @@ use infra::docker::DockerManager;
 use infra::nfs::{NfsManager, NfsMode};
 use infra::sqlite::SandboxRepository;
 use infra::workspace_repository::WorkspaceRepository;
-use service::sandbox::SandboxService;
-use service::workspace::WorkspaceService;
 use service::process::ProcessService;
 use service::pty::PtyService;
+use service::sandbox::SandboxService;
+use service::workspace::WorkspaceService;
 
 /// Application state shared across handlers
 #[derive(Clone)]

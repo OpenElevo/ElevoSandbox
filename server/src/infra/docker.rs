@@ -63,14 +63,10 @@ impl DockerManager {
     /// Create a new Docker manager
     pub fn new(socket_path: Option<&str>, default_image: &str) -> Result<Self> {
         let client = match socket_path {
-            Some(path) => {
-                Docker::connect_with_socket(path, 120, bollard::API_DEFAULT_VERSION)
-                    .map_err(|e| Error::DockerError(e.to_string()))?
-            }
-            None => {
-                Docker::connect_with_local_defaults()
-                    .map_err(|e| Error::DockerError(e.to_string()))?
-            }
+            Some(path) => Docker::connect_with_socket(path, 120, bollard::API_DEFAULT_VERSION)
+                .map_err(|e| Error::DockerError(e.to_string()))?,
+            None => Docker::connect_with_local_defaults()
+                .map_err(|e| Error::DockerError(e.to_string()))?,
         };
 
         Ok(Self {
@@ -270,11 +266,9 @@ impl DockerManager {
 
             // Get network stats
             let (rx_bytes, tx_bytes) = if let Some(networks) = stats.networks {
-                networks
-                    .values()
-                    .fold((0u64, 0u64), |(rx, tx), net| {
-                        (rx + net.rx_bytes, tx + net.tx_bytes)
-                    })
+                networks.values().fold((0u64, 0u64), |(rx, tx), net| {
+                    (rx + net.rx_bytes, tx + net.tx_bytes)
+                })
             } else {
                 (0, 0)
             };
@@ -288,7 +282,9 @@ impl DockerManager {
             });
         }
 
-        Err(Error::DockerError("Failed to get container stats".to_string()))
+        Err(Error::DockerError(
+            "Failed to get container stats".to_string(),
+        ))
     }
 
     /// Get container logs
@@ -301,7 +297,9 @@ impl DockerManager {
         let options = LogsOptions::<String> {
             stdout: true,
             stderr: true,
-            tail: tail.map(|t| t.to_string()).unwrap_or_else(|| "all".to_string()),
+            tail: tail
+                .map(|t| t.to_string())
+                .unwrap_or_else(|| "all".to_string()),
             follow,
             ..Default::default()
         };
@@ -311,12 +309,8 @@ impl DockerManager {
         Ok(stream.map(|result| {
             result
                 .map(|output| match output {
-                    LogOutput::StdOut { message } => {
-                        String::from_utf8_lossy(&message).to_string()
-                    }
-                    LogOutput::StdErr { message } => {
-                        String::from_utf8_lossy(&message).to_string()
-                    }
+                    LogOutput::StdOut { message } => String::from_utf8_lossy(&message).to_string(),
+                    LogOutput::StdErr { message } => String::from_utf8_lossy(&message).to_string(),
                     _ => String::new(),
                 })
                 .map_err(|e| Error::DockerError(e.to_string()))
@@ -340,10 +334,7 @@ impl DockerManager {
             .await
             .map_err(|e| Error::DockerError(e.to_string()))?;
 
-        Ok(containers
-            .into_iter()
-            .filter_map(|c| c.id)
-            .collect())
+        Ok(containers.into_iter().filter_map(|c| c.id).collect())
     }
 
     /// Check if a container is running
@@ -354,10 +345,7 @@ impl DockerManager {
             .await
             .map_err(|e| Error::DockerError(e.to_string()))?;
 
-        Ok(info
-            .state
-            .and_then(|s| s.running)
-            .unwrap_or(false))
+        Ok(info.state.and_then(|s| s.running).unwrap_or(false))
     }
 }
 
@@ -366,8 +354,8 @@ fn calculate_cpu_percent(stats: &Stats) -> f64 {
     let cpu_stats = &stats.cpu_stats;
     let precpu_stats = &stats.precpu_stats;
 
-    let cpu_delta = cpu_stats.cpu_usage.total_usage as f64
-        - precpu_stats.cpu_usage.total_usage as f64;
+    let cpu_delta =
+        cpu_stats.cpu_usage.total_usage as f64 - precpu_stats.cpu_usage.total_usage as f64;
 
     let system_delta = cpu_stats.system_cpu_usage.unwrap_or(0) as f64
         - precpu_stats.system_cpu_usage.unwrap_or(0) as f64;

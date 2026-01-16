@@ -1,13 +1,13 @@
 //! HTTP API handlers
 
 mod health;
-mod workspace;
-mod sandbox;
 mod process;
 mod pty;
+mod sandbox;
+mod workspace;
 
 use axum::{
-    routing::{get, post, put, delete},
+    routing::{delete, get, post, put},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -46,8 +46,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/sandboxes/{id}", delete(sandbox::delete_sandbox))
         // Process routes
         .route("/sandboxes/{id}/process/run", post(process::run_command))
-        .route("/sandboxes/{id}/process/run/stream", get(process::run_command_stream))
-        .route("/sandboxes/{id}/process/{pid}/kill", post(process::kill_process))
+        .route(
+            "/sandboxes/{id}/process/run/stream",
+            get(process::run_command_stream),
+        )
+        .route(
+            "/sandboxes/{id}/process/{pid}/kill",
+            post(process::kill_process),
+        )
         // PTY routes
         .route("/sandboxes/{id}/pty", post(pty::create_pty))
         .route("/sandboxes/{id}/pty/{pty_id}", get(pty::pty_websocket))

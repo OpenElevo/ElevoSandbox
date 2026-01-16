@@ -80,14 +80,22 @@ async fn handle_pty_socket(
             match msg {
                 Message::Text(text) => {
                     // Send text input to PTY
-                    if let Err(e) = state.pty_service.send_input(&sandbox_id, &pty_id, text.as_bytes().to_vec()).await {
+                    if let Err(e) = state
+                        .pty_service
+                        .send_input(&sandbox_id, &pty_id, text.as_bytes().to_vec())
+                        .await
+                    {
                         tracing::error!("Failed to send PTY input: {}", e);
                         break;
                     }
                 }
                 Message::Binary(data) => {
                     // Send binary input to PTY
-                    if let Err(e) = state.pty_service.send_input(&sandbox_id, &pty_id, data.to_vec()).await {
+                    if let Err(e) = state
+                        .pty_service
+                        .send_input(&sandbox_id, &pty_id, data.to_vec())
+                        .await
+                    {
                         tracing::error!("Failed to send PTY input: {}", e);
                         break;
                     }
@@ -107,7 +115,10 @@ pub async fn resize_pty(
     Path((sandbox_id, pty_id)): Path<(String, String)>,
     Json(req): Json<ResizePtyRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    state.pty_service.resize(&sandbox_id, &pty_id, req.cols, req.rows).await?;
+    state
+        .pty_service
+        .resize(&sandbox_id, &pty_id, req.cols, req.rows)
+        .await?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
 

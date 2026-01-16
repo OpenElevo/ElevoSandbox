@@ -77,11 +77,9 @@ pub async fn run_command_stream(
 ) -> Sse<impl Stream<Item = std::result::Result<Event, Infallible>>> {
     // For now, return a simple stream that ends immediately
     // TODO: Implement streaming with run_stream service method
-    let stream = stream::iter(vec![
-        Ok(Event::default()
-            .event("exit")
-            .data(serde_json::to_string(&ProcessEventResponse::Exit { code: 0 }).unwrap())),
-    ]);
+    let stream = stream::iter(vec![Ok(Event::default()
+        .event("exit")
+        .data(serde_json::to_string(&ProcessEventResponse::Exit { code: 0 }).unwrap()))]);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -92,9 +90,14 @@ pub async fn kill_process(
     Path((sandbox_id, pid)): Path<(String, String)>,
     Json(req): Json<KillProcessRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    let pid: u32 = pid.parse().map_err(|_| crate::Error::InvalidParameter("pid must be a number".to_string()))?;
+    let pid: u32 = pid
+        .parse()
+        .map_err(|_| crate::Error::InvalidParameter("pid must be a number".to_string()))?;
     let signal = req.signal.unwrap_or(15);
 
-    state.process_service.kill(&sandbox_id, pid, Some(signal)).await?;
+    state
+        .process_service
+        .kill(&sandbox_id, pid, Some(signal))
+        .await?;
     Ok(Json(serde_json::json!({ "success": true })))
 }
