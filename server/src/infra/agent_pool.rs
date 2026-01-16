@@ -187,6 +187,7 @@ impl AgentConnPool {
     }
 
     /// Run a command on an agent and wait for response
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_command(
         &self,
         sandbox_id: &str,

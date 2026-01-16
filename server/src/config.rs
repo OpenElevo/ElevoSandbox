@@ -250,8 +250,7 @@ impl Config {
     pub fn get_sandbox_workspace_host_path(&self, sandbox_id: &str) -> String {
         let base = self
             .workspace_host_dir
-            .as_ref()
-            .map(|s| s.as_str())
+            .as_deref()
             .unwrap_or(&self.workspace_dir);
         format!("{}/{}", base, sandbox_id)
     }
