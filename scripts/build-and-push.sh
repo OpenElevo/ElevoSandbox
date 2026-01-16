@@ -1,25 +1,24 @@
 #!/bin/bash
-# Build and push Elevo Workspace Docker images to registry
+# Build and push ElevoSandbox Docker images to registry
 # Usage: ./build-and-push.sh [version]
 #
 # Prerequisites:
 #   - Docker installed and running
-#   - Access to docker.easyops.local registry
+#   - Logged in to container registry (run: docker login ghcr.io)
 
 set -e
 
-# Configuration
-REGISTRY="docker.easyops.local"
-NAMESPACE="elevo"
+# Configuration - can be overridden via environment variables
+REGISTRY="${REGISTRY:-ghcr.io/openelevo}"
 VERSION="${1:-latest}"
 CACHE_DIR="${CARGO_CACHE_DIR:-/data/cache}"
 
 # Image names
-SERVER_IMAGE="${REGISTRY}/${NAMESPACE}/workspace-server"
-BASE_IMAGE="${REGISTRY}/${NAMESPACE}/workspace-base"
+SERVER_IMAGE="${REGISTRY}/elevosandbox-server"
+BASE_IMAGE="${REGISTRY}/elevosandbox-base"
 
-# Rust builder image for compilation
-RUST_IMAGE="docker.easyops.local/ci/rust-builder:1.92.0-centos7"
+# Rust builder image for compilation (using official Rust image)
+RUST_IMAGE="${RUST_IMAGE:-rust:1.85}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -52,12 +51,11 @@ cd "$PROJECT_ROOT"
 
 echo ""
 echo "=============================================="
-echo "  Elevo Workspace - Build and Push Images"
+echo "  ElevoSandbox - Build and Push Images"
 echo "=============================================="
 echo ""
-echo "Registry:  ${REGISTRY}"
-echo "Namespace: ${NAMESPACE}"
-echo "Version:   ${VERSION}"
+echo "Registry: ${REGISTRY}"
+echo "Version:  ${VERSION}"
 echo ""
 
 # Check Docker
@@ -109,14 +107,12 @@ rm -f target/release/workspace-server target/release/workspace-agent 2>/dev/null
 cp "${CACHE_DIR}/target/release/workspace-server" target/release/
 cp "${CACHE_DIR}/target/release/workspace-agent" target/release/
 
-# Login to registry
-log_info "Logging in to registry ${REGISTRY}..."
-echo "Charlieschen1" | docker login "${REGISTRY}" -u charlies --password-stdin
-if [ $? -ne 0 ]; then
-    log_error "Failed to login to registry"
-    exit 1
+# Check registry login
+log_info "Checking registry authentication..."
+if ! docker pull "${REGISTRY}/elevosandbox-server:latest" >/dev/null 2>&1&& \
+   ! docker manifest inspect "${REGISTRY}/elevosandbox-server:latest" >/dev/null 2>&1; then
+    log_warn "May not be logged in to registry. If push fails, run: docker login ${REGISTRY%%/*}"
 fi
-log_success "Logged in to registry"
 
 # Build workspace-server
 log_info "Building workspace-server Docker image..."

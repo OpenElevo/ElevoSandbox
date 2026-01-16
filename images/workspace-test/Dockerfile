@@ -1,5 +1,5 @@
 # Simple test image - copies pre-built agent into existing local image
-FROM docker.easyops.local/ci/rust-builder:1.85.0-centos7
+FROM rust:1.85
 
 # Copy pre-built static agent binary (musl)
 COPY target/x86_64-unknown-linux-musl/release/workspace-agent /usr/local/bin/workspace-agent

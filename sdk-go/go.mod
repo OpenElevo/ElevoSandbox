@@ -1,4 +1,4 @@
-module git.easyops.local/elevo/elevo-workspace/sdk-go
+module github.com/OpenElevo/ElevoSandbox/sdk-go
 
 go 1.21
 

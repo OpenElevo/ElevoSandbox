@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 
 BASE_URL = os.environ.get("WORKSPACE_TEST_URL", "http://127.0.0.1:8080")
-BASE_IMAGE = os.environ.get("WORKSPACE_BASE_IMAGE", "docker.easyops.local/ci/rust-builder:1.85.0-centos7")
+BASE_IMAGE = os.environ.get("WORKSPACE_BASE_IMAGE", "rust:1.85")
 API_URL = f"{BASE_URL}/api/v1"
 
 @dataclass

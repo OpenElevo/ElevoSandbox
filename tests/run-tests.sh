@@ -17,7 +17,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # Default configuration
 export WORKSPACE_WORKSPACE_DIR="${WORKSPACE_WORKSPACE_DIR:-/tmp/workspace-sdk-test/workspace}"
 export WORKSPACE_DATABASE_URL="${WORKSPACE_DATABASE_URL:-sqlite:/tmp/workspace-sdk-test/data/test.db?mode=rwc}"
-export WORKSPACE_BASE_IMAGE="${WORKSPACE_BASE_IMAGE:-docker.easyops.local/ci/rust-builder:1.85.0-centos7}"
+export WORKSPACE_BASE_IMAGE="${WORKSPACE_BASE_IMAGE:-rust:1.85}"
 export WORKSPACE_AGENT_TIMEOUT="${WORKSPACE_AGENT_TIMEOUT:-5}"
 export WORKSPACE_TEST_URL="${WORKSPACE_TEST_URL:-http://127.0.0.1:8080}"
 export WORKSPACE_TEST_TIMEOUT="${WORKSPACE_TEST_TIMEOUT:-60}"
