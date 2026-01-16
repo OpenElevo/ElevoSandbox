@@ -237,7 +237,7 @@ impl WorkspaceService {
             let name = entry.file_name().to_string_lossy().to_string();
             let entry_path = Path::new(path).join(&name);
 
-            let modified_at = metadata.modified().ok().map(|t| DateTime::<Utc>::from(t));
+            let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
 
             files.push(FileInfo {
                 name,
@@ -379,7 +379,7 @@ impl WorkspaceService {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let modified_at = metadata.modified().ok().map(|t| DateTime::<Utc>::from(t));
+        let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
 
         Ok(FileInfo {
             name,

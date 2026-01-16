@@ -13,7 +13,7 @@ use crate::infra::agent_pool::{AgentCommandResponse, AgentConnPool};
 use crate::infra::sqlite::SandboxRepository;
 
 /// Options for running a command
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RunCommandOptions {
     /// Command to execute
     pub command: String,
@@ -25,18 +25,6 @@ pub struct RunCommandOptions {
     pub cwd: Option<String>,
     /// Timeout in milliseconds (0 = no timeout)
     pub timeout_ms: u64,
-}
-
-impl Default for RunCommandOptions {
-    fn default() -> Self {
-        Self {
-            command: String::new(),
-            args: Vec::new(),
-            env: HashMap::new(),
-            cwd: None,
-            timeout_ms: 0,
-        }
-    }
 }
 
 /// Process service for executing commands
