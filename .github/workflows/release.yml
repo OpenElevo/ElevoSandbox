@@ -64,6 +64,7 @@ jobs:
       - name: Build binaries
         run: |
           cargo build --release --package workspace-server --package workspace-agent
+          ls -la target/release/workspace-server target/release/workspace-agent
 
       - name: Build and push server image
         run: |
