@@ -74,7 +74,11 @@ impl WorkspaceService {
                     workspace_id, nfs_url
                 );
                 // Update NFS URL in database
-                if let Err(e) = self.repository.update_nfs_url(&workspace_id, &nfs_url).await {
+                if let Err(e) = self
+                    .repository
+                    .update_nfs_url(&workspace_id, &nfs_url)
+                    .await
+                {
                     warn!("Failed to update NFS URL in database: {}", e);
                 }
             }

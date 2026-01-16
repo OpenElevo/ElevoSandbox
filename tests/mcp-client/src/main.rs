@@ -4,13 +4,13 @@
 
 use anyhow::Result;
 use rmcp::{
-    ServiceExt,
     model::CallToolRequestParam,
-    transport::{TokioChildProcess, ConfigureCommandExt},
+    transport::{ConfigureCommandExt, TokioChildProcess},
+    ServiceExt,
 };
 use serde_json::json;
 use tokio::process::Command;
-use tracing::{info, error, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Helper to call a tool and print the result
@@ -67,11 +67,9 @@ async fn main() -> Result<()> {
     info!("📡 Connecting to MCP server: {}", server_path);
 
     // Create the transport using TokioChildProcess with Command
-    let transport = TokioChildProcess::new(
-        Command::new(&server_path).configure(|cmd| {
-            cmd.env("WORKSPACE_MCP_MODE", "stdio");
-        })
-    )?;
+    let transport = TokioChildProcess::new(Command::new(&server_path).configure(|cmd| {
+        cmd.env("WORKSPACE_MCP_MODE", "stdio");
+    }))?;
 
     // Connect to the server using () as a simple client handler
     let client = ().serve(transport).await?;
@@ -88,7 +86,11 @@ async fn main() -> Result<()> {
     let tools = client.list_tools(None).await?;
     info!("Available tools ({}):", tools.tools.len());
     for tool in &tools.tools {
-        info!("  - {} : {}", tool.name, tool.description.as_deref().unwrap_or(""));
+        info!(
+            "  - {} : {}",
+            tool.name,
+            tool.description.as_deref().unwrap_or("")
+        );
     }
     info!("");
 

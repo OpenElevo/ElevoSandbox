@@ -26,13 +26,13 @@
 //!   - Use when AI needs full control over the environment
 
 mod common;
-mod types;
-mod executor;
 mod developer;
+mod executor;
 mod full;
+mod types;
 
-pub use executor::ExecutorMcpHandler;
 pub use developer::DeveloperMcpHandler;
+pub use executor::ExecutorMcpHandler;
 pub use full::FullMcpHandler;
 
 use std::sync::Arc;
@@ -40,8 +40,7 @@ use std::sync::Arc;
 use axum::Router;
 use rmcp::transport::stdio;
 use rmcp::transport::streamable_http_server::{
-    session::local::LocalSessionManager,
-    StreamableHttpServerConfig, StreamableHttpService,
+    session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
 };
 use rmcp::ServiceExt;
 use tracing::info;
@@ -81,7 +80,9 @@ impl McpProfile {
     pub fn description(&self) -> &'static str {
         match self {
             McpProfile::Executor => "Executor (1 tool: process_run)",
-            McpProfile::Developer => "Developer (6 tools: process_run, file_read/write/list/mkdir/remove)",
+            McpProfile::Developer => {
+                "Developer (6 tools: process_run, file_read/write/list/mkdir/remove)"
+            }
             McpProfile::Full => "Full (14 tools: sandbox_*, process_*, file_*)",
         }
     }

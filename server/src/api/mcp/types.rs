@@ -2,9 +2,9 @@
 //!
 //! Shared parameter types for MCP tools across different profiles.
 
-use std::collections::HashMap;
 use rmcp::schemars;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 // ============================================================================
 // Sandbox Tool Parameters
@@ -47,7 +47,9 @@ pub struct SandboxGetParams {
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SandboxListParams {
     /// Filter by sandbox state (optional)
-    #[schemars(description = "Filter by sandbox state: starting, running, stopping, stopped, error")]
+    #[schemars(
+        description = "Filter by sandbox state: starting, running, stopping, stopped, error"
+    )]
     pub state: Option<String>,
 }
 

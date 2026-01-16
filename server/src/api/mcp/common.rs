@@ -2,9 +2,9 @@
 //!
 //! Common functions used by different MCP handlers.
 
-use std::collections::HashMap;
-use crate::AppState;
 use crate::service::process::RunCommandOptions;
+use crate::AppState;
+use std::collections::HashMap;
 
 /// Run a command in a sandbox
 pub async fn run_command(

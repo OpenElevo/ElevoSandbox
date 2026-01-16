@@ -12,12 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .build_transport(false) // Disable transport to avoid connect method conflict
         .out_dir(out_dir)
-        .compile_protos(
-            &[
-                "../proto/workspace/v1/agent.proto",
-            ],
-            &["../proto"],
-        )?;
+        .compile_protos(&["../proto/workspace/v1/agent.proto"], &["../proto"])?;
 
     println!("cargo:rerun-if-changed=../proto");
     Ok(())

@@ -188,9 +188,7 @@ impl Error {
             | Error::NotADirectory(_)
             | Error::DirectoryNotEmpty(_) => StatusCode::BAD_REQUEST,
 
-            Error::SandboxLimitExceeded | Error::PtyLimitExceeded => {
-                StatusCode::TOO_MANY_REQUESTS
-            }
+            Error::SandboxLimitExceeded | Error::PtyLimitExceeded => StatusCode::TOO_MANY_REQUESTS,
 
             Error::ProcessTimeout | Error::AgentConnectionTimeout => StatusCode::GATEWAY_TIMEOUT,
 

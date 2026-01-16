@@ -20,9 +20,8 @@ mod proto {
 
 use proto::agent_service_client::AgentServiceClient;
 use proto::{
-    agent_command_response, agent_message, AgentCommandError, AgentCommandResponse,
+    agent_command_response, agent_message, server_message, AgentCommandError, AgentCommandResponse,
     AgentCommandSuccess, AgentHandshake, AgentHeartbeat, AgentMessage,
-    server_message,
 };
 
 const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -416,14 +415,8 @@ impl ConnectionManager {
         let cwd_clone = cwd.clone();
 
         tokio::spawn(async move {
-            let _ = process::run_command(
-                &cmd,
-                &args_clone,
-                &env_clone,
-                cwd_clone.as_deref(),
-                tx,
-            )
-            .await;
+            let _ =
+                process::run_command(&cmd, &args_clone, &env_clone, cwd_clone.as_deref(), tx).await;
         });
 
         let mut stdout = String::new();

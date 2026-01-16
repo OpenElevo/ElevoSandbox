@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile proto files
     tonic_build::configure()
         .build_server(true)
-        .build_client(false)  // Don't build client for server
+        .build_client(false) // Don't build client for server
         .out_dir(out_dir)
         .compile_protos(
             &[

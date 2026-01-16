@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize, MasterPty};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::{Mutex, RwLock};
 
 /// PTY instance
@@ -74,7 +74,9 @@ impl PtyManager {
     pub async fn resize(&self, id: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
         let ptys = self.ptys.read().await;
 
-        let pty = ptys.get(id).ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
+        let pty = ptys
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
 
         let master = pty.master.lock().await;
         master.resize(PtySize {
@@ -102,7 +104,9 @@ impl PtyManager {
     pub async fn write(&self, id: &str, data: &[u8]) -> anyhow::Result<()> {
         let ptys = self.ptys.read().await;
 
-        let pty = ptys.get(id).ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
+        let pty = ptys
+            .get(id)
+            .ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
 
         let master = pty.master.lock().await;
         use std::io::Write;

@@ -7,9 +7,9 @@ use uuid::Uuid;
 
 use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{PtyInfo, PtyOptions};
+use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::sqlite::SandboxRepository;
-use crate::error::{Error, Result};
 
 /// PTY service for managing interactive terminals
 pub struct PtyService {
@@ -20,7 +20,10 @@ pub struct PtyService {
 impl PtyService {
     /// Create a new PTY service
     pub fn new(agent_pool: Arc<AgentConnPool>, repository: Arc<SandboxRepository>) -> Self {
-        Self { agent_pool, repository }
+        Self {
+            agent_pool,
+            repository,
+        }
     }
 
     /// Create a new PTY
@@ -122,6 +125,8 @@ impl PtyService {
             return Err(Error::AgentNotConnected(sandbox_id.to_string()));
         }
 
-        self.agent_pool.send_pty_input(sandbox_id, pty_id, data).await
+        self.agent_pool
+            .send_pty_input(sandbox_id, pty_id, data)
+            .await
     }
 }

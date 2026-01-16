@@ -27,7 +27,10 @@ async fn test_health_check() {
         response.status()
     );
 
-    let health: HealthResponse = response.json().await.expect("Failed to parse health response");
+    let health: HealthResponse = response
+        .json()
+        .await
+        .expect("Failed to parse health response");
     assert_eq!(health.status, "healthy");
 }
 
@@ -79,7 +82,10 @@ async fn test_create_sandbox() {
         response.status()
     );
 
-    let sandbox: SandboxResponse = response.json().await.expect("Failed to parse sandbox response");
+    let sandbox: SandboxResponse = response
+        .json()
+        .await
+        .expect("Failed to parse sandbox response");
 
     assert!(!sandbox.id.is_empty());
     assert_eq!(sandbox.name, Some("test-sandbox-create".to_string()));

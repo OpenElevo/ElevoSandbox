@@ -8,9 +8,9 @@ use tracing::info;
 
 use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{CommandResult, ProcessEvent};
+use crate::error::{Error, Result};
 use crate::infra::agent_pool::{AgentCommandResponse, AgentConnPool};
 use crate::infra::sqlite::SandboxRepository;
-use crate::error::{Error, Result};
 
 /// Options for running a command
 #[derive(Debug, Clone)]
@@ -48,7 +48,10 @@ pub struct ProcessService {
 impl ProcessService {
     /// Create a new process service
     pub fn new(agent_pool: Arc<AgentConnPool>, repository: Arc<SandboxRepository>) -> Self {
-        Self { agent_pool, repository }
+        Self {
+            agent_pool,
+            repository,
+        }
     }
 
     /// Run a command and wait for completion
@@ -152,7 +155,10 @@ impl ProcessService {
         }
 
         let sig = signal.unwrap_or(15); // SIGTERM
-        info!("Killing process {} in sandbox {} with signal {}", pid, sandbox_id, sig);
+        info!(
+            "Killing process {} in sandbox {} with signal {}",
+            pid, sandbox_id, sig
+        );
 
         self.agent_pool.kill_process(sandbox_id, pid, sig).await
     }
@@ -167,7 +173,9 @@ impl ProcessService {
             })
         } else {
             Err(Error::ProcessExecutionFailed(
-                response.error_message.unwrap_or_else(|| "Unknown error".to_string()),
+                response
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string()),
             ))
         }
     }
@@ -194,7 +202,9 @@ impl ProcessService {
             });
         } else {
             events.push(ProcessEvent::Error {
-                message: response.error_message.unwrap_or_else(|| "Unknown error".to_string()),
+                message: response
+                    .error_message
+                    .unwrap_or_else(|| "Unknown error".to_string()),
             });
         }
 

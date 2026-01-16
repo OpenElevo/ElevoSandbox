@@ -193,7 +193,12 @@ impl SandboxRepository {
     }
 
     /// Update sandbox state
-    pub async fn update_state(&self, id: &str, state: SandboxState, error_message: Option<&str>) -> Result<()> {
+    pub async fn update_state(
+        &self,
+        id: &str,
+        state: SandboxState,
+        error_message: Option<&str>,
+    ) -> Result<()> {
         let now = Utc::now();
 
         let result = sqlx::query(
@@ -419,8 +424,13 @@ mod tests {
             timeout: None,
         };
 
-        repo.create(params1).await.expect("Failed to create sandbox 1");
-        let sandbox2 = repo.create(params2).await.expect("Failed to create sandbox 2");
+        repo.create(params1)
+            .await
+            .expect("Failed to create sandbox 1");
+        let sandbox2 = repo
+            .create(params2)
+            .await
+            .expect("Failed to create sandbox 2");
 
         // Update one to running
         repo.update_state(&sandbox2.id, SandboxState::Running, None)
@@ -432,10 +442,16 @@ mod tests {
         assert_eq!(all.len(), 2);
 
         // List by state
-        let starting = repo.list(Some(SandboxState::Starting)).await.expect("Failed to list");
+        let starting = repo
+            .list(Some(SandboxState::Starting))
+            .await
+            .expect("Failed to list");
         assert_eq!(starting.len(), 1);
 
-        let running = repo.list(Some(SandboxState::Running)).await.expect("Failed to list");
+        let running = repo
+            .list(Some(SandboxState::Running))
+            .await
+            .expect("Failed to list");
         assert_eq!(running.len(), 1);
     }
 
@@ -456,7 +472,9 @@ mod tests {
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
 
-        repo.delete(&sandbox.id).await.expect("Failed to delete sandbox");
+        repo.delete(&sandbox.id)
+            .await
+            .expect("Failed to delete sandbox");
 
         let result = repo.get(&sandbox.id).await;
         assert!(matches!(result, Err(Error::SandboxNotFound(_))));

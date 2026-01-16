@@ -7,16 +7,15 @@
 //! Tools: process_run (1 tool)
 
 use rmcp::{
-    ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{ServerCapabilities, ServerInfo},
-    tool, tool_handler, tool_router,
+    tool, tool_handler, tool_router, ServerHandler,
 };
 use tracing::{error, info};
 
-use crate::AppState;
+use super::common::{format_command_result, run_command};
 use super::types::ProcessRunParams;
-use super::common::{run_command, format_command_result};
+use crate::AppState;
 
 /// Executor MCP Handler - minimal tool set for command execution only
 #[derive(Clone)]
@@ -36,7 +35,9 @@ impl ExecutorMcpHandler {
 
 #[tool_router]
 impl ExecutorMcpHandler {
-    #[tool(description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr.")]
+    #[tool(
+        description = "Run a command in a sandbox and wait for completion. Returns exit code, stdout, and stderr."
+    )]
     async fn process_run(&self, Parameters(params): Parameters<ProcessRunParams>) -> String {
         info!(
             "MCP[executor]: process_run in {} with command: {}",

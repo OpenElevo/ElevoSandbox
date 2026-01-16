@@ -173,7 +173,10 @@ pub async fn read_file(
     Path(workspace_id): Path<String>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<ReadFileResponse>> {
-    let content = state.workspace_service.read_file_string(&workspace_id, &query.path).await?;
+    let content = state
+        .workspace_service
+        .read_file_string(&workspace_id, &query.path)
+        .await?;
     Ok(Json(ReadFileResponse { content }))
 }
 
@@ -184,8 +187,13 @@ pub async fn write_file(
     Query(query): Query<PathQuery>,
     Json(req): Json<WriteFileRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    state.workspace_service.write_file(&workspace_id, &query.path, req.content.as_bytes()).await?;
-    Ok(Json(serde_json::json!({ "success": true, "path": query.path })))
+    state
+        .workspace_service
+        .write_file(&workspace_id, &query.path, req.content.as_bytes())
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "success": true, "path": query.path }),
+    ))
 }
 
 /// List directory contents in workspace
@@ -194,7 +202,10 @@ pub async fn list_files(
     Path(workspace_id): Path<String>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<ListFilesResponse>> {
-    let files = state.workspace_service.list_files(&workspace_id, &query.path).await?;
+    let files = state
+        .workspace_service
+        .list_files(&workspace_id, &query.path)
+        .await?;
 
     let responses: Vec<FileInfoResponse> = files
         .into_iter()
@@ -216,8 +227,13 @@ pub async fn mkdir(
     Path(workspace_id): Path<String>,
     Json(req): Json<MkdirRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    state.workspace_service.mkdir(&workspace_id, &req.path).await?;
-    Ok(Json(serde_json::json!({ "success": true, "path": req.path })))
+    state
+        .workspace_service
+        .mkdir(&workspace_id, &req.path)
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "success": true, "path": req.path }),
+    ))
 }
 
 /// Delete file or directory in workspace
@@ -227,8 +243,13 @@ pub async fn delete_file(
     Query(query): Query<DeleteQuery>,
 ) -> Result<Json<serde_json::Value>> {
     let recursive = query.recursive.map(|r| r == "true").unwrap_or(false);
-    state.workspace_service.delete_file(&workspace_id, &query.path, recursive).await?;
-    Ok(Json(serde_json::json!({ "success": true, "path": query.path })))
+    state
+        .workspace_service
+        .delete_file(&workspace_id, &query.path, recursive)
+        .await?;
+    Ok(Json(
+        serde_json::json!({ "success": true, "path": query.path }),
+    ))
 }
 
 /// Move/rename file or directory in workspace
@@ -237,7 +258,10 @@ pub async fn move_file(
     Path(workspace_id): Path<String>,
     Json(req): Json<MoveRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    state.workspace_service.move_file(&workspace_id, &req.source, &req.destination).await?;
+    state
+        .workspace_service
+        .move_file(&workspace_id, &req.source, &req.destination)
+        .await?;
     Ok(Json(serde_json::json!({
         "success": true,
         "source": req.source,
@@ -251,7 +275,10 @@ pub async fn copy_file(
     Path(workspace_id): Path<String>,
     Json(req): Json<MoveRequest>,
 ) -> Result<Json<serde_json::Value>> {
-    state.workspace_service.copy_file(&workspace_id, &req.source, &req.destination).await?;
+    state
+        .workspace_service
+        .copy_file(&workspace_id, &req.source, &req.destination)
+        .await?;
     Ok(Json(serde_json::json!({
         "success": true,
         "source": req.source,
@@ -265,7 +292,10 @@ pub async fn get_file_info(
     Path(workspace_id): Path<String>,
     Query(query): Query<PathQuery>,
 ) -> Result<Json<FileInfoResponse>> {
-    let info = state.workspace_service.get_file_info(&workspace_id, &query.path).await?;
+    let info = state
+        .workspace_service
+        .get_file_info(&workspace_id, &query.path)
+        .await?;
 
     Ok(Json(FileInfoResponse {
         name: info.name,

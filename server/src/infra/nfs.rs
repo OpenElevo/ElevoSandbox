@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 use nfsserve::nfs::{
-    fattr3, fileid3, filename3, ftype3, nfsstat3, nfstime3, sattr3, set_size3, nfspath3,
+    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_size3,
 };
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
@@ -175,7 +175,9 @@ impl WorkspaceNfs {
             return id;
         }
 
-        let id = self.next_fileid.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let id = self
+            .next_fileid
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         path_to_id.insert(path.to_path_buf(), id);
 
         let mut id_to_path = self.id_to_path.write().unwrap();
@@ -208,15 +210,31 @@ impl WorkspaceNfs {
         let size = metadata.len();
         let used = metadata.blocks() * 512;
 
-        let atime = metadata.accessed().ok()
+        let atime = metadata
+            .accessed()
+            .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| nfstime3 { seconds: d.as_secs() as u32, nseconds: d.subsec_nanos() })
-            .unwrap_or(nfstime3 { seconds: 0, nseconds: 0 });
+            .map(|d| nfstime3 {
+                seconds: d.as_secs() as u32,
+                nseconds: d.subsec_nanos(),
+            })
+            .unwrap_or(nfstime3 {
+                seconds: 0,
+                nseconds: 0,
+            });
 
-        let mtime = metadata.modified().ok()
+        let mtime = metadata
+            .modified()
+            .ok()
             .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| nfstime3 { seconds: d.as_secs() as u32, nseconds: d.subsec_nanos() })
-            .unwrap_or(nfstime3 { seconds: 0, nseconds: 0 });
+            .map(|d| nfstime3 {
+                seconds: d.as_secs() as u32,
+                nseconds: d.subsec_nanos(),
+            })
+            .unwrap_or(nfstime3 {
+                seconds: 0,
+                nseconds: 0,
+            });
 
         let ctime = nfstime3 {
             seconds: metadata.ctime() as u32,
@@ -231,7 +249,10 @@ impl WorkspaceNfs {
             gid,
             size,
             used,
-            rdev: nfsserve::nfs::specdata3 { specdata1: 0, specdata2: 0 },
+            rdev: nfsserve::nfs::specdata3 {
+                specdata1: 0,
+                specdata2: 0,
+            },
             fsid: 0,
             fileid,
             atime,
@@ -259,7 +280,8 @@ impl NFSFileSystem for WorkspaceNfs {
         let target_path = if dirid == 1 {
             // Root directory - sandbox_id lookup
             let exports = self.exports.read().await;
-            exports.get(filename_str)
+            exports
+                .get(filename_str)
                 .cloned()
                 .ok_or(nfsstat3::NFS3ERR_NOENT)?
         } else {
@@ -303,11 +325,17 @@ impl NFSFileSystem for WorkspaceNfs {
         Ok(self.metadata_to_fattr(&metadata, id))
     }
 
-    async fn read(&self, id: fileid3, offset: u64, count: u32) -> Result<(Vec<u8>, bool), nfsstat3> {
+    async fn read(
+        &self,
+        id: fileid3,
+        offset: u64,
+        count: u32,
+    ) -> Result<(Vec<u8>, bool), nfsstat3> {
         let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
 
         let mut file = std::fs::File::open(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        file.seek(SeekFrom::Start(offset)).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
 
         let mut buffer = vec![0u8; count as usize];
         let bytes_read = file.read(&mut buffer).map_err(|_| nfsstat3::NFS3ERR_IO)?;
@@ -327,7 +355,8 @@ impl NFSFileSystem for WorkspaceNfs {
             .open(&path)
             .map_err(|_| nfsstat3::NFS3ERR_IO)?;
 
-        file.seek(SeekFrom::Start(offset)).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        file.seek(SeekFrom::Start(offset))
+            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
         file.write_all(data).map_err(|_| nfsstat3::NFS3ERR_IO)?;
 
         let metadata = file.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
@@ -352,7 +381,11 @@ impl NFSFileSystem for WorkspaceNfs {
         Ok((id, self.metadata_to_fattr(&metadata, id)))
     }
 
-    async fn create_exclusive(&self, dirid: fileid3, filename: &filename3) -> Result<fileid3, nfsstat3> {
+    async fn create_exclusive(
+        &self,
+        dirid: fileid3,
+        filename: &filename3,
+    ) -> Result<fileid3, nfsstat3> {
         let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
         let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
         let file_path = dir_path.join(filename_str);
@@ -387,10 +420,15 @@ impl NFSFileSystem for WorkspaceNfs {
         to_dirid: fileid3,
         to_filename: &filename3,
     ) -> Result<(), nfsstat3> {
-        let from_dir = self.get_path_by_id(from_dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let to_dir = self.get_path_by_id(to_dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let from_dir = self
+            .get_path_by_id(from_dirid)
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let to_dir = self
+            .get_path_by_id(to_dirid)
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let from_name = std::str::from_utf8(&from_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let from_name =
+            std::str::from_utf8(&from_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
         let to_name = std::str::from_utf8(&to_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let from_path = from_dir.join(from_name);
@@ -400,7 +438,11 @@ impl NFSFileSystem for WorkspaceNfs {
         Ok(())
     }
 
-    async fn mkdir(&self, dirid: fileid3, dirname: &filename3) -> Result<(fileid3, fattr3), nfsstat3> {
+    async fn mkdir(
+        &self,
+        dirid: fileid3,
+        dirname: &filename3,
+    ) -> Result<(fileid3, fattr3), nfsstat3> {
         let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
         let dirname_str = std::str::from_utf8(&dirname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
         let new_dir_path = dir_path.join(dirname_str);
@@ -437,12 +479,24 @@ impl NFSFileSystem for WorkspaceNfs {
                             gid: 0,
                             size: 4096,
                             used: 4096,
-                            rdev: nfsserve::nfs::specdata3 { specdata1: 0, specdata2: 0 },
+                            rdev: nfsserve::nfs::specdata3 {
+                                specdata1: 0,
+                                specdata2: 0,
+                            },
                             fsid: 0,
                             fileid: id,
-                            atime: nfstime3 { seconds: 0, nseconds: 0 },
-                            mtime: nfstime3 { seconds: 0, nseconds: 0 },
-                            ctime: nfstime3 { seconds: 0, nseconds: 0 },
+                            atime: nfstime3 {
+                                seconds: 0,
+                                nseconds: 0,
+                            },
+                            mtime: nfstime3 {
+                                seconds: 0,
+                                nseconds: 0,
+                            },
+                            ctime: nfstime3 {
+                                seconds: 0,
+                                nseconds: 0,
+                            },
                         },
                     };
                     entries.push(DirEntry {
@@ -456,10 +510,7 @@ impl NFSFileSystem for WorkspaceNfs {
                 }
             }
 
-            return Ok(ReadDirResult {
-                entries,
-                end: true,
-            });
+            return Ok(ReadDirResult { entries, end: true });
         }
 
         let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
@@ -486,10 +537,7 @@ impl NFSFileSystem for WorkspaceNfs {
             }
         }
 
-        Ok(ReadDirResult {
-            entries,
-            end: true,
-        })
+        Ok(ReadDirResult { entries, end: true })
     }
 
     async fn symlink(
