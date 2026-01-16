@@ -1,11 +1,22 @@
-# Elevo Workspace
+# ElevoSandbox
 
-Elevo Workspace 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
+[![CI](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+ElevoSandbox 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
+
+## 特性
+
+- **容器隔离**: 基于 Docker 的安全沙盒环境
+- **多 SDK 支持**: Go、Python、TypeScript SDK
+- **MCP 协议**: 原生支持 Model Context Protocol
+- **NFS 共享**: 工作空间文件可通过 NFS 挂载到本地
+- **PTY 终端**: WebSocket 实时交互终端
 
 ## 项目结构
 
 ```
-elevo-workspace/
+ElevoSandbox/
 ├── server/                 # Rust 服务端 (HTTP API + MCP)
 ├── agent/                  # Rust Agent (运行在容器内)
 ├── sdk-go/                 # Go SDK
@@ -85,7 +96,7 @@ WORKSPACE_DOCKER_NETWORK=workspace-network
 
 # NFS 配置
 WORKSPACE_NFS_PORT=2049           # NFS 服务端口
-WORKSPACE_NFS_HOST=172.30.0.188   # NFS 外部访问地址 (用于返回给客户端的 nfs_url)
+WORKSPACE_NFS_HOST=your-server-ip # NFS 外部访问地址 (用于返回给客户端的 nfs_url)
 
 # MCP 配置
 WORKSPACE_MCP_MODE=http           # disabled / stdio / http
@@ -101,32 +112,35 @@ WORKSPACE_MCP_PROFILE=developer   # executor / developer / full
 
 ```bash
 # 设置 NFS 外部访问地址
-export WORKSPACE_NFS_HOST=172.30.0.188
+export WORKSPACE_NFS_HOST=your-server-ip
 export WORKSPACE_NFS_PORT=2049
 ```
 
 **客户端挂载**
 
 ```bash
+# 设置服务器地址
+SERVER_IP=your-server-ip
+
 # 创建 workspace
-WORKSPACE_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/workspaces \
+WORKSPACE_ID=$(curl -s -X POST http://${SERVER_IP}:8080/api/v1/workspaces \
   -H "Content-Type: application/json" \
   -d '{"name": "my-workspace"}' | jq -r '.id')
 
 # 挂载 NFS (需要 nfs-common 包)
 sudo mkdir -p /mnt/workspace
 sudo mount -t nfs -o nfsvers=3,tcp,nolock,port=2049,mountport=2049 \
-  172.30.0.188:/${WORKSPACE_ID} /mnt/workspace
+  ${SERVER_IP}:/${WORKSPACE_ID} /mnt/workspace
 
 # 现在可以直接读写 /mnt/workspace，与所有绑定该 workspace 的 sandbox 共享
 echo "Hello" > /mnt/workspace/test.txt
 
 # 创建 sandbox 并验证
-SANDBOX_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/sandboxes \
+SANDBOX_ID=$(curl -s -X POST http://${SERVER_IP}:8080/api/v1/sandboxes \
   -H "Content-Type: application/json" \
   -d "{\"workspace_id\": \"$WORKSPACE_ID\"}" | jq -r '.id')
 
-curl -s -X POST "http://172.30.0.188:8081/api/v1/sandboxes/${SANDBOX_ID}/process/run" \
+curl -s -X POST "http://${SERVER_IP}:8080/api/v1/sandboxes/${SANDBOX_ID}/process/run" \
   -H "Content-Type: application/json" \
   -d '{"command": "cat", "args": ["/workspace/test.txt"]}'
 
@@ -272,7 +286,7 @@ Stdio 模式用于本地 CLI 集成，如 Claude Desktop。
 ### Go SDK
 
 ```bash
-go get git.easyops.local/elevo/elevo-workspace/sdk-go
+go get github.com/OpenElevo/ElevoSandbox/sdk-go
 ```
 
 ```go
@@ -283,7 +297,7 @@ import (
     "fmt"
     "log"
 
-    workspace "git.easyops.local/elevo/elevo-workspace/sdk-go"
+    workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
 )
 
 func main() {
@@ -471,4 +485,4 @@ cd agent && cargo build --release
 
 ## 许可证
 
-Apache 2.0
+MIT

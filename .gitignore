@@ -21,12 +21,14 @@ npm-debug.log*
 *.swp
 *.swo
 
-# Data
+# Data directories
 /data/
+server/data/
 
 # Environment
 .env
 .env.local
+.env.*.local
 
 # OS
 .DS_Store
@@ -37,3 +39,11 @@ Thumbs.db
 coverage/
 .coverage
 htmlcov/
+
+# Rust
+Cargo.lock
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

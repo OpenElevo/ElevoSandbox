@@ -1,9 +1,9 @@
 # Workspace base image with agent
 # Uses pre-built binary (compiled with docker_complie.sh for glibc compatibility)
-FROM docker.easyops.local/library/base:ubuntu-4-generic
+FROM ubuntu:24.04
 
 LABEL maintainer="Elevo Team"
-LABEL org.opencontainers.image.source="https://github.com/elevo/elevo-workspace"
+LABEL org.opencontainers.image.source="https://github.com/OpenElevo/ElevoSandbox"
 LABEL org.opencontainers.image.description="Elevo Workspace Base Image with Agent"
 
 # Install development tools commonly needed in workspaces

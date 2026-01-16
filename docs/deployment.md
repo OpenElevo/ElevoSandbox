@@ -31,8 +31,8 @@ Elevo Workspace 是一个统一的 Sandbox/Workspace 服务，为 AI Agent 开�
 
 | 镜像 | 说明 |
 |------|------|
-| `docker.easyops.local/elevo/workspace-server:latest` | 服务端镜像 |
-| `docker.easyops.local/elevo/workspace-base:latest` | Sandbox 基础镜像 |
+| `ghcr.io/openelevo/elevosandbox-server:latest` | 服务端镜像 |
+| `ghcr.io/openelevo/elevosandbox-base:latest` | Sandbox 基础镜像 |
 
 ## 构建镜像
 
@@ -41,14 +41,14 @@ Elevo Workspace 是一个统一的 Sandbox/Workspace 服务，为 AI Agent 开�
 ### 前置要求
 
 - Docker（用于编译和构建镜像）
-- 访问 `docker.easyops.local` 镜像仓库
+- 访问容器镜像仓库（如 ghcr.io）
 
 ### 构建步骤
 
 ```bash
 # 克隆仓库
-git clone https://github.com/elevo/elevo-workspace.git
-cd elevo-workspace
+git clone https://github.com/OpenElevo/ElevoSandbox.git
+cd ElevoSandbox
 
 # 使用构建脚本（推荐）
 # 脚本会自动：
@@ -61,7 +61,7 @@ cd elevo-workspace
 ./scripts/build-and-push.sh v1.0.0
 ```
 
-**注意**：构建脚本使用 `docker.easyops.local/ci/rust-builder:1.92.0-centos7` 镜像进行编译，
+**注意**：构建脚本使用 `rust:1.85` 官方镜像进行编译，
 确保生成的二进制文件与生产环境的 glibc 版本兼容。
 
 ## 快速部署
@@ -74,8 +74,8 @@ sudo mkdir -p /var/lib/elevo-workspace/workspaces
 sudo chmod 755 /var/lib/elevo-workspace
 
 # 拉取镜像
-docker pull docker.easyops.local/elevo/workspace-server:latest
-docker pull docker.easyops.local/elevo/workspace-base:latest
+docker pull ghcr.io/openelevo/elevosandbox-server:latest
+docker pull ghcr.io/openelevo/elevosandbox-base:latest
 ```
 
 ### 2. 创建 docker-compose.yml
@@ -85,7 +85,7 @@ version: '3.8'
 
 services:
   workspace-server:
-    image: docker.easyops.local/elevo/workspace-server:latest
+    image: ghcr.io/openelevo/elevosandbox-server:latest
     container_name: elevo-workspace-server
     restart: unless-stopped
     ports:
@@ -97,7 +97,7 @@ services:
       - WORKSPACE_DOCKER_SOCKET=/var/run/docker.sock
       - WORKSPACE_WORKSPACE_DIR=/data/workspaces
       - WORKSPACE_WORKSPACE_HOST_DIR=/var/lib/elevo-workspace/workspaces
-      - WORKSPACE_BASE_IMAGE=docker.easyops.local/elevo/workspace-base:latest
+      - WORKSPACE_BASE_IMAGE=ghcr.io/openelevo/elevosandbox-base:latest
       - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:9090
       - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
       - WORKSPACE_AGENT_TIMEOUT=60
@@ -142,7 +142,7 @@ docker logs -f elevo-workspace-server
 curl -X POST http://localhost:8080/api/v1/sandboxes \
   -H "Content-Type: application/json" \
   -d '{
-    "template": "docker.easyops.local/elevo/workspace-base:latest",
+    "template": "ghcr.io/openelevo/elevosandbox-base:latest",
     "name": "my-sandbox"
   }'
 ```
@@ -232,8 +232,8 @@ docker volume rm elevo-workspace-data
 
 ```bash
 # 拉取新镜像
-docker pull docker.easyops.local/elevo/workspace-server:latest
-docker pull docker.easyops.local/elevo/workspace-base:latest
+docker pull ghcr.io/openelevo/elevosandbox-server:latest
+docker pull ghcr.io/openelevo/elevosandbox-base:latest
 
 # 重启服务
 docker-compose down

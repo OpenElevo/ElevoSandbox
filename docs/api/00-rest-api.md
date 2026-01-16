@@ -928,8 +928,8 @@ info:
     name: API Support
     email: api-support@example.com
   license:
-    name: Apache 2.0
-    url: https://www.apache.org/licenses/LICENSE-2.0
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 
 servers:
   - url: https://api.example.com/api/v1

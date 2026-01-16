@@ -27,8 +27,8 @@ GRPC_PORT=9090          # gRPC 端口 (Agent 连接)
 WORKSPACE_HOST_DIR=/var/lib/elevo-workspace/workspaces
 
 # 镜像
-SERVER_IMAGE=docker.easyops.local/elevo/workspace-server:latest
-BASE_IMAGE=docker.easyops.local/elevo/workspace-base:latest
+SERVER_IMAGE=ghcr.io/openelevo/elevosandbox-server:latest
+BASE_IMAGE=ghcr.io/openelevo/elevosandbox-base:latest
 
 # MCP
 MCP_MODE=http           # disabled 或 http

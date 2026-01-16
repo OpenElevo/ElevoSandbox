@@ -1,7 +1,7 @@
 import { WorkspaceClient } from 'workspace-sdk';
 
 const BASE_URL = process.env.WORKSPACE_TEST_URL || 'http://127.0.0.1:8080';
-const BASE_IMAGE = process.env.WORKSPACE_BASE_IMAGE || 'docker.easyops.local/ci/rust-builder:1.85.0-centos7';
+const BASE_IMAGE = process.env.WORKSPACE_BASE_IMAGE || 'rust:1.85';
 
 interface TestResult {
   name: string;

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package workspace.v1;
 
-option go_package = "github.com/elevo/workspace-sdk/proto/workspace/v1";
+option go_package = "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1";
 
 // Agent service for bidirectional communication between server and sandbox agents
 service AgentService {

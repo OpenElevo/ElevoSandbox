@@ -6,8 +6,8 @@ set -e
 
 # Configuration
 CONTAINER_NAME="elevo-workspace-server"
-SERVER_IMAGE="docker.easyops.local/elevo/workspace-server:latest"
-BASE_IMAGE="docker.easyops.local/elevo/workspace-base:latest"
+SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/openelevo/elevosandbox-server:latest}"
+BASE_IMAGE="${BASE_IMAGE:-ghcr.io/openelevo/elevosandbox-base:latest}"
 WORKSPACE_HOST_DIR="${WORKSPACE_HOST_DIR:-/var/lib/elevo-workspace/workspaces}"
 HTTP_PORT="${HTTP_PORT:-8080}"
 GRPC_PORT="${GRPC_PORT:-9090}"

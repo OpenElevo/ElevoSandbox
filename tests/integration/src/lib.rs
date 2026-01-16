@@ -61,7 +61,7 @@ impl Default for CreateSandboxRequest {
         Self {
             template: Some(
                 std::env::var("WORKSPACE_BASE_IMAGE")
-                    .unwrap_or_else(|_| "docker.easyops.local/ci/rust-builder:1.85.0-centos7".to_string()),
+                    .unwrap_or_else(|_| "rust:1.85".to_string()),
             ),
             name: None,
             env: None,

@@ -5,7 +5,7 @@ version: '3.8'
 
 services:
   workspace-server:
-    image: docker.easyops.local/elevo/workspace-server:latest
+    image: ghcr.io/openelevo/elevosandbox-server:latest
     container_name: elevo-workspace-server
     restart: unless-stopped
     ports:
@@ -32,7 +32,7 @@ services:
       - WORKSPACE_NFS_PORT=2049
 
       # Base image for sandbox containers
-      - WORKSPACE_BASE_IMAGE=docker.easyops.local/elevo/workspace-base:latest
+      - WORKSPACE_BASE_IMAGE=ghcr.io/openelevo/elevosandbox-base:latest
 
       # Agent configuration
       - WORKSPACE_AGENT_TIMEOUT=60
