@@ -12,6 +12,10 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SandboxCreateParams {
+    /// ID of the workspace to bind to (required)
+    #[schemars(description = "ID of the workspace to bind to")]
+    pub workspace_id: String,
+
     /// Docker template image to use (default: workspace-base:latest)
     #[schemars(description = "Docker template image to use")]
     pub template: Option<String>,

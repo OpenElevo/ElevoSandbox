@@ -12,9 +12,28 @@ FileType = Literal["file", "directory", "symlink"]
 
 
 @dataclass
+class Workspace:
+    """Workspace resource"""
+    id: str
+    created_at: str
+    updated_at: str
+    name: Optional[str] = None
+    nfs_url: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
+
+
+@dataclass
+class CreateWorkspaceParams:
+    """Parameters for creating a workspace"""
+    name: Optional[str] = None
+    metadata: Optional[Dict[str, str]] = None
+
+
+@dataclass
 class Sandbox:
     """Sandbox resource"""
     id: str
+    workspace_id: str
     template: str
     state: SandboxState
     created_at: str
@@ -22,7 +41,6 @@ class Sandbox:
     name: Optional[str] = None
     env: Optional[Dict[str, str]] = None
     metadata: Optional[Dict[str, str]] = None
-    nfs_url: Optional[str] = None
     timeout: Optional[int] = None
     error_message: Optional[str] = None
 
@@ -30,6 +48,7 @@ class Sandbox:
 @dataclass
 class CreateSandboxParams:
     """Parameters for creating a sandbox"""
+    workspace_id: str
     template: Optional[str] = None
     name: Optional[str] = None
     env: Optional[Dict[str, str]] = None

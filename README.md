@@ -23,15 +23,41 @@ elevo-workspace/
 
 | 服务 | 描述 | 状态 |
 |-----|------|------|
-| **Sandbox** | 沙盒生命周期管理 (创建/删除/列表) | ✅ 已实现 |
-| **FileSystem** | 文件系统操作 (读/写/列表/创建目录/删除) | ✅ 已实现 |
+| **Workspace** | 工作空间管理 (持久存储，1:N 与 Sandbox 关系) | ✅ 已实现 |
+| **Sandbox** | 沙盒生命周期管理 (创建/删除/列表，绑定 Workspace) | ✅ 已实现 |
+| **FileSystem** | 文件系统操作 (通过 Workspace API 读/写/列表/创建目录/删除) | ✅ 已实现 |
 | **Process** | 进程执行 (同步/流式输出) | ✅ 已实现 |
 | **PTY** | 伪终端交互 (WebSocket) | ✅ 已实现 |
 | **MCP** | Model Context Protocol 支持 | ✅ 已实现 |
-| **NFS** | 网络文件系统共享 | ✅ 已实现 |
+| **NFS** | 网络文件系统共享 (Workspace 级别) | ✅ 已实现 |
 | Git | Git 版本控制 | ⏳ 规划中 |
 | LSP | 语言服务协议 | ⏳ 规划中 |
 | Snapshot | 快照管理 | ⏳ 规划中 |
+
+## 核心概念
+
+### Workspace 与 Sandbox 的关系
+
+- **Workspace**：持久的工作目录，独立管理生命周期，NFS 挂载归属于此
+- **Sandbox**：临时执行环境，创建时必须绑定一个 Workspace
+- **关系**：1:N（一个 Workspace 可被多个 Sandbox 同时使用）
+
+```
+┌─────────────────────────────────────────────────┐
+│                   Workspace                       │
+│  ┌─────────────────────────────────────────────┐ │
+│  │  /workspace (持久存储目录)                    │ │
+│  │  - 文件操作通过 Workspace API                 │ │
+│  │  - NFS 挂载到本地                            │ │
+│  └─────────────────────────────────────────────┘ │
+│           ▲              ▲              ▲        │
+│           │              │              │        │
+│    ┌──────┴──┐    ┌──────┴──┐    ┌──────┴──┐    │
+│    │ Sandbox │    │ Sandbox │    │ Sandbox │    │
+│    │   #1    │    │   #2    │    │   #3    │    │
+│    └─────────┘    └─────────┘    └─────────┘    │
+└─────────────────────────────────────────────────┘
+```
 
 ## 快速开始
 
@@ -69,7 +95,7 @@ WORKSPACE_MCP_PROFILE=developer   # executor / developer / full
 
 ### NFS 文件共享
 
-每个 Sandbox 的 `/workspace` 目录可以通过 NFS 挂载到本地，实现文件双向同步。
+每个 Workspace 的 `/workspace` 目录可以通过 NFS 挂载到本地，实现文件双向同步。
 
 **服务端配置**
 
@@ -82,20 +108,24 @@ export WORKSPACE_NFS_PORT=2049
 **客户端挂载**
 
 ```bash
-# 创建 sandbox
-SANDBOX_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/sandboxes \
+# 创建 workspace
+WORKSPACE_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/workspaces \
   -H "Content-Type: application/json" \
-  -d '{"name": "my-sandbox"}' | jq -r '.id')
+  -d '{"name": "my-workspace"}' | jq -r '.id')
 
 # 挂载 NFS (需要 nfs-common 包)
 sudo mkdir -p /mnt/workspace
 sudo mount -t nfs -o nfsvers=3,tcp,nolock,port=2049,mountport=2049 \
-  172.30.0.188:/${SANDBOX_ID} /mnt/workspace
+  172.30.0.188:/${WORKSPACE_ID} /mnt/workspace
 
-# 现在可以直接读写 /mnt/workspace，与 sandbox 内的 /workspace 同步
+# 现在可以直接读写 /mnt/workspace，与所有绑定该 workspace 的 sandbox 共享
 echo "Hello" > /mnt/workspace/test.txt
 
-# 在 sandbox 中验证
+# 创建 sandbox 并验证
+SANDBOX_ID=$(curl -s -X POST http://172.30.0.188:8081/api/v1/sandboxes \
+  -H "Content-Type: application/json" \
+  -d "{\"workspace_id\": \"$WORKSPACE_ID\"}" | jq -r '.id')
+
 curl -s -X POST "http://172.30.0.188:8081/api/v1/sandboxes/${SANDBOX_ID}/process/run" \
   -H "Content-Type: application/json" \
   -d '{"command": "cat", "args": ["/workspace/test.txt"]}'
@@ -260,9 +290,19 @@ func main() {
     client := workspace.NewClient("http://localhost:8080")
     ctx := context.Background()
 
-    // 创建 sandbox
+    // 创建 workspace (持久存储)
+    ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+        Name: "my-workspace",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Workspace.Delete(ctx, ws.ID)
+
+    // 创建 sandbox 绑定到 workspace
     sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-        Template: "workspace-test:latest",
+        WorkspaceID: ws.ID,
+        Template:    "workspace-test:latest",
     })
     if err != nil {
         log.Fatal(err)
@@ -277,6 +317,11 @@ func main() {
         log.Fatal(err)
     }
     fmt.Printf("Output: %s", result.Stdout)
+
+    // 文件操作通过 workspace API
+    client.Workspace.WriteFileString(ctx, ws.ID, "hello.txt", "Hello!")
+    content, _ := client.Workspace.ReadFileString(ctx, ws.ID, "hello.txt")
+    fmt.Printf("File: %s\n", content)
 }
 ```
 
@@ -287,19 +332,30 @@ pip install -e sdk-python
 ```
 
 ```python
-from workspace_sdk import WorkspaceClient
+from workspace_sdk import WorkspaceClient, CreateWorkspaceParams, CreateSandboxParams
 
-client = WorkspaceClient(base_url="http://localhost:8080")
+with WorkspaceClient("http://localhost:8080") as client:
+    # 创建 workspace (持久存储)
+    workspace = client.workspace.create(CreateWorkspaceParams(name="my-workspace"))
 
-# 创建 sandbox
-sandbox = client.sandbox.create(template="workspace-test:latest")
+    # 创建 sandbox 绑定到 workspace
+    sandbox = client.sandbox.create(CreateSandboxParams(
+        workspace_id=workspace.id,
+        template="workspace-test:latest"
+    ))
 
-try:
-    # 执行命令
-    result = client.process.run(sandbox.id, "echo", args=["Hello", "World"])
-    print(result.stdout)
-finally:
-    client.sandbox.delete(sandbox.id, force=True)
+    try:
+        # 执行命令
+        result = client.process.run(sandbox.id, "echo", args=["Hello", "World"])
+        print(result.stdout)
+
+        # 文件操作通过 workspace API
+        client.workspace.write_file(workspace.id, "hello.txt", "Hello!")
+        content = client.workspace.read_file(workspace.id, "hello.txt")
+        print(f"File: {content}")
+    finally:
+        client.sandbox.delete(sandbox.id, force=True)
+        client.workspace.delete(workspace.id)
 ```
 
 ### TypeScript SDK
@@ -307,10 +363,14 @@ finally:
 ```typescript
 import { WorkspaceClient } from '@elevo/workspace-sdk'
 
-const client = new WorkspaceClient({ baseUrl: 'http://localhost:8080' })
+const client = new WorkspaceClient({ apiUrl: 'http://localhost:8080' })
 
-// 创建 sandbox
+// 创建 workspace (持久存储)
+const workspace = await client.workspace.create({ name: 'my-workspace' })
+
+// 创建 sandbox 绑定到 workspace
 const sandbox = await client.sandbox.create({
+  workspaceId: workspace.id,
   template: 'workspace-test:latest'
 })
 
@@ -320,8 +380,14 @@ try {
     args: ['Hello', 'World']
   })
   console.log(result.stdout)
+
+  // 文件操作通过 workspace API
+  await client.workspace.writeFile(workspace.id, 'hello.txt', 'Hello!')
+  const content = await client.workspace.readFile(workspace.id, 'hello.txt')
+  console.log(`File: ${content}`)
 } finally {
-  await client.sandbox.delete(sandbox.id, { force: true })
+  await client.sandbox.delete(sandbox.id, true)
+  await client.workspace.delete(workspace.id)
 }
 ```
 
@@ -340,12 +406,17 @@ try {
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Workspace Server (Rust)                   │
-│  ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐           │
-│  │ Sandbox │ │   FS    │ │ Process │ │   PTY   │           │
-│  └─────────┘ └─────────┘ └─────────┘ └─────────┘           │
+│  ┌──────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
+│  │Workspace │ │ Sandbox │ │ Process │ │   PTY   │          │
+│  │ (持久)   │ │ (临时)  │ │         │ │         │          │
+│  └──────────┘ └─────────┘ └─────────┘ └─────────┘          │
 │  ┌─────────────────────────────────────────────┐           │
 │  │              MCP Handler                     │           │
 │  │  (executor / developer / full profiles)     │           │
+│  └─────────────────────────────────────────────┘           │
+│  ┌─────────────────────────────────────────────┐           │
+│  │              NFS Server                      │           │
+│  │  (Workspace 级别文件共享)                     │           │
 │  └─────────────────────────────────────────────┘           │
 └────────────────────────────┬────────────────────────────────┘
                              │
@@ -358,7 +429,7 @@ try {
 │  │           Workspace Agent (Rust)             │           │
 │  │  - 进程执行                                   │           │
 │  │  - PTY 管理                                   │           │
-│  │  - 文件操作                                   │           │
+│  │  - /workspace (挂载 Workspace 目录)           │           │
 │  └─────────────────────────────────────────────┘           │
 └─────────────────────────────────────────────────────────────┘
 ```

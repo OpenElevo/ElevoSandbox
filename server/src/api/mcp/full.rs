@@ -65,11 +65,12 @@ impl FullMcpHandler {
     // Sandbox Tools
     // ========================================================================
 
-    #[tool(description = "Create a new sandbox environment. Returns the sandbox ID and details.")]
+    #[tool(description = "Create a new sandbox environment bound to a workspace. Returns the sandbox ID and details.")]
     async fn sandbox_create(&self, Parameters(params): Parameters<SandboxCreateParams>) -> String {
-        info!("MCP[full]: sandbox_create called");
+        info!("MCP[full]: sandbox_create called for workspace {}", params.workspace_id);
 
         let create_params = CreateSandboxParams {
+            workspace_id: params.workspace_id,
             template: params.template,
             name: params.name,
             env: params.env,

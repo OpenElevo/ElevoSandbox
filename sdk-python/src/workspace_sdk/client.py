@@ -5,10 +5,10 @@ Sync Workspace Client - Main entry point for synchronous SDK usage
 from typing import Optional
 import httpx
 
+from workspace_sdk.services.workspace import WorkspaceService
 from workspace_sdk.services.sandbox import SandboxService
 from workspace_sdk.services.process import ProcessService
 from workspace_sdk.services.pty import PtyService
-from workspace_sdk.services.filesystem import FileSystemService
 from workspace_sdk.services.nfs import NfsService
 from workspace_sdk.errors import parse_error_response
 
@@ -42,10 +42,10 @@ class WorkspaceClient:
         self._client: Optional[httpx.Client] = None
 
         # Services will be initialized when context manager is entered
+        self.workspace: WorkspaceService
         self.sandbox: SandboxService
         self.process: ProcessService
         self.pty: PtyService
-        self.filesystem: FileSystemService
         self.nfs: NfsService
 
     def __enter__(self) -> "WorkspaceClient":
@@ -61,10 +61,10 @@ class WorkspaceClient:
         )
 
         # Initialize services
+        self.workspace = WorkspaceService(self._client, self._api_url)
         self.sandbox = SandboxService(self._client, self._api_url)
         self.process = ProcessService(self._client, self._api_url)
         self.pty = PtyService(self._client, self._api_url)
-        self.filesystem = FileSystemService(self._client, self._api_url)
         self.nfs = NfsService(self._nfs_host, self._nfs_port)
 
         return self
@@ -96,6 +96,7 @@ class WorkspaceClient:
 
         Usage:
             with WorkspaceClient.create("http://localhost:8080") as client:
-                sandbox = client.sandbox.create()
+                workspace = client.workspace.create()
+                sandbox = client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id))
         """
         return WorkspaceClient(api_url, api_key, timeout, nfs_host, nfs_port)

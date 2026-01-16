@@ -4,6 +4,28 @@ import (
 	"time"
 )
 
+// Workspace represents a workspace instance
+type Workspace struct {
+	ID        string            `json:"id"`
+	Name      *string           `json:"name,omitempty"`
+	NfsURL    *string           `json:"nfs_url,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
+}
+
+// CreateWorkspaceParams contains parameters for creating a workspace
+type CreateWorkspaceParams struct {
+	Name     string            `json:"name,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// ListWorkspacesResponse represents the response from listing workspaces
+type ListWorkspacesResponse struct {
+	Workspaces []Workspace `json:"workspaces"`
+	Total      int         `json:"total"`
+}
+
 // SandboxState represents the state of a sandbox
 type SandboxState string
 
@@ -17,12 +39,12 @@ const (
 // Sandbox represents a sandbox instance
 type Sandbox struct {
 	ID           string            `json:"id"`
+	WorkspaceID  string            `json:"workspace_id"`
 	Name         *string           `json:"name,omitempty"`
 	Template     string            `json:"template"`
 	State        SandboxState      `json:"state"`
 	Env          map[string]string `json:"env,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
-	NfsURL       *string           `json:"nfs_url,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	Timeout      int               `json:"timeout,omitempty"`
@@ -31,11 +53,12 @@ type Sandbox struct {
 
 // CreateSandboxParams contains parameters for creating a sandbox
 type CreateSandboxParams struct {
-	Template string            `json:"template,omitempty"`
-	Name     string            `json:"name,omitempty"`
-	Env      map[string]string `json:"env,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
-	Timeout  int               `json:"timeout,omitempty"`
+	WorkspaceID string            `json:"workspace_id"`
+	Template    string            `json:"template,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+	Timeout     int               `json:"timeout,omitempty"`
 }
 
 // CommandResult contains the result of a command execution

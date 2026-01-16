@@ -36,23 +36,23 @@ message Sandbox {
   // Unique identifier
   string id = 1;
 
+  // Workspace ID this sandbox is bound to
+  string workspace_id = 2;
+
   // Optional human-readable name
-  optional string name = 2;
+  optional string name = 3;
 
   // Template used to create this sandbox
-  string template = 3;
+  string template = 4;
 
   // Current state
-  SandboxState state = 4;
+  SandboxState state = 5;
 
   // Environment variables
-  map<string, string> env = 5;
+  map<string, string> env = 6;
 
   // Custom metadata
-  map<string, string> metadata = 6;
-
-  // NFS mount URL (if available)
-  optional string nfs_url = 7;
+  map<string, string> metadata = 7;
 
   // Creation timestamp
   google.protobuf.Timestamp created_at = 8;
@@ -69,20 +69,23 @@ message Sandbox {
 
 // Create sandbox request
 message CreateSandboxRequest {
+  // Workspace ID to bind to (required)
+  string workspace_id = 1;
+
   // Template to use (optional, defaults to "default")
-  optional string template = 1;
+  optional string template = 2;
 
   // Optional name
-  optional string name = 2;
+  optional string name = 3;
 
   // Environment variables
-  map<string, string> env = 3;
+  map<string, string> env = 4;
 
   // Custom metadata
-  map<string, string> metadata = 4;
+  map<string, string> metadata = 5;
 
   // Timeout in seconds (optional)
-  optional uint64 timeout = 5;
+  optional uint64 timeout = 6;
 }
 
 // Create sandbox response

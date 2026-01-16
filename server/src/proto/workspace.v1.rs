@@ -5,30 +5,30 @@ pub struct Sandbox {
     /// Unique identifier
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
+    /// Workspace ID this sandbox is bound to
+    #[prost(string, tag = "2")]
+    pub workspace_id: ::prost::alloc::string::String,
     /// Optional human-readable name
-    #[prost(string, optional, tag = "2")]
+    #[prost(string, optional, tag = "3")]
     pub name: ::core::option::Option<::prost::alloc::string::String>,
     /// Template used to create this sandbox
-    #[prost(string, tag = "3")]
+    #[prost(string, tag = "4")]
     pub template: ::prost::alloc::string::String,
     /// Current state
-    #[prost(enumeration = "SandboxState", tag = "4")]
+    #[prost(enumeration = "SandboxState", tag = "5")]
     pub state: i32,
     /// Environment variables
-    #[prost(map = "string, string", tag = "5")]
+    #[prost(map = "string, string", tag = "6")]
     pub env: ::std::collections::HashMap<
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
     /// Custom metadata
-    #[prost(map = "string, string", tag = "6")]
+    #[prost(map = "string, string", tag = "7")]
     pub metadata: ::std::collections::HashMap<
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
-    /// NFS mount URL (if available)
-    #[prost(string, optional, tag = "7")]
-    pub nfs_url: ::core::option::Option<::prost::alloc::string::String>,
     /// Creation timestamp
     #[prost(message, optional, tag = "8")]
     pub created_at: ::core::option::Option<::prost_types::Timestamp>,
@@ -45,26 +45,29 @@ pub struct Sandbox {
 /// Create sandbox request
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct CreateSandboxRequest {
+    /// Workspace ID to bind to (required)
+    #[prost(string, tag = "1")]
+    pub workspace_id: ::prost::alloc::string::String,
     /// Template to use (optional, defaults to "default")
-    #[prost(string, optional, tag = "1")]
+    #[prost(string, optional, tag = "2")]
     pub template: ::core::option::Option<::prost::alloc::string::String>,
     /// Optional name
-    #[prost(string, optional, tag = "2")]
+    #[prost(string, optional, tag = "3")]
     pub name: ::core::option::Option<::prost::alloc::string::String>,
     /// Environment variables
-    #[prost(map = "string, string", tag = "3")]
+    #[prost(map = "string, string", tag = "4")]
     pub env: ::std::collections::HashMap<
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
     /// Custom metadata
-    #[prost(map = "string, string", tag = "4")]
+    #[prost(map = "string, string", tag = "5")]
     pub metadata: ::std::collections::HashMap<
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
     /// Timeout in seconds (optional)
-    #[prost(uint64, optional, tag = "5")]
+    #[prost(uint64, optional, tag = "6")]
     pub timeout: ::core::option::Option<u64>,
 }
 /// Create sandbox response

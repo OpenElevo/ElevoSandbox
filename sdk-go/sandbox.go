@@ -11,10 +11,13 @@ type SandboxService struct {
 	client *Client
 }
 
-// Create creates a new sandbox
+// Create creates a new sandbox bound to a workspace
 func (s *SandboxService) Create(ctx context.Context, params *CreateSandboxParams) (*Sandbox, error) {
 	if params == nil {
-		params = &CreateSandboxParams{}
+		return nil, fmt.Errorf("params cannot be nil, workspace_id is required")
+	}
+	if params.WorkspaceID == "" {
+		return nil, fmt.Errorf("workspace_id is required")
 	}
 
 	var sandbox Sandbox

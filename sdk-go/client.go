@@ -31,11 +31,11 @@ type Client struct {
 	httpClient *http.Client
 
 	// Services
-	Sandbox    *SandboxService
-	Process    *ProcessService
-	Pty        *PtyService
-	FileSystem *FileSystemService
-	Nfs        *NfsService
+	Workspace *WorkspaceService
+	Sandbox   *SandboxService
+	Process   *ProcessService
+	Pty       *PtyService
+	Nfs       *NfsService
 }
 
 // NewClient creates a new workspace client
@@ -64,10 +64,10 @@ func NewClient(apiURL string, opts ...ClientOptions) *Client {
 	}
 
 	// Initialize services
+	c.Workspace = &WorkspaceService{client: c}
 	c.Sandbox = &SandboxService{client: c}
 	c.Process = &ProcessService{client: c}
 	c.Pty = &PtyService{client: c}
-	c.FileSystem = &FileSystemService{client: c}
 	c.Nfs = NewNfsService(opt.NfsHost, opt.NfsPort)
 
 	return c

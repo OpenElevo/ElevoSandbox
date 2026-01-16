@@ -1,6 +1,6 @@
 # Workspace SDK for Go
 
-Go SDK for the Elevo Workspace service. Provides a simple, idiomatic Go API for managing sandboxes, executing commands, and interacting with containerized development environments.
+Go SDK for the Elevo Workspace service. Provides a simple, idiomatic Go API for managing workspaces, sandboxes, executing commands, and interacting with containerized development environments.
 
 ## Installation
 
@@ -26,9 +26,21 @@ func main() {
     client := workspace.NewClient("http://localhost:8080")
     ctx := context.Background()
 
-    // Create a sandbox
+    // Create a workspace (persistent storage)
+    ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+        Name: "my-workspace",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Workspace.Delete(ctx, ws.ID)
+
+    fmt.Printf("Created workspace: %s\n", ws.ID)
+
+    // Create a sandbox bound to the workspace
     sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-        Template: "workspace-test:latest",
+        WorkspaceID: ws.ID,
+        Template:    "workspace-test:latest",
     })
     if err != nil {
         log.Fatal(err)
@@ -46,16 +58,32 @@ func main() {
     }
 
     fmt.Printf("Output: %s", result.Stdout)
+
+    // Write a file to workspace
+    err = client.Workspace.WriteFileString(ctx, ws.ID, "hello.txt", "Hello, World!")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Read the file
+    content, err := client.Workspace.ReadFileString(ctx, ws.ID, "hello.txt")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    fmt.Printf("File content: %s\n", content)
 }
 ```
 
 ## Features
 
-- **Sandbox Management**: Create, list, get, and delete sandboxes
+- **Workspace Management**: Create, list, get, and delete workspaces (persistent storage)
+- **Sandbox Management**: Create, list, get, and delete sandboxes (bound to workspaces)
 - **Process Execution**: Run commands with full control over args, env, and working directory
 - **Streaming Output**: Real-time stdout/stderr streaming via SSE
 - **PTY Support**: Interactive terminal sessions via WebSocket
-- **File System**: Read, write, and manage files in sandboxes
+- **File System**: Read, write, and manage files in workspaces
+- **NFS Mount**: Mount workspaces via NFS for local development
 - **Concurrent Operations**: Thread-safe client for parallel operations
 - **Error Handling**: Rich error types with detailed information
 
@@ -71,22 +99,58 @@ client := workspace.NewClient("http://localhost:8080")
 client := workspace.NewClient("http://localhost:8080", workspace.ClientOptions{
     APIKey:  "your-api-key",
     Timeout: 60 * time.Second,
+    NfsHost: "192.168.1.100",  // Optional: NFS server host for mounting
+    NfsPort: 2049,             // Optional: NFS server port (default: 2049)
 })
 
 // Health check
 err := client.Health(ctx)
 ```
 
+### Workspace Service
+
+```go
+// Create a workspace
+ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+    Name:     "my-workspace",
+    Metadata: map[string]string{"project": "demo"},
+})
+
+// Get workspace by ID
+ws, err := client.Workspace.Get(ctx, "workspace-id")
+
+// List all workspaces
+workspaces, err := client.Workspace.List(ctx)
+
+// Check if workspace exists
+exists, err := client.Workspace.Exists(ctx, "workspace-id")
+
+// Delete workspace (fails if sandboxes are using it)
+err := client.Workspace.Delete(ctx, "workspace-id")
+
+// File operations on workspace
+err := client.Workspace.WriteFileString(ctx, ws.ID, "src/main.py", `print("hello")`)
+content, err := client.Workspace.ReadFileString(ctx, ws.ID, "src/main.py")
+files, err := client.Workspace.ListFiles(ctx, ws.ID, "src")
+err := client.Workspace.Mkdir(ctx, ws.ID, "src/components")
+err := client.Workspace.CopyFile(ctx, ws.ID, "src/main.py", "src/backup.py")
+err := client.Workspace.MoveFile(ctx, ws.ID, "src/backup.py", "src/old.py")
+err := client.Workspace.DeleteFile(ctx, ws.ID, "src/old.py", false)
+info, err := client.Workspace.GetFileInfo(ctx, ws.ID, "src/main.py")
+exists, err := client.Workspace.FileExists(ctx, ws.ID, "src/main.py")
+```
+
 ### Sandbox Service
 
 ```go
-// Create a sandbox
+// Create a sandbox bound to a workspace
 sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-    Template: "workspace-test:latest",
-    Name:     "my-sandbox",
-    Env:      map[string]string{"APP_ENV": "development"},
-    Metadata: map[string]string{"project": "demo"},
-    Timeout:  3600, // seconds
+    WorkspaceID: ws.ID,              // Required: workspace to bind to
+    Template:    "workspace-test:latest",
+    Name:        "my-sandbox",
+    Env:         map[string]string{"APP_ENV": "development"},
+    Metadata:    map[string]string{"project": "demo"},
+    Timeout:     3600, // seconds
 })
 
 // Get sandbox by ID
@@ -149,14 +213,14 @@ for {
         case workspace.ProcessEventStderr:
             fmt.Fprint(os.Stderr, event.Data)
         case workspace.ProcessEventExit:
-            fmt.Printf("Exited with code: %d\n", *event.Code)
-            return
+            fmt.Printf("\nExited with code: %d\n", *event.Code)
+        case workspace.ProcessEventError:
+            fmt.Printf("Error: %s\n", event.Message)
         }
     case err := <-errCh:
         if err != nil {
-            log.Printf("Stream error: %v", err)
+            log.Fatal(err)
         }
-        return
     }
 }
 
@@ -167,149 +231,227 @@ err := client.Process.Kill(ctx, sandboxID, pid, 15) // SIGTERM
 ### PTY Service
 
 ```go
-// Create PTY handle only
-handle, err := client.Pty.Create(ctx, sandboxID, &workspace.PtyOptions{
+// Create and connect to PTY
+pty, err := client.Pty.Connect(ctx, sandboxID, &workspace.PtyOptions{
     Cols:    120,
     Rows:    40,
     Command: "/bin/bash",
+    Env:     map[string]string{"TERM": "xterm-256color"},
 })
 
-// Create and connect to PTY via WebSocket
-session, err := client.Pty.Connect(ctx, sandboxID, &workspace.PtyOptions{
-    Cols: 80,
-    Rows: 24,
+// Handle output
+pty.OnData(func(data []byte) {
+    os.Stdout.Write(data)
 })
-defer session.Close()
+
+// Handle close
+pty.OnClose(func() {
+    fmt.Println("PTY closed")
+})
 
 // Write to PTY
-session.WriteString("ls -la\n")
-
-// Read from PTY
-go func() {
-    for data := range session.Read() {
-        fmt.Print(string(data))
-    }
-}()
+err := pty.Write([]byte("ls -la\n"))
 
 // Resize PTY
-session.Resize(100, 50)
+err := pty.Resize(100, 50)
 
-// Handle errors
-go func() {
-    for err := range session.Errors() {
-        log.Printf("PTY error: %v", err)
-    }
-}()
-
-// Wait for session to end
-<-session.Done()
+// Kill PTY
+err := pty.Kill()
 ```
 
-### FileSystem Service
+### NFS Service
 
 ```go
-// Read file
-content, err := client.FileSystem.Read(ctx, sandboxID, "/workspace/config.json")
+// Mount a workspace via NFS
+mountPoint, err := client.Nfs.Mount(ws.ID, "/mnt/workspace")
 
-// Read as string
-text, err := client.FileSystem.ReadString(ctx, sandboxID, "/workspace/README.md")
+// Check if mounted
+isMounted, err := client.Nfs.IsMounted("/mnt/workspace")
 
-// Write file
-err := client.FileSystem.Write(ctx, sandboxID, "/workspace/data.bin", []byte{0x00, 0x01})
+// Unmount
+err := client.Nfs.Unmount("/mnt/workspace")
 
-// Write string
-err := client.FileSystem.WriteString(ctx, sandboxID, "/workspace/hello.txt", "Hello, World!")
-
-// Create directory
-err := client.FileSystem.Mkdir(ctx, sandboxID, "/workspace/src/components", true) // recursive
-
-// Create directory (shorthand)
-err := client.FileSystem.MkdirAll(ctx, sandboxID, "/workspace/src/components")
-
-// List directory
-files, err := client.FileSystem.List(ctx, sandboxID, "/workspace")
-for _, f := range files {
-    fmt.Printf("%s %d %s\n", f.Mode, f.Size, f.Name)
-}
-
-// Get file info
-info, err := client.FileSystem.Stat(ctx, sandboxID, "/workspace/file.txt")
-
-// Check if exists
-exists, err := client.FileSystem.Exists(ctx, sandboxID, "/workspace/file.txt")
-
-// Remove file
-err := client.FileSystem.Remove(ctx, sandboxID, "/workspace/temp.txt", false)
-
-// Remove directory recursively
-err := client.FileSystem.RemoveAll(ctx, sandboxID, "/workspace/old_dir")
-
-// Move/rename
-err := client.FileSystem.Move(ctx, sandboxID, "/workspace/old.txt", "/workspace/new.txt")
-
-// Copy
-err := client.FileSystem.Copy(ctx, sandboxID, "/workspace/src.txt", "/workspace/dst.txt")
+// Get NFS URL for a workspace
+nfsURL := client.Nfs.GetNfsURL(ws.ID)
+// Returns: nfs://192.168.1.100:2049/workspace-id
 ```
 
 ## Error Handling
 
 ```go
-result, err := client.Sandbox.Get(ctx, "invalid-id")
+sandbox, err := client.Sandbox.Get(ctx, "invalid-id")
 if err != nil {
-    // Check error type
-    if workspace.IsNotFound(err) {
+    if workspace.IsSandboxNotFound(err) {
         fmt.Println("Sandbox not found")
-    } else if workspace.IsTimeout(err) {
-        fmt.Println("Request timed out")
-    } else if e, ok := err.(*workspace.Error); ok {
-        fmt.Printf("API error [%d]: %s\n", e.StatusCode, e.Message)
+    } else if workspace.IsNotFound(err) {
+        fmt.Println("Resource not found")
+    } else if wsErr, ok := err.(*workspace.Error); ok {
+        fmt.Printf("API error [%d]: %s\n", wsErr.StatusCode, wsErr.Message)
     } else {
         fmt.Printf("Unknown error: %v\n", err)
     }
 }
 
-// Process errors
-output, err := client.Process.Exec(ctx, sandboxID, "invalid-command")
+// Workspace deletion protection
+err := client.Workspace.Delete(ctx, "workspace-with-sandboxes")
 if err != nil {
-    if e, ok := err.(*workspace.ProcessError); ok {
-        fmt.Printf("Command '%s' failed: %s\n", e.Command, e.Message)
-    }
+    // Error: Workspace has active sandboxes (code: 7002)
+    fmt.Println(err)
+}
+```
+
+## Type Definitions
+
+### Workspace
+
+```go
+type Workspace struct {
+    ID        string            `json:"id"`
+    Name      *string           `json:"name,omitempty"`
+    NfsURL    *string           `json:"nfs_url,omitempty"`  // NFS mount URL
+    Metadata  map[string]string `json:"metadata,omitempty"`
+    CreatedAt time.Time         `json:"created_at"`
+    UpdatedAt time.Time         `json:"updated_at"`
+}
+```
+
+### Sandbox
+
+```go
+type Sandbox struct {
+    ID           string            `json:"id"`
+    WorkspaceID  string            `json:"workspace_id"`  // Bound workspace ID
+    Name         *string           `json:"name,omitempty"`
+    Template     string            `json:"template"`
+    State        SandboxState      `json:"state"`
+    Env          map[string]string `json:"env,omitempty"`
+    Metadata     map[string]string `json:"metadata,omitempty"`
+    CreatedAt    time.Time         `json:"created_at"`
+    UpdatedAt    time.Time         `json:"updated_at"`
+    Timeout      int               `json:"timeout,omitempty"`
+    ErrorMessage *string           `json:"error_message,omitempty"`
+}
+
+type SandboxState string
+
+const (
+    SandboxStateStarting SandboxState = "starting"
+    SandboxStateRunning  SandboxState = "running"
+    SandboxStateStopped  SandboxState = "stopped"
+    SandboxStateFailed   SandboxState = "failed"
+)
+```
+
+### CommandResult
+
+```go
+type CommandResult struct {
+    ExitCode int    `json:"exit_code"`
+    Stdout   string `json:"stdout"`
+    Stderr   string `json:"stderr"`
+}
+```
+
+### FileInfo
+
+```go
+type FileInfo struct {
+    Name    string    `json:"name"`
+    Path    string    `json:"path"`
+    Size    int64     `json:"size"`
+    Mode    string    `json:"mode"`
+    ModTime time.Time `json:"mod_time"`
+    IsDir   bool      `json:"is_dir"`
 }
 ```
 
 ## Concurrent Usage
 
-The client is safe for concurrent use:
-
 ```go
-client := workspace.NewClient("http://localhost:8080")
+package main
 
-var wg sync.WaitGroup
-for i := 0; i < 10; i++ {
-    wg.Add(1)
-    go func(id int) {
-        defer wg.Done()
+import (
+    "context"
+    "fmt"
+    "log"
+    "sync"
 
-        sandbox, _ := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-            Template: "workspace-test:latest",
-        })
-        defer client.Sandbox.Delete(ctx, sandbox.ID, true)
+    workspace "git.easyops.local/elevo/elevo-workspace/sdk-go"
+)
 
-        result, _ := client.Process.Run(ctx, sandbox.ID, "echo", &workspace.RunCommandOptions{
-            Args: []string{fmt.Sprintf("Worker %d", id)},
-        })
-        fmt.Printf("Worker %d: %s", id, result.Stdout)
-    }(i)
+func main() {
+    client := workspace.NewClient("http://localhost:8080")
+    ctx := context.Background()
+
+    // Create a shared workspace
+    ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+        Name: "shared-workspace",
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer client.Workspace.Delete(ctx, ws.ID)
+
+    // Create multiple sandboxes sharing the same workspace
+    var sandboxes []*workspace.Sandbox
+    var mu sync.Mutex
+    var wg sync.WaitGroup
+
+    for i := 0; i < 3; i++ {
+        wg.Add(1)
+        go func(i int) {
+            defer wg.Done()
+            sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
+                WorkspaceID: ws.ID,
+                Template:    "workspace-test:latest",
+                Name:        fmt.Sprintf("worker-%d", i),
+            })
+            if err != nil {
+                log.Printf("Failed to create sandbox %d: %v", i, err)
+                return
+            }
+            mu.Lock()
+            sandboxes = append(sandboxes, sandbox)
+            mu.Unlock()
+        }(i)
+    }
+    wg.Wait()
+
+    fmt.Printf("Created %d sandboxes sharing workspace %s\n", len(sandboxes), ws.ID)
+
+    // Run commands in all sandboxes concurrently
+    for i, sandbox := range sandboxes {
+        wg.Add(1)
+        go func(i int, sandbox *workspace.Sandbox) {
+            defer wg.Done()
+            result, err := client.Process.Run(ctx, sandbox.ID, "echo", &workspace.RunCommandOptions{
+                Args: []string{fmt.Sprintf("Worker %d", i)},
+            })
+            if err != nil {
+                log.Printf("Worker %d error: %v", i, err)
+                return
+            }
+            fmt.Printf("Worker %d: %s", i, result.Stdout)
+        }(i, sandbox)
+    }
+    wg.Wait()
+
+    // Cleanup all sandboxes first
+    for _, sandbox := range sandboxes {
+        wg.Add(1)
+        go func(sandbox *workspace.Sandbox) {
+            defer wg.Done()
+            client.Sandbox.Delete(ctx, sandbox.ID, true)
+        }(sandbox)
+    }
+    wg.Wait()
 }
-wg.Wait()
 ```
 
-## Context Support
-
-All methods accept a context for cancellation and timeouts:
+## Context and Timeout
 
 ```go
-// With timeout
+// Using context with timeout
 ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 defer cancel()
 
@@ -318,21 +460,39 @@ result, err := client.Process.Run(ctx, sandboxID, "sleep", &workspace.RunCommand
 })
 if err != nil {
     if ctx.Err() == context.DeadlineExceeded {
-        fmt.Println("Command timed out")
+        fmt.Println("Request timed out")
     }
 }
 
-// With cancellation
-ctx, cancel := context.WithCancel(context.Background())
-
-go func() {
-    time.Sleep(5 * time.Second)
-    cancel() // Cancel after 5 seconds
-}()
-
-eventCh, _ := client.Process.RunStream(ctx, sandboxID, "tail", &workspace.RunCommandOptions{
-    Args: []string{"-f", "/var/log/app.log"},
+// Command-level timeout
+result, err := client.Process.Run(ctx, sandboxID, "sleep", &workspace.RunCommandOptions{
+    Args:    []string{"60"},
+    Timeout: 5, // seconds
 })
+```
+
+## Examples
+
+See the `examples/` directory for more usage examples:
+
+- `examples/basic/main.go` - Basic usage with workspace, sandbox and process operations
+- `examples/streaming/main.go` - Streaming command output
+- `examples/concurrent/main.go` - Concurrent operations with goroutines
+- `examples/error-handling/main.go` - Error handling patterns
+- `examples/pty-session/main.go` - Interactive PTY sessions
+- `examples/nfs-mount/main.go` - NFS mounting for local development
+
+## Building from Source
+
+```bash
+# Get dependencies
+go mod download
+
+# Run tests
+go test ./...
+
+# Build examples
+go build -o bin/ ./examples/...
 ```
 
 ## License

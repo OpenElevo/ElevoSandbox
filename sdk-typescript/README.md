@@ -1,6 +1,6 @@
 # Workspace SDK for TypeScript
 
-TypeScript/JavaScript SDK for the Elevo Workspace service. Provides a fully typed API for managing sandboxes, executing commands, and interacting with containerized development environments.
+TypeScript/JavaScript SDK for the Elevo Workspace service. Provides a fully typed API for managing workspaces, sandboxes, executing commands, and interacting with containerized development environments.
 
 ## Installation
 
@@ -28,8 +28,16 @@ const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
 });
 
-// Create a sandbox
+// Create a workspace (persistent storage)
+const workspace = await client.workspace.create({
+  name: 'my-workspace',
+});
+
+console.log(`Created workspace: ${workspace.id}`);
+
+// Create a sandbox bound to the workspace
 const sandbox = await client.sandbox.create({
+  workspaceId: workspace.id,
   template: 'workspace-test:latest',
 });
 
@@ -42,18 +50,28 @@ const result = await client.process.run(sandbox.id, 'echo', {
 
 console.log(`Output: ${result.stdout}`);
 
+// Write a file to workspace
+await client.workspace.writeFile(workspace.id, 'hello.txt', 'Hello, World!');
+
+// Read the file
+const content = await client.workspace.readFile(workspace.id, 'hello.txt');
+console.log(`File content: ${content}`);
+
 // Cleanup
 await client.sandbox.delete(sandbox.id, true);
+await client.workspace.delete(workspace.id);
 ```
 
 ## Features
 
 - **Full TypeScript Support**: Complete type definitions for all APIs
-- **Sandbox Management**: Create, list, get, and delete sandboxes
+- **Workspace Management**: Create, list, get, and delete workspaces (persistent storage)
+- **Sandbox Management**: Create, list, get, and delete sandboxes (bound to workspaces)
 - **Process Execution**: Run commands with full control over args, env, and working directory
 - **Streaming Output**: Real-time stdout/stderr streaming via SSE
 - **PTY Support**: Interactive terminal sessions via WebSocket
-- **File System**: Read, write, and manage files in sandboxes
+- **File System**: Read, write, and manage files in workspaces
+- **NFS Mount**: Mount workspaces via NFS for local development
 - **Error Handling**: Rich error types with detailed information
 
 ## API Reference
@@ -67,6 +85,8 @@ const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
   apiKey: 'your-api-key',        // Optional
   timeout: 60000,                 // Request timeout in ms (default: 30000)
+  nfsHost: '192.168.1.100',       // Optional: NFS server host for mounting
+  nfsPort: 2049,                  // Optional: NFS server port (default: 2049)
 });
 
 // Health check
@@ -74,13 +94,46 @@ const health = await client.health();
 console.log(`Server status: ${health.status}`);
 ```
 
+### Workspace Service
+
+```typescript
+import { CreateWorkspaceParams } from '@elevo/workspace-sdk';
+
+// Create a workspace
+const workspace = await client.workspace.create({
+  name: 'my-workspace',
+  metadata: { project: 'demo' },
+});
+
+// Get workspace by ID
+const workspace = await client.workspace.get('workspace-id');
+
+// List all workspaces
+const workspaces = await client.workspace.list();
+
+// Delete workspace (fails if sandboxes are using it)
+await client.workspace.delete('workspace-id');
+
+// File operations on workspace
+await client.workspace.writeFile(workspace.id, 'src/main.py', 'print("hello")');
+const content = await client.workspace.readFile(workspace.id, 'src/main.py');
+const files = await client.workspace.listFiles(workspace.id, 'src');
+await client.workspace.mkdir(workspace.id, 'src/components');
+await client.workspace.copyFile(workspace.id, 'src/main.py', 'src/backup.py');
+await client.workspace.moveFile(workspace.id, 'src/backup.py', 'src/old.py');
+await client.workspace.deleteFile(workspace.id, 'src/old.py');
+const info = await client.workspace.getFileInfo(workspace.id, 'src/main.py');
+const exists = await client.workspace.exists(workspace.id, 'src/main.py');
+```
+
 ### Sandbox Service
 
 ```typescript
 import { CreateSandboxParams, SandboxState } from '@elevo/workspace-sdk';
 
-// Create a sandbox
+// Create a sandbox bound to a workspace
 const sandbox = await client.sandbox.create({
+  workspaceId: workspace.id,      // Required: workspace to bind to
   template: 'workspace-test:latest',
   name: 'my-sandbox',
   env: { APP_ENV: 'development' },
@@ -181,49 +234,17 @@ await pty.resize(100, 50);
 await pty.kill();
 ```
 
-### FileSystem Service
+### NFS Service
 
 ```typescript
-import { FileInfo } from '@elevo/workspace-sdk';
+// Mount a workspace via NFS
+const mountPoint = await client.nfs.mount(workspace.id, '/mnt/workspace');
 
-// Read file as Buffer
-const content: Buffer = await client.filesystem.read(sandboxId, '/workspace/config.json');
+// Check if mounted
+const isMounted = await client.nfs.isMounted('/mnt/workspace');
 
-// Read file as string
-const text: string = await client.filesystem.readString(sandboxId, '/workspace/README.md');
-
-// Write file from Buffer
-await client.filesystem.write(sandboxId, '/workspace/data.bin', Buffer.from([0x00, 0x01]));
-
-// Write file from string
-await client.filesystem.writeString(sandboxId, '/workspace/hello.txt', 'Hello, World!');
-
-// Create directory
-await client.filesystem.mkdir(sandboxId, '/workspace/src/components', true); // recursive
-
-// List directory
-const files: FileInfo[] = await client.filesystem.list(sandboxId, '/workspace');
-for (const f of files) {
-  console.log(`${f.type.padEnd(10)} ${f.size.toString().padStart(8)} ${f.name}`);
-}
-
-// Get file info
-const info = await client.filesystem.stat(sandboxId, '/workspace/file.txt');
-
-// Check if exists
-const exists = await client.filesystem.exists(sandboxId, '/workspace/file.txt');
-
-// Remove file
-await client.filesystem.remove(sandboxId, '/workspace/temp.txt');
-
-// Remove directory recursively
-await client.filesystem.remove(sandboxId, '/workspace/old_dir', true);
-
-// Move/rename
-await client.filesystem.move(sandboxId, '/workspace/old.txt', '/workspace/new.txt');
-
-// Copy
-await client.filesystem.copy(sandboxId, '/workspace/src.txt', '/workspace/dst.txt');
+// Unmount
+await client.nfs.unmount('/mnt/workspace');
 ```
 
 ## Error Handling
@@ -232,6 +253,7 @@ await client.filesystem.copy(sandboxId, '/workspace/src.txt', '/workspace/dst.tx
 import {
   WorkspaceError,
   SandboxNotFoundError,
+  WorkspaceNotFoundError,
   TemplateNotFoundError,
   FileNotFoundError,
   PermissionDeniedError,
@@ -245,6 +267,8 @@ try {
 } catch (error) {
   if (error instanceof SandboxNotFoundError) {
     console.log(`Sandbox not found`);
+  } else if (error instanceof WorkspaceNotFoundError) {
+    console.log(`Workspace not found`);
   } else if (error instanceof WorkspaceError) {
     console.log(`API error [${error.code}]: ${error.message}`);
   } else {
@@ -252,31 +276,41 @@ try {
   }
 }
 
-// Process errors
+// Workspace deletion protection
 try {
-  const result = await client.process.run(sandboxId, 'invalid-command');
+  await client.workspace.delete('workspace-with-sandboxes');
 } catch (error) {
-  if (error instanceof ProcessTimeoutError) {
-    console.log('Command timed out');
-  } else if (error instanceof WorkspaceError) {
-    console.log(`Error: ${error.message}`);
-  }
+  // Error: Workspace has active sandboxes (code: 7002)
+  console.log(error.message);
 }
 ```
 
 ## Type Definitions
+
+### Workspace
+
+```typescript
+interface Workspace {
+  id: string;
+  name?: string;
+  nfsUrl?: string;                 // NFS mount URL
+  metadata?: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+}
+```
 
 ### Sandbox
 
 ```typescript
 interface Sandbox {
   id: string;
+  workspaceId: string;             // Bound workspace ID
   name?: string;
   template: string;
   state: SandboxState;  // 'starting' | 'running' | 'stopping' | 'stopped' | 'error'
   env?: Record<string, string>;
   metadata?: Record<string, string>;
-  nfsUrl?: string;
   createdAt: string;
   updatedAt: string;
   timeout?: number;
@@ -325,14 +359,17 @@ const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
 });
 
-// Create multiple sandboxes concurrently
+// Create a shared workspace
+const workspace = await client.workspace.create({ name: 'shared-workspace' });
+
+// Create multiple sandboxes sharing the same workspace
 const sandboxes = await Promise.all([
-  client.sandbox.create({ template: 'workspace-test:latest' }),
-  client.sandbox.create({ template: 'workspace-test:latest' }),
-  client.sandbox.create({ template: 'workspace-test:latest' }),
+  client.sandbox.create({ workspaceId: workspace.id, template: 'workspace-test:latest' }),
+  client.sandbox.create({ workspaceId: workspace.id, template: 'workspace-test:latest' }),
+  client.sandbox.create({ workspaceId: workspace.id, template: 'workspace-test:latest' }),
 ]);
 
-console.log(`Created ${sandboxes.length} sandboxes`);
+console.log(`Created ${sandboxes.length} sandboxes sharing workspace ${workspace.id}`);
 
 // Run commands in all sandboxes concurrently
 const results = await Promise.all(
@@ -345,10 +382,13 @@ for (const [i, result] of results.entries()) {
   console.log(`Worker ${i}: ${result.stdout.trim()}`);
 }
 
-// Cleanup all sandboxes concurrently
+// Cleanup all sandboxes first
 await Promise.all(
   sandboxes.map((s) => client.sandbox.delete(s.id, true))
 );
+
+// Then delete the workspace
+await client.workspace.delete(workspace.id);
 ```
 
 ## Timeout Handling
@@ -402,11 +442,12 @@ const { WorkspaceClient } = require('@elevo/workspace-sdk');
 
 See the `examples/` directory for more usage examples:
 
-- `examples/basic.ts` - Basic usage with sandbox and process operations
+- `examples/basic.ts` - Basic usage with workspace, sandbox and process operations
 - `examples/streaming.ts` - Streaming command output
 - `examples/concurrent.ts` - Concurrent operations with Promise.all
 - `examples/error-handling.ts` - Error handling patterns
 - `examples/pty-session.ts` - Interactive PTY sessions
+- `examples/nfs-mount.ts` - NFS mounting for local development
 
 ## Building from Source
 

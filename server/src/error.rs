@@ -30,6 +30,16 @@ pub enum Error {
     #[error("Sandbox limit exceeded")]
     SandboxLimitExceeded,
 
+    // Workspace errors (7000-7999)
+    #[error("Workspace not found: {0}")]
+    WorkspaceNotFound(String),
+
+    #[error("Workspace has active sandboxes")]
+    WorkspaceHasActiveSandboxes,
+
+    #[error("Path not allowed: {0}")]
+    PathNotAllowed(String),
+
     // FileSystem errors (3000-3999)
     #[error("File not found: {0}")]
     FileNotFound(String),
@@ -114,6 +124,11 @@ impl Error {
             Error::InvalidSandboxState { .. } => 2004,
             Error::SandboxLimitExceeded => 2005,
 
+            // Workspace errors (7000-7999)
+            Error::WorkspaceNotFound(_) => 7001,
+            Error::WorkspaceHasActiveSandboxes => 7002,
+            Error::PathNotAllowed(_) => 7003,
+
             // FileSystem errors (3000-3999)
             Error::FileNotFound(_) => 3001,
             Error::FileAlreadyExists(_) => 3002,
@@ -154,6 +169,7 @@ impl Error {
     pub fn status_code(&self) -> StatusCode {
         match self {
             Error::SandboxNotFound(_)
+            | Error::WorkspaceNotFound(_)
             | Error::FileNotFound(_)
             | Error::ProcessNotFound(_)
             | Error::PtyNotFound(_)
@@ -161,7 +177,9 @@ impl Error {
 
             Error::SandboxAlreadyExists(_) | Error::FileAlreadyExists(_) => StatusCode::CONFLICT,
 
-            Error::PermissionDenied(_) => StatusCode::FORBIDDEN,
+            Error::WorkspaceHasActiveSandboxes => StatusCode::CONFLICT,
+
+            Error::PermissionDenied(_) | Error::PathNotAllowed(_) => StatusCode::FORBIDDEN,
 
             Error::InvalidRequest(_)
             | Error::InvalidParameter(_)

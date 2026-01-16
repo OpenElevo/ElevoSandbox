@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/elevo/workspace-sdk/proto/workspace/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// Workspace service for managing workspace lifecycle and file operations
+service WorkspaceService {
+  // Create a new workspace
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+
+  // Get workspace by ID
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+
+  // List all workspaces
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+
+  // Delete a workspace
+  rpc DeleteWorkspace(DeleteWorkspaceRequest) returns (DeleteWorkspaceResponse);
+
+  // File operations
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  rpc ListFiles(ListFilesRequest) returns (ListFilesResponse);
+  rpc Mkdir(MkdirRequest) returns (MkdirResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  rpc MoveFile(MoveFileRequest) returns (MoveFileResponse);
+  rpc CopyFile(CopyFileRequest) returns (CopyFileResponse);
+  rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);
+}
+
+// Workspace resource
+message Workspace {
+  // Unique identifier
+  string id = 1;
+
+  // Optional human-readable name
+  optional string name = 2;
+
+  // NFS mount URL (if available)
+  optional string nfs_url = 3;
+
+  // Custom metadata
+  map<string, string> metadata = 4;
+
+  // Creation timestamp
+  google.protobuf.Timestamp created_at = 5;
+
+  // Last update timestamp
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+// File information
+message FileInfo {
+  // File name
+  string name = 1;
+
+  // File path
+  string path = 2;
+
+  // Type: "file" or "directory"
+  string type = 3;
+
+  // File size in bytes
+  uint64 size = 4;
+
+  // Last modification time
+  optional google.protobuf.Timestamp modified_at = 5;
+}
+
+// Create workspace request
+message CreateWorkspaceRequest {
+  // Optional name
+  optional string name = 1;
+
+  // Custom metadata
+  map<string, string> metadata = 2;
+}
+
+// Create workspace response
+message CreateWorkspaceResponse {
+  Workspace workspace = 1;
+}
+
+// Get workspace request
+message GetWorkspaceRequest {
+  string id = 1;
+}
+
+// Get workspace response
+message GetWorkspaceResponse {
+  Workspace workspace = 1;
+}
+
+// List workspaces request
+message ListWorkspacesRequest {
+  // Pagination: page size
+  optional int32 page_size = 1;
+
+  // Pagination: page token
+  optional string page_token = 2;
+}
+
+// List workspaces response
+message ListWorkspacesResponse {
+  repeated Workspace workspaces = 1;
+
+  // Next page token (empty if no more pages)
+  string next_page_token = 2;
+
+  // Total count
+  int32 total = 3;
+}
+
+// Delete workspace request
+message DeleteWorkspaceRequest {
+  string id = 1;
+}
+
+// Delete workspace response
+message DeleteWorkspaceResponse {
+  bool success = 1;
+}
+
+// Read file request
+message ReadFileRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// Read file response
+message ReadFileResponse {
+  bytes content = 1;
+}
+
+// Write file request
+message WriteFileRequest {
+  string workspace_id = 1;
+  string path = 2;
+  bytes content = 3;
+}
+
+// Write file response
+message WriteFileResponse {
+  bool success = 1;
+}
+
+// List files request
+message ListFilesRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// List files response
+message ListFilesResponse {
+  repeated FileInfo files = 1;
+}
+
+// Mkdir request
+message MkdirRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// Mkdir response
+message MkdirResponse {
+  bool success = 1;
+}
+
+// Delete file request
+message DeleteFileRequest {
+  string workspace_id = 1;
+  string path = 2;
+  bool recursive = 3;
+}
+
+// Delete file response
+message DeleteFileResponse {
+  bool success = 1;
+}
+
+// Move file request
+message MoveFileRequest {
+  string workspace_id = 1;
+  string source = 2;
+  string destination = 3;
+}
+
+// Move file response
+message MoveFileResponse {
+  bool success = 1;
+}
+
+// Copy file request
+message CopyFileRequest {
+  string workspace_id = 1;
+  string source = 2;
+  string destination = 3;
+}
+
+// Copy file response
+message CopyFileResponse {
+  bool success = 1;
+}
+
+// Get file info request
+message GetFileInfoRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// Get file info response
+message GetFileInfoResponse {
+  FileInfo file = 1;
+}

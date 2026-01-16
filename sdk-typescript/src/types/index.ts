@@ -3,6 +3,34 @@
  */
 
 /**
+ * Workspace resource
+ */
+export interface Workspace {
+  /** Unique identifier */
+  id: string;
+  /** Optional human-readable name */
+  name?: string;
+  /** NFS mount URL */
+  nfsUrl?: string;
+  /** Custom metadata */
+  metadata?: Record<string, string>;
+  /** Creation timestamp */
+  createdAt: string;
+  /** Last update timestamp */
+  updatedAt: string;
+}
+
+/**
+ * Parameters for creating a workspace
+ */
+export interface CreateWorkspaceParams {
+  /** Optional name */
+  name?: string;
+  /** Custom metadata */
+  metadata?: Record<string, string>;
+}
+
+/**
  * Sandbox state
  */
 export type SandboxState = 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
@@ -13,6 +41,8 @@ export type SandboxState = 'starting' | 'running' | 'stopping' | 'stopped' | 'er
 export interface Sandbox {
   /** Unique identifier */
   id: string;
+  /** Workspace ID this sandbox is bound to */
+  workspaceId: string;
   /** Optional human-readable name */
   name?: string;
   /** Template used to create this sandbox */
@@ -23,8 +53,6 @@ export interface Sandbox {
   env?: Record<string, string>;
   /** Custom metadata */
   metadata?: Record<string, string>;
-  /** NFS mount URL */
-  nfsUrl?: string;
   /** Creation timestamp */
   createdAt: string;
   /** Last update timestamp */
@@ -39,6 +67,8 @@ export interface Sandbox {
  * Parameters for creating a sandbox
  */
 export interface CreateSandboxParams {
+  /** Workspace ID to bind to (required) */
+  workspaceId: string;
   /** Template to use */
   template?: string;
   /** Optional name */

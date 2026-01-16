@@ -1,15 +1,25 @@
 // Package workspace provides a Go SDK for the Elevo Workspace service.
 //
-// The SDK provides access to sandbox management, process execution, PTY terminals,
-// and filesystem operations through a simple, idiomatic Go API.
+// The SDK provides access to workspace management, sandbox management, process execution,
+// PTY terminals, and filesystem operations through a simple, idiomatic Go API.
 //
 // Basic usage:
 //
 //	client := workspace.NewClient("http://localhost:8080")
 //
-//	// Create a sandbox
+//	// Create a workspace
+//	ws, err := client.Workspace.Create(context.Background(), &workspace.CreateWorkspaceParams{
+//	    Name: "my-workspace",
+//	})
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	defer client.Workspace.Delete(context.Background(), ws.ID)
+//
+//	// Create a sandbox bound to the workspace
 //	sandbox, err := client.Sandbox.Create(context.Background(), &workspace.CreateSandboxParams{
-//	    Template: "workspace-test:latest",
+//	    WorkspaceID: ws.ID,
+//	    Template:    "workspace-test:latest",
 //	})
 //	if err != nil {
 //	    log.Fatal(err)

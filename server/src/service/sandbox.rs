@@ -10,8 +10,8 @@ use tracing::{error, info, warn};
 use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::docker::{CreateContainerOpts, DockerManager};
-use crate::infra::nfs::NfsManager;
 use crate::infra::sqlite::SandboxRepository;
+use crate::infra::workspace_repository::WorkspaceRepository;
 use crate::error::{Error, Result};
 use crate::Config;
 
@@ -21,9 +21,9 @@ const SANDBOX_LABEL_KEY: &str = "workspace.sandbox.id";
 /// Sandbox service for managing sandbox lifecycle
 pub struct SandboxService {
     repository: Arc<SandboxRepository>,
+    workspace_repo: Arc<WorkspaceRepository>,
     docker: Arc<DockerManager>,
     agent_pool: Arc<AgentConnPool>,
-    nfs_manager: Arc<NfsManager>,
     config: Arc<Config>,
 }
 
@@ -31,36 +31,39 @@ impl SandboxService {
     /// Create a new sandbox service
     pub fn new(
         repository: Arc<SandboxRepository>,
+        workspace_repo: Arc<WorkspaceRepository>,
         docker: Arc<DockerManager>,
         agent_pool: Arc<AgentConnPool>,
-        nfs_manager: Arc<NfsManager>,
         config: Arc<Config>,
     ) -> Self {
         Self {
             repository,
+            workspace_repo,
             docker,
             agent_pool,
-            nfs_manager,
             config,
         }
     }
 
     /// Create a new sandbox
     pub async fn create(&self, params: CreateSandboxParams) -> Result<Sandbox> {
-        info!("Creating sandbox with template: {:?}", params.template);
+        info!("Creating sandbox with template: {:?}, workspace_id: {}", params.template, params.workspace_id);
+
+        // Verify workspace exists
+        let workspace = self.workspace_repo.get(&params.workspace_id).await?;
 
         // Create database record first
         let sandbox = self.repository.create(params.clone()).await?;
         let sandbox_id = sandbox.id.clone();
 
-        // Create workspace directory
-        let workspace_dir = self.get_workspace_dir(&sandbox_id);
-        if let Err(e) = std::fs::create_dir_all(&workspace_dir) {
-            error!("Failed to create workspace directory: {}", e);
+        // Use workspace directory (already created by WorkspaceService)
+        let workspace_dir = self.get_workspace_dir(&workspace.id);
+        if !workspace_dir.exists() {
+            error!("Workspace directory does not exist: {:?}", workspace_dir);
             self.repository
-                .update_state(&sandbox_id, SandboxState::Error, Some(&e.to_string()))
+                .update_state(&sandbox_id, SandboxState::Error, Some("Workspace directory not found"))
                 .await?;
-            return Err(Error::Internal(format!("Failed to create workspace: {}", e)));
+            return Err(Error::Internal("Workspace directory not found".to_string()));
         }
 
         // Build container options
@@ -69,18 +72,20 @@ impl SandboxService {
 
         // Add sandbox ID and server address to environment
         env.insert("WORKSPACE_SANDBOX_ID".to_string(), sandbox_id.clone());
+        env.insert("WORKSPACE_WORKSPACE_ID".to_string(), workspace.id.clone());
         env.insert(
             "WORKSPACE_SERVER_ADDR".to_string(),
             self.config.agent_server_addr.clone(),
         );
 
         // Use host path for volume mounting if configured (for Docker-in-Docker scenarios)
-        let volume_host_path = self.config.get_sandbox_workspace_host_path(&sandbox_id);
+        let volume_host_path = self.config.get_sandbox_workspace_host_path(&workspace.id);
         let mut volumes = HashMap::new();
         volumes.insert(volume_host_path, "/workspace".to_string());
 
         let mut labels = HashMap::new();
         labels.insert(SANDBOX_LABEL_KEY.to_string(), sandbox_id.clone());
+        labels.insert("workspace.workspace.id".to_string(), workspace.id.clone());
 
         // Determine network mode
         let network_mode = self.config.docker_network.clone()
@@ -147,17 +152,6 @@ impl SandboxService {
             }
         }
 
-        // Export workspace via NFS
-        match self.nfs_manager.export(&sandbox_id, &workspace_dir).await {
-            Ok(nfs_url) => {
-                info!("NFS export created for sandbox {}: {}", sandbox_id, nfs_url);
-            }
-            Err(e) => {
-                warn!("Failed to export NFS for sandbox {}: {}", sandbox_id, e);
-                // Non-fatal error, continue
-            }
-        }
-
         // Fetch and return updated sandbox
         self.repository.get(&sandbox_id).await
     }
@@ -208,16 +202,8 @@ impl SandboxService {
         // Unregister agent connection
         self.agent_pool.unregister(id);
 
-        // Unexport NFS
-        self.nfs_manager.unexport(id).await;
-
-        // Remove workspace directory
-        let workspace_dir = self.get_workspace_dir(id);
-        if workspace_dir.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&workspace_dir) {
-                warn!("Failed to remove workspace directory: {}", e);
-            }
-        }
+        // NOTE: We do NOT delete the workspace directory here.
+        // The workspace is managed separately by WorkspaceService.
 
         // Delete from database
         self.repository.delete(id).await?;
@@ -231,14 +217,9 @@ impl SandboxService {
         self.agent_pool.is_connected(id)
     }
 
-    /// Get sandbox workspace directory
-    fn get_workspace_dir(&self, sandbox_id: &str) -> PathBuf {
-        PathBuf::from(&self.config.workspace_dir).join(sandbox_id)
-    }
-
-    /// Get NFS URL for a sandbox
-    pub async fn get_nfs_url(&self, sandbox_id: &str) -> Option<String> {
-        self.nfs_manager.get_nfs_url(sandbox_id).await
+    /// Get workspace directory for a workspace
+    fn get_workspace_dir(&self, workspace_id: &str) -> PathBuf {
+        PathBuf::from(&self.config.workspace_dir).join(workspace_id)
     }
 
     /// Cleanup expired sandboxes

@@ -5,10 +5,10 @@ Async Workspace Client - Main entry point for async SDK usage
 from typing import Optional
 import httpx
 
+from workspace_sdk.services.workspace import AsyncWorkspaceService
 from workspace_sdk.services.sandbox import AsyncSandboxService
 from workspace_sdk.services.process import AsyncProcessService
 from workspace_sdk.services.pty import AsyncPtyService
-from workspace_sdk.services.filesystem import AsyncFileSystemService
 from workspace_sdk.errors import parse_error_response
 
 
@@ -35,10 +35,10 @@ class AsyncWorkspaceClient:
         self._client: Optional[httpx.AsyncClient] = None
 
         # Services will be initialized when context manager is entered
+        self.workspace: AsyncWorkspaceService
         self.sandbox: AsyncSandboxService
         self.process: AsyncProcessService
         self.pty: AsyncPtyService
-        self.filesystem: AsyncFileSystemService
 
     async def __aenter__(self) -> "AsyncWorkspaceClient":
         """Enter async context manager"""
@@ -53,10 +53,10 @@ class AsyncWorkspaceClient:
         )
 
         # Initialize services
+        self.workspace = AsyncWorkspaceService(self._client, self._api_url)
         self.sandbox = AsyncSandboxService(self._client, self._api_url)
         self.process = AsyncProcessService(self._client, self._api_url)
         self.pty = AsyncPtyService(self._client, self._api_url)
-        self.filesystem = AsyncFileSystemService(self._client, self._api_url)
 
         return self
 
@@ -85,6 +85,7 @@ class AsyncWorkspaceClient:
 
         Usage:
             async with AsyncWorkspaceClient.create("http://localhost:8080") as client:
-                sandbox = await client.sandbox.create()
+                workspace = await client.workspace.create()
+                sandbox = await client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id))
         """
         return AsyncWorkspaceClient(api_url, api_key, timeout)

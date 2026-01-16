@@ -13,13 +13,13 @@ use crate::error::{Error, Result};
 #[derive(Debug, FromRow)]
 struct SandboxRow {
     id: String,
+    workspace_id: Option<String>,
     name: Option<String>,
     template: String,
     state: String,
     container_id: Option<String>,
     env: String,
     metadata: String,
-    nfs_url: Option<String>,
     timeout: i64,
     error_message: Option<String>,
     created_at: String,
@@ -47,15 +47,18 @@ impl TryFrom<SandboxRow> for Sandbox {
             .map_err(|e| Error::Internal(format!("Failed to parse updated_at: {}", e)))?
             .with_timezone(&Utc);
 
+        // workspace_id is required for new sandboxes, but may be empty for legacy data
+        let workspace_id = row.workspace_id.unwrap_or_default();
+
         Ok(Sandbox {
             id: row.id,
+            workspace_id,
             name: row.name,
             template: row.template,
             state,
             container_id: row.container_id,
             env,
             metadata,
-            nfs_url: row.nfs_url,
             created_at,
             updated_at,
             timeout: row.timeout as u64,
@@ -120,11 +123,12 @@ impl SandboxRepository {
 
         sqlx::query(
             r#"
-            INSERT INTO sandboxes (id, name, template, state, env, metadata, timeout, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sandboxes (id, workspace_id, name, template, state, env, metadata, timeout, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
+        .bind(&params.workspace_id)
         .bind(&params.name)
         .bind(&template)
         .bind(SandboxState::Starting.as_str())
@@ -143,7 +147,7 @@ impl SandboxRepository {
     pub async fn get(&self, id: &str) -> Result<Sandbox> {
         let row: SandboxRow = sqlx::query_as(
             r#"
-            SELECT id, name, template, state, container_id, env, metadata, nfs_url, timeout, error_message, created_at, updated_at
+            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
             WHERE id = ?
             "#,
@@ -162,7 +166,7 @@ impl SandboxRepository {
             Some(state) => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, name, template, state, container_id, env, metadata, nfs_url, timeout, error_message, created_at, updated_at
+                    SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
                     FROM sandboxes
                     WHERE state = ?
                     ORDER BY created_at DESC
@@ -175,7 +179,7 @@ impl SandboxRepository {
             None => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, name, template, state, container_id, env, metadata, nfs_url, timeout, error_message, created_at, updated_at
+                    SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
                     FROM sandboxes
                     ORDER BY created_at DESC
                     "#,
@@ -237,30 +241,6 @@ impl SandboxRepository {
         Ok(())
     }
 
-    /// Update sandbox NFS URL
-    pub async fn update_nfs_url(&self, id: &str, nfs_url: &str) -> Result<()> {
-        let now = Utc::now();
-
-        let result = sqlx::query(
-            r#"
-            UPDATE sandboxes
-            SET nfs_url = ?, updated_at = ?
-            WHERE id = ?
-            "#,
-        )
-        .bind(nfs_url)
-        .bind(now.to_rfc3339())
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(Error::SandboxNotFound(id.to_string()));
-        }
-
-        Ok(())
-    }
-
     /// Delete a sandbox
     pub async fn delete(&self, id: &str) -> Result<()> {
         let result = sqlx::query("DELETE FROM sandboxes WHERE id = ?")
@@ -295,7 +275,7 @@ impl SandboxRepository {
 
         let rows: Vec<SandboxRow> = sqlx::query_as(
             r#"
-            SELECT id, name, template, state, container_id, env, metadata, nfs_url, timeout, error_message, created_at, updated_at
+            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
             WHERE state = 'running'
               AND timeout > 0
@@ -303,6 +283,23 @@ impl SandboxRepository {
             "#,
         )
         .bind(now.to_rfc3339())
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// List sandboxes by workspace ID
+    pub async fn list_by_workspace(&self, workspace_id: &str) -> Result<Vec<Sandbox>> {
+        let rows: Vec<SandboxRow> = sqlx::query_as(
+            r#"
+            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+            FROM sandboxes
+            WHERE workspace_id = ?
+            ORDER BY created_at DESC
+            "#,
+        )
+        .bind(workspace_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -329,12 +326,31 @@ mod tests {
         pool
     }
 
+    // Helper to create a test workspace
+    async fn create_test_workspace(pool: &SqlitePool) -> String {
+        let workspace_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+        sqlx::query(
+            r#"INSERT INTO workspaces (id, name, metadata, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)"#,
+        )
+        .bind(&workspace_id)
+        .bind("test-workspace")
+        .bind(now.to_rfc3339())
+        .bind(now.to_rfc3339())
+        .execute(pool)
+        .await
+        .expect("Failed to create test workspace");
+        workspace_id
+    }
+
     #[tokio::test]
     async fn test_create_and_get_sandbox() {
         let pool = create_test_pool().await;
+        let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
+            workspace_id: workspace_id.clone(),
             template: Some("python:3.11".to_string()),
             name: Some("test-sandbox".to_string()),
             env: None,
@@ -343,6 +359,7 @@ mod tests {
         };
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
+        assert_eq!(sandbox.workspace_id, workspace_id);
         assert_eq!(sandbox.name, Some("test-sandbox".to_string()));
         assert_eq!(sandbox.template, "python:3.11");
         assert_eq!(sandbox.state, SandboxState::Starting);
@@ -356,9 +373,11 @@ mod tests {
     #[tokio::test]
     async fn test_update_state() {
         let pool = create_test_pool().await;
+        let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
+            workspace_id,
             template: None,
             name: None,
             env: None,
@@ -379,10 +398,12 @@ mod tests {
     #[tokio::test]
     async fn test_list_sandboxes() {
         let pool = create_test_pool().await;
+        let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         // Create two sandboxes
         let params1 = CreateSandboxParams {
+            workspace_id: workspace_id.clone(),
             template: Some("python".to_string()),
             name: Some("sandbox1".to_string()),
             env: None,
@@ -390,6 +411,7 @@ mod tests {
             timeout: None,
         };
         let params2 = CreateSandboxParams {
+            workspace_id,
             template: Some("node".to_string()),
             name: Some("sandbox2".to_string()),
             env: None,
@@ -420,9 +442,11 @@ mod tests {
     #[tokio::test]
     async fn test_delete_sandbox() {
         let pool = create_test_pool().await;
+        let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
+            workspace_id,
             template: None,
             name: None,
             env: None,

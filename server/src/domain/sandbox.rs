@@ -49,6 +49,9 @@ pub struct Sandbox {
     /// Unique identifier
     pub id: String,
 
+    /// Workspace ID this sandbox is bound to
+    pub workspace_id: String,
+
     /// Optional human-readable name
     pub name: Option<String>,
 
@@ -67,9 +70,6 @@ pub struct Sandbox {
     /// Custom metadata
     pub metadata: HashMap<String, String>,
 
-    /// NFS mount URL (if available)
-    pub nfs_url: Option<String>,
-
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -85,17 +85,17 @@ pub struct Sandbox {
 
 impl Sandbox {
     /// Create a new sandbox
-    pub fn new(id: String, template: String) -> Self {
+    pub fn new(id: String, workspace_id: String, template: String) -> Self {
         let now = Utc::now();
         Self {
             id,
+            workspace_id,
             name: None,
             template,
             state: SandboxState::Starting,
             container_id: None,
             env: HashMap::new(),
             metadata: HashMap::new(),
-            nfs_url: None,
             created_at: now,
             updated_at: now,
             timeout: 0,
@@ -141,6 +141,9 @@ impl Sandbox {
 /// Parameters for creating a sandbox
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSandboxParams {
+    /// Workspace ID to bind this sandbox to (required)
+    pub workspace_id: String,
+
     /// Template to use
     pub template: Option<String>,
 

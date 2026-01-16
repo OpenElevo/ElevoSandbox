@@ -27,7 +27,9 @@ use infra::agent_pool::AgentConnPool;
 use infra::docker::DockerManager;
 use infra::nfs::{NfsManager, NfsMode};
 use infra::sqlite::SandboxRepository;
+use infra::workspace_repository::WorkspaceRepository;
 use service::sandbox::SandboxService;
+use service::workspace::WorkspaceService;
 use service::process::ProcessService;
 use service::pty::PtyService;
 
@@ -35,6 +37,7 @@ use service::pty::PtyService;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
+    pub workspace_service: Arc<WorkspaceService>,
     pub sandbox_service: Arc<SandboxService>,
     pub process_service: Arc<ProcessService>,
     pub pty_service: Arc<PtyService>,
@@ -77,7 +80,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize infrastructure
     let pool = SandboxRepository::init(&config.database_url).await?;
-    let repository = Arc::new(SandboxRepository::new(pool));
+    let sandbox_repository = Arc::new(SandboxRepository::new(pool.clone()));
+    let workspace_repository = Arc::new(WorkspaceRepository::new(pool));
     let docker = Arc::new(DockerManager::new(None, &config.base_image)?);
     let agent_pool = Arc::new(AgentConnPool::new());
 
@@ -100,27 +104,34 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize services
+    let workspace_service = Arc::new(WorkspaceService::new(
+        workspace_repository.clone(),
+        nfs_manager.clone(),
+        config.clone(),
+    ));
+
     let sandbox_service = Arc::new(SandboxService::new(
-        repository.clone(),
+        sandbox_repository.clone(),
+        workspace_repository.clone(),
         docker.clone(),
         agent_pool.clone(),
-        nfs_manager.clone(),
         config.clone(),
     ));
 
     let process_service = Arc::new(ProcessService::new(
         agent_pool.clone(),
-        repository.clone(),
+        sandbox_repository.clone(),
     ));
 
     let pty_service = Arc::new(PtyService::new(
         agent_pool.clone(),
-        repository.clone(),
+        sandbox_repository.clone(),
     ));
 
     // Create application state
     let state = AppState {
         config: config.clone(),
+        workspace_service,
         sandbox_service,
         process_service,
         pty_service,

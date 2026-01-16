@@ -15,10 +15,17 @@ export class SandboxService {
   ) {}
 
   /**
-   * Create a new sandbox
+   * Create a new sandbox bound to a workspace
    */
-  async create(params: CreateSandboxParams = {}): Promise<Sandbox> {
-    const response = await this.httpClient.post('/sandboxes', params);
+  async create(params: CreateSandboxParams): Promise<Sandbox> {
+    const response = await this.httpClient.post('/sandboxes', {
+      workspace_id: params.workspaceId,
+      template: params.template,
+      name: params.name,
+      env: params.env,
+      metadata: params.metadata,
+      timeout: params.timeout,
+    });
     return this.transformSandbox(response.data);
   }
 
@@ -51,12 +58,12 @@ export class SandboxService {
   private transformSandbox(data: any): Sandbox {
     return {
       id: data.id,
+      workspaceId: data.workspace_id,
       name: data.name,
       template: data.template,
       state: data.state,
       env: data.env,
       metadata: data.metadata,
-      nfsUrl: data.nfs_url,
       createdAt: data.created_at,
       updatedAt: data.updated_at,
       timeout: data.timeout,

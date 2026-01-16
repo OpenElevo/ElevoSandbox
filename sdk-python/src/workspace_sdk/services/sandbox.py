@@ -15,20 +15,21 @@ class AsyncSandboxService:
         self._client = client
         self._api_url = api_url
 
-    async def create(self, params: Optional[CreateSandboxParams] = None) -> Sandbox:
-        """Create a new sandbox"""
-        data = {}
-        if params:
-            if params.template:
-                data["template"] = params.template
-            if params.name:
-                data["name"] = params.name
-            if params.env:
-                data["env"] = params.env
-            if params.metadata:
-                data["metadata"] = params.metadata
-            if params.timeout:
-                data["timeout"] = params.timeout
+    async def create(self, params: CreateSandboxParams) -> Sandbox:
+        """Create a new sandbox bound to a workspace"""
+        data = {
+            "workspace_id": params.workspace_id,
+        }
+        if params.template:
+            data["template"] = params.template
+        if params.name:
+            data["name"] = params.name
+        if params.env:
+            data["env"] = params.env
+        if params.metadata:
+            data["metadata"] = params.metadata
+        if params.timeout:
+            data["timeout"] = params.timeout
 
         response = await self._client.post("/sandboxes", json=data)
         response.raise_for_status()
@@ -64,12 +65,12 @@ class AsyncSandboxService:
         """Transform API response to Sandbox type"""
         return Sandbox(
             id=data["id"],
+            workspace_id=data["workspace_id"],
             name=data.get("name"),
             template=data["template"],
             state=data["state"],
             env=data.get("env"),
             metadata=data.get("metadata"),
-            nfs_url=data.get("nfs_url"),
             created_at=data["created_at"],
             updated_at=data["updated_at"],
             timeout=data.get("timeout"),
@@ -84,20 +85,21 @@ class SandboxService:
         self._client = client
         self._api_url = api_url
 
-    def create(self, params: Optional[CreateSandboxParams] = None) -> Sandbox:
-        """Create a new sandbox"""
-        data = {}
-        if params:
-            if params.template:
-                data["template"] = params.template
-            if params.name:
-                data["name"] = params.name
-            if params.env:
-                data["env"] = params.env
-            if params.metadata:
-                data["metadata"] = params.metadata
-            if params.timeout:
-                data["timeout"] = params.timeout
+    def create(self, params: CreateSandboxParams) -> Sandbox:
+        """Create a new sandbox bound to a workspace"""
+        data = {
+            "workspace_id": params.workspace_id,
+        }
+        if params.template:
+            data["template"] = params.template
+        if params.name:
+            data["name"] = params.name
+        if params.env:
+            data["env"] = params.env
+        if params.metadata:
+            data["metadata"] = params.metadata
+        if params.timeout:
+            data["timeout"] = params.timeout
 
         response = self._client.post("/sandboxes", json=data)
         response.raise_for_status()
@@ -133,12 +135,12 @@ class SandboxService:
         """Transform API response to Sandbox type"""
         return Sandbox(
             id=data["id"],
+            workspace_id=data["workspace_id"],
             name=data.get("name"),
             template=data["template"],
             state=data["state"],
             env=data.get("env"),
             metadata=data.get("metadata"),
-            nfs_url=data.get("nfs_url"),
             created_at=data["created_at"],
             updated_at=data["updated_at"],
             timeout=data.get("timeout"),

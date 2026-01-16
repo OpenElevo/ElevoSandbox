@@ -12,6 +12,7 @@ use crate::{AppState, Result};
 /// Create sandbox request
 #[derive(Debug, Deserialize)]
 pub struct CreateSandboxRequest {
+    pub workspace_id: String,
     pub template: Option<String>,
     pub name: Option<String>,
     pub env: Option<std::collections::HashMap<String, String>>,
@@ -23,12 +24,12 @@ pub struct CreateSandboxRequest {
 #[derive(Debug, Serialize)]
 pub struct SandboxResponse {
     pub id: String,
+    pub workspace_id: String,
     pub name: Option<String>,
     pub template: String,
     pub state: String,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
-    pub nfs_url: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub timeout: Option<u64>,
@@ -60,6 +61,7 @@ pub async fn create_sandbox(
     Json(req): Json<CreateSandboxRequest>,
 ) -> Result<Json<SandboxResponse>> {
     let params = CreateSandboxParams {
+        workspace_id: req.workspace_id,
         template: req.template,
         name: req.name,
         env: req.env,
@@ -71,12 +73,12 @@ pub async fn create_sandbox(
 
     Ok(Json(SandboxResponse {
         id: sandbox.id,
+        workspace_id: sandbox.workspace_id,
         name: sandbox.name,
         template: sandbox.template,
         state: sandbox.state.as_str().to_string(),
         env: Some(sandbox.env),
         metadata: Some(sandbox.metadata),
-        nfs_url: sandbox.nfs_url,
         created_at: sandbox.created_at.to_rfc3339(),
         updated_at: sandbox.updated_at.to_rfc3339(),
         timeout: Some(sandbox.timeout),
@@ -93,12 +95,12 @@ pub async fn get_sandbox(
 
     Ok(Json(SandboxResponse {
         id: sandbox.id,
+        workspace_id: sandbox.workspace_id,
         name: sandbox.name,
         template: sandbox.template,
         state: sandbox.state.as_str().to_string(),
         env: Some(sandbox.env),
         metadata: Some(sandbox.metadata),
-        nfs_url: sandbox.nfs_url,
         created_at: sandbox.created_at.to_rfc3339(),
         updated_at: sandbox.updated_at.to_rfc3339(),
         timeout: Some(sandbox.timeout),
@@ -127,12 +129,12 @@ pub async fn list_sandboxes(
         .into_iter()
         .map(|s| SandboxResponse {
             id: s.id,
+            workspace_id: s.workspace_id,
             name: s.name,
             template: s.template,
             state: s.state.as_str().to_string(),
             env: Some(s.env),
             metadata: Some(s.metadata),
-            nfs_url: s.nfs_url,
             created_at: s.created_at.to_rfc3339(),
             updated_at: s.updated_at.to_rfc3339(),
             timeout: Some(s.timeout),

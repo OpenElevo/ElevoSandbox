@@ -3,10 +3,10 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import { WorkspaceService } from './services/workspace';
 import { SandboxService } from './services/sandbox';
 import { ProcessService } from './services/process';
 import { PtyService } from './services/pty';
-import { FileSystemService } from './services/filesystem';
 import { NfsService } from './services/nfs';
 import { WorkspaceError, parseErrorResponse } from './errors';
 
@@ -33,15 +33,15 @@ export class WorkspaceClient {
   private readonly httpClient: AxiosInstance;
   private readonly options: WorkspaceClientOptions;
 
+  /** Workspace service for managing workspaces and file operations */
+  public readonly workspace: WorkspaceService;
   /** Sandbox service for managing sandboxes */
   public readonly sandbox: SandboxService;
   /** Process service for executing commands */
   public readonly process: ProcessService;
   /** PTY service for interactive terminals */
   public readonly pty: PtyService;
-  /** FileSystem service for file operations */
-  public readonly filesystem: FileSystemService;
-  /** NFS service for mounting sandbox workspaces */
+  /** NFS service for mounting workspaces */
   public readonly nfs: NfsService;
 
   constructor(options: WorkspaceClientOptions) {
@@ -69,10 +69,10 @@ export class WorkspaceClient {
     );
 
     // Initialize services
+    this.workspace = new WorkspaceService(this.httpClient, this.options.apiUrl);
     this.sandbox = new SandboxService(this.httpClient, this.options.apiUrl);
     this.process = new ProcessService(this.httpClient, this.options.apiUrl);
     this.pty = new PtyService(this.httpClient, this.options.apiUrl);
-    this.filesystem = new FileSystemService(this.httpClient, this.options.apiUrl);
     this.nfs = new NfsService(this.options.nfsHost, this.options.nfsPort ?? 2049);
   }
 
