@@ -16,33 +16,39 @@ async function main() {
     timeout: 60000,
   });
 
-  // 1. Create a sandbox
-  console.log('1. Creating sandbox...');
+  // 1. Create a workspace
+  console.log('1. Creating workspace...');
+  const workspace = await client.workspace.create();
+  console.log(`   Created: ${workspace.id}\n`);
+
+  // 2. Create a sandbox
+  console.log('2. Creating sandbox...');
   const sandbox = await client.sandbox.create({
-    template: 'workspace-test:latest',
+    workspaceId: workspace.id,
+    template: 'workspace-base:latest',
     name: 'example-sandbox',
     metadata: { purpose: 'demo' },
   });
   console.log(`   Created: ${sandbox.id} (state: ${sandbox.state})\n`);
 
   try {
-    // 2. Run a simple command
-    console.log('2. Running echo command...');
+    // 3. Run a simple command
+    console.log('3. Running echo command...');
     let result = await client.process.run(sandbox.id, 'echo', {
       args: ['Hello', 'from', 'TypeScript', 'SDK!'],
     });
     console.log(`   Output: ${result.stdout}`);
 
-    // 3. Run command with environment variables
-    console.log('3. Running command with environment variables...');
+    // 4. Run command with environment variables
+    console.log('4. Running command with environment variables...');
     result = await client.process.run(sandbox.id, 'bash', {
       args: ['-c', 'echo "User: $USER, App: $APP_NAME"'],
       env: { USER: 'developer', APP_NAME: 'MyApp' },
     });
     console.log(`   Output: ${result.stdout}`);
 
-    // 4. Write and read a file
-    console.log('4. Writing and reading a file...');
+    // 5. Write and read a file
+    console.log('5. Writing and reading a file...');
     result = await client.process.run(sandbox.id, 'bash', {
       args: [
         '-c',
@@ -51,16 +57,17 @@ async function main() {
     });
     console.log(`   File content: ${result.stdout}`);
 
-    // 5. List workspace directory
-    console.log('5. Listing workspace directory...');
+    // 6. List workspace directory
+    console.log('6. Listing workspace directory...');
     result = await client.process.run(sandbox.id, 'ls', {
       args: ['-la', '/workspace'],
     });
     console.log(`   Directory listing:\n${result.stdout}`);
   } finally {
-    // 6. Cleanup
-    console.log('\n6. Cleaning up...');
-    await client.sandbox.delete(sandbox.id, true);
+    // 7. Cleanup
+    console.log('\n7. Cleaning up...');
+    await client.sandbox.delete(sandbox.id);
+    await client.workspace.delete(workspace.id);
     console.log('   Done!');
   }
 }

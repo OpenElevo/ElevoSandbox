@@ -4,7 +4,7 @@
  * @packageDocumentation
  */
 
-export { WorkspaceClient, WorkspaceClientOptions } from './client';
+export { WorkspaceClient, type WorkspaceClientOptions } from './client';
 
 // Services
 export * from './services';

@@ -375,7 +375,7 @@ with WorkspaceClient("http://localhost:8080") as client:
 ### TypeScript SDK
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk'
+import { WorkspaceClient } from '@openelevo/workspace-sdk'
 
 const client = new WorkspaceClient({ apiUrl: 'http://localhost:8080' })
 
