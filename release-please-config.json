@@ -1,0 +1,6 @@
+{
+  "packages": {
+    "sdk-typescript": {}
+  },
+  "bump-minor-pre-major": true
+}

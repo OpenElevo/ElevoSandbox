@@ -1,0 +1,54 @@
+name: release-please
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+
+    outputs:
+      releases_created: ${{ steps.release.outputs.sdk-typescript--release_created }}
+
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GH_TOKEN_EVE }}
+          release-type: node
+          path: sdk-typescript
+
+  npm-publish:
+
+    needs: release-please
+
+    runs-on: ubuntu-latest
+
+    # Ensure that a publication only occurs when a new release is created:
+    if: ${{ needs.release-please.outputs.releases_created }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: sdk-typescript
+        run: npm ci
+
+      - name: Build @openelevo/workspace-sdk
+        working-directory: sdk-typescript
+        run: npm run build
+
+      - name: Publish to npm
+        working-directory: sdk-typescript
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
