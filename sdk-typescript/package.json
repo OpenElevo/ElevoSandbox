@@ -1,5 +1,5 @@
 {
-  "name": "@elevo/workspace-sdk",
+  "name": "@openelevo/workspace-sdk",
   "version": "0.1.0",
   "description": "TypeScript SDK for Elevo Workspace Service",
   "type": "module",

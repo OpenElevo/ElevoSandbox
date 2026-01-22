@@ -5,11 +5,11 @@ TypeScript/JavaScript SDK for the Elevo Workspace service. Provides a fully type
 ## Installation
 
 ```bash
-npm install @elevo/workspace-sdk
+npm install @openelevo/workspace-sdk
 # or
-yarn add @elevo/workspace-sdk
+yarn add @openelevo/workspace-sdk
 # or
-pnpm add @elevo/workspace-sdk
+pnpm add @openelevo/workspace-sdk
 ```
 
 ### Dependencies
@@ -22,7 +22,7 @@ pnpm add @elevo/workspace-sdk
 ## Quick Start
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk';
+import { WorkspaceClient } from '@openelevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -79,7 +79,7 @@ await client.workspace.delete(workspace.id);
 ### Client Initialization
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk';
+import { WorkspaceClient } from '@openelevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -97,7 +97,7 @@ console.log(`Server status: ${health.status}`);
 ### Workspace Service
 
 ```typescript
-import { CreateWorkspaceParams } from '@elevo/workspace-sdk';
+import { CreateWorkspaceParams } from '@openelevo/workspace-sdk';
 
 // Create a workspace
 const workspace = await client.workspace.create({
@@ -129,7 +129,7 @@ const exists = await client.workspace.exists(workspace.id, 'src/main.py');
 ### Sandbox Service
 
 ```typescript
-import { CreateSandboxParams, SandboxState } from '@elevo/workspace-sdk';
+import { CreateSandboxParams, SandboxState } from '@openelevo/workspace-sdk';
 
 // Create a sandbox bound to a workspace
 const sandbox = await client.sandbox.create({
@@ -163,7 +163,7 @@ const readySandbox = await client.sandbox.waitForState('sandbox-id', 'running');
 ### Process Service
 
 ```typescript
-import { RunCommandOptions, ProcessEvent } from '@elevo/workspace-sdk';
+import { RunCommandOptions, ProcessEvent } from '@openelevo/workspace-sdk';
 
 // Run a command and wait for completion
 const result = await client.process.run(sandboxId, 'ls', {
@@ -204,7 +204,7 @@ await client.process.kill(sandboxId, pid, 15); // SIGTERM
 ### PTY Service
 
 ```typescript
-import { PtyOptions, PtyHandle } from '@elevo/workspace-sdk';
+import { PtyOptions, PtyHandle } from '@openelevo/workspace-sdk';
 
 // Create and connect to PTY
 const pty = await client.pty.connect(sandboxId, {
@@ -260,7 +260,7 @@ import {
   ProcessTimeoutError,
   PtyNotFoundError,
   AgentNotConnectedError,
-} from '@elevo/workspace-sdk';
+} from '@openelevo/workspace-sdk';
 
 try {
   const sandbox = await client.sandbox.get('invalid-id');
@@ -353,7 +353,7 @@ interface FileInfo {
 ## Concurrent Usage
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk';
+import { WorkspaceClient } from '@openelevo/workspace-sdk';
 
 const client = new WorkspaceClient({
   apiUrl: 'http://localhost:8080',
@@ -394,7 +394,7 @@ await client.workspace.delete(workspace.id);
 ## Timeout Handling
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk';
+import { WorkspaceClient } from '@openelevo/workspace-sdk';
 
 // Client-level timeout
 const client = new WorkspaceClient({
@@ -432,10 +432,10 @@ The SDK supports both ESM and CommonJS:
 
 ```typescript
 // ESM
-import { WorkspaceClient } from '@elevo/workspace-sdk';
+import { WorkspaceClient } from '@openelevo/workspace-sdk';
 
 // CommonJS
-const { WorkspaceClient } = require('@elevo/workspace-sdk');
+const { WorkspaceClient } = require('@openelevo/workspace-sdk');
 ```
 
 ## Examples

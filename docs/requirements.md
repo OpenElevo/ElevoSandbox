@@ -1299,7 +1299,7 @@ X-API-Key: <api_key>
 
 ### 7.1 TypeScript SDK
 
-**包名:** `@elevo/workspace-sdk`
+**包名:** `@openelevo/workspace-sdk`
 
 **客户端配置:**
 
@@ -1317,7 +1317,7 @@ interface ClientConfig {
 **使用示例:**
 
 ```typescript
-import { WorkspaceClient } from '@elevo/workspace-sdk'
+import { WorkspaceClient } from '@openelevo/workspace-sdk'
 
 const client = new WorkspaceClient({
   apiUrl: 'http://workspace-server:8080',
@@ -1422,7 +1422,7 @@ export class RateLimitedError extends WorkspaceError {}
 
 ```typescript
 // 方式 1: 使用 using 声明 (TypeScript 5.2+, Node.js 18+)
-import { WorkspaceClient } from '@elevo/workspace-sdk'
+import { WorkspaceClient } from '@openelevo/workspace-sdk'
 
 async function main() {
   const client = new WorkspaceClient({...})
@@ -1439,7 +1439,7 @@ async function main() {
 }
 
 // 方式 2: 使用辅助函数 (兼容旧版本)
-import { withSandbox } from '@elevo/workspace-sdk'
+import { withSandbox } from '@openelevo/workspace-sdk'
 
 await withSandbox(client, { template: 'python:3.11' }, async (sandbox) => {
   const result = await sandbox.process.run('python --version')
