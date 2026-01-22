@@ -1,6 +1,8 @@
 {
   "packages": {
-    "sdk-typescript": {}
+    "sdk-typescript": {
+      "release-type": "node"
+    }
   },
   "bump-minor-pre-major": true
 }

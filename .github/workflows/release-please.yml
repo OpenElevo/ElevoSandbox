@@ -17,8 +17,6 @@ jobs:
         id: release
         with:
           token: ${{ secrets.GH_TOKEN_EVE }}
-          release-type: node
-          path: sdk-typescript
 
   npm-publish:
 
