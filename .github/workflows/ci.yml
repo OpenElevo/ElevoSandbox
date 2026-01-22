@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, github]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -118,7 +118,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install dependencies
         working-directory: sdk-typescript
@@ -126,7 +126,7 @@ jobs:
 
       - name: Type check
         working-directory: sdk-typescript
-        run: npm run build || npx tsc --noEmit
+        run: npm run build
 
   sdk-go:
     name: Go SDK
