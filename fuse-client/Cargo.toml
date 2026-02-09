@@ -1,0 +1,46 @@
+[package]
+name = "workspace-fuse"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "FUSE client for mounting Elevo Workspaces"
+
+[[bin]]
+name = "workspace-fuse"
+path = "src/main.rs"
+
+[dependencies]
+# Shared proto definitions
+workspace-proto = { path = "../workspace-proto" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+
+# gRPC
+tonic = { workspace = true }
+tonic-types = { workspace = true }
+prost-types = { workspace = true }
+
+# FUSE
+fuser = "0.16"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Caching
+moka = { version = "0.12", features = ["sync"] }
+
+# System
+libc = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+
+# Utilities
+bytes = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
