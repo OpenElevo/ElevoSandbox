@@ -1,31 +1,33 @@
 //! NFS file system management
 //!
 //! Provides embedded NFS server for exposing sandbox workspaces.
+//! All file operations are delegated to `StorageBackend` for async, non-blocking I/O.
 
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write as IoWrite};
-use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use nfsserve::nfs::{
-    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_size3,
+    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_atime,
+    set_mode3, set_mtime, set_size3, specdata3,
 };
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use super::storage::{FileStat, FileType, StorageBackend, StorageError};
+
 /// NFS manager for handling file system exports
 pub struct NfsManager {
     mode: NfsMode,
-    base_dir: PathBuf,
     port: u16,
     host: String,
-    /// Map of sandbox_id -> exported path
-    exports: Arc<RwLock<HashMap<String, PathBuf>>>,
+    storage: Arc<dyn StorageBackend>,
+    /// Map of workspace_id (used as NFS export name) -> workspace_id
+    /// The storage backend knows how to resolve workspace_id to a physical path.
+    exports: Arc<RwLock<HashMap<String, String>>>,
     /// Server handle (if running)
     server_handle: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
 }
@@ -41,12 +43,12 @@ pub enum NfsMode {
 
 impl NfsManager {
     /// Create a new NFS manager
-    pub fn new(mode: NfsMode, base_dir: PathBuf, port: u16, host: String) -> Self {
+    pub fn new(mode: NfsMode, port: u16, host: String, storage: Arc<dyn StorageBackend>) -> Self {
         Self {
             mode,
-            base_dir,
             port,
             host,
+            storage,
             exports: Arc::new(RwLock::new(HashMap::new())),
             server_handle: Arc::new(RwLock::new(None)),
         }
@@ -65,14 +67,14 @@ impl NfsManager {
             return Ok(());
         }
 
-        let base_dir = self.base_dir.clone();
         let port = self.port;
         let exports = self.exports.clone();
+        let storage = self.storage.clone();
 
         info!("Starting embedded NFS server on port {}", port);
 
         let server_task = tokio::spawn(async move {
-            let fs = WorkspaceNfs::new(base_dir, exports);
+            let fs = WorkspaceNfs::new(storage, exports);
             let addr = format!("0.0.0.0:{}", port);
 
             match NFSTcpListener::bind(&addr, fs).await {
@@ -101,30 +103,33 @@ impl NfsManager {
         }
     }
 
-    /// Export a sandbox workspace
-    pub async fn export(&self, sandbox_id: &str, workspace_path: &Path) -> anyhow::Result<String> {
+    /// Export a workspace
+    pub async fn export(&self, workspace_id: &str) -> anyhow::Result<String> {
         let mut exports = self.exports.write().await;
-        exports.insert(sandbox_id.to_string(), workspace_path.to_path_buf());
+        exports.insert(workspace_id.to_string(), workspace_id.to_string());
 
-        let nfs_url = format!("nfs://{}:{}/{}", self.host, self.port, sandbox_id);
-        info!("Exported sandbox {} at {}", sandbox_id, nfs_url);
+        let nfs_url = format!("nfs://{}:{}/{}", self.host, self.port, workspace_id);
+        info!("Exported workspace {} at {}", workspace_id, nfs_url);
 
         Ok(nfs_url)
     }
 
-    /// Unexport a sandbox workspace
-    pub async fn unexport(&self, sandbox_id: &str) {
+    /// Unexport a workspace
+    pub async fn unexport(&self, workspace_id: &str) {
         let mut exports = self.exports.write().await;
-        if exports.remove(sandbox_id).is_some() {
-            info!("Unexported sandbox {}", sandbox_id);
+        if exports.remove(workspace_id).is_some() {
+            info!("Unexported workspace {}", workspace_id);
         }
     }
 
-    /// Get NFS URL for a sandbox
-    pub async fn get_nfs_url(&self, sandbox_id: &str) -> Option<String> {
+    /// Get NFS URL for a workspace
+    pub async fn get_nfs_url(&self, workspace_id: &str) -> Option<String> {
         let exports = self.exports.read().await;
-        if exports.contains_key(sandbox_id) {
-            Some(format!("nfs://{}:{}/{}", self.host, self.port, sandbox_id))
+        if exports.contains_key(workspace_id) {
+            Some(format!(
+                "nfs://{}:{}/{}",
+                self.host, self.port, workspace_id
+            ))
         } else {
             None
         }
@@ -135,129 +140,211 @@ impl NfsManager {
         &self.mode
     }
 
-    /// Get the base directory
-    pub fn base_dir(&self) -> &Path {
-        &self.base_dir
-    }
-
     /// Get the NFS port
     pub fn port(&self) -> u16 {
         self.port
     }
 }
 
-/// NFS filesystem implementation for workspace access
+/// Inode key: (workspace_id, relative_path)
+/// For workspace root dirs, relative_path is empty string.
+type InodeKey = (String, String);
+
+/// Convert `StorageError` to NFS `nfsstat3`
+fn storage_error_to_nfsstat(err: &StorageError) -> nfsstat3 {
+    match err {
+        StorageError::NotFound(_) => nfsstat3::NFS3ERR_NOENT,
+        StorageError::AlreadyExists(_) => nfsstat3::NFS3ERR_EXIST,
+        StorageError::IsADirectory(_) => nfsstat3::NFS3ERR_ISDIR,
+        StorageError::NotADirectory(_) => nfsstat3::NFS3ERR_NOTDIR,
+        StorageError::DirectoryNotEmpty(_) => nfsstat3::NFS3ERR_NOTEMPTY,
+        StorageError::PermissionDenied(_) | StorageError::PathTraversalDenied(_) => {
+            nfsstat3::NFS3ERR_ACCES
+        }
+        StorageError::NotSupported(_) => nfsstat3::NFS3ERR_NOTSUPP,
+        StorageError::NotAFile(_) => nfsstat3::NFS3ERR_INVAL,
+        StorageError::Io { .. } | StorageError::Internal(_) => nfsstat3::NFS3ERR_IO,
+    }
+}
+
+/// Convert an optional `DateTime<Utc>` to NFS `nfstime3`
+fn to_nfstime3(dt: Option<DateTime<Utc>>) -> nfstime3 {
+    match dt {
+        Some(dt) => {
+            let ts = dt.timestamp();
+            let nsec = dt.timestamp_subsec_nanos();
+            nfstime3 {
+                seconds: ts.clamp(0, u32::MAX as i64) as u32,
+                nseconds: nsec,
+            }
+        }
+        None => nfstime3 {
+            seconds: 0,
+            nseconds: 0,
+        },
+    }
+}
+
+/// Convert NFS `nfstime3` to `DateTime<Utc>`
+fn nfstime3_to_datetime(t: nfstime3) -> DateTime<Utc> {
+    use chrono::TimeZone;
+    Utc.timestamp_opt(t.seconds as i64, t.nseconds)
+        .single()
+        .unwrap_or_else(Utc::now)
+}
+
+/// Convert `FileStat` to NFS `fattr3`
+fn file_stat_to_fattr(stat: &FileStat, fileid: fileid3) -> fattr3 {
+    let ftype = match stat.file_type {
+        FileType::File => ftype3::NF3REG,
+        FileType::Directory => ftype3::NF3DIR,
+        FileType::Symlink => ftype3::NF3LNK,
+    };
+
+    fattr3 {
+        ftype,
+        mode: stat.mode,
+        nlink: if stat.file_type == FileType::Directory {
+            2
+        } else {
+            1
+        },
+        uid: stat.uid,
+        gid: stat.gid,
+        size: stat.size,
+        used: stat.size,
+        rdev: specdata3 {
+            specdata1: 0,
+            specdata2: 0,
+        },
+        fsid: 0,
+        fileid,
+        atime: to_nfstime3(stat.accessed_at),
+        mtime: to_nfstime3(stat.modified_at),
+        ctime: to_nfstime3(stat.modified_at),
+    }
+}
+
+/// Default fattr3 for a directory (fallback when stat fails)
+fn default_dir_fattr(fileid: fileid3) -> fattr3 {
+    fattr3 {
+        ftype: ftype3::NF3DIR,
+        mode: 0o755,
+        nlink: 2,
+        uid: 0,
+        gid: 0,
+        size: 4096,
+        used: 4096,
+        rdev: specdata3 {
+            specdata1: 0,
+            specdata2: 0,
+        },
+        fsid: 0,
+        fileid,
+        atime: nfstime3 {
+            seconds: 0,
+            nseconds: 0,
+        },
+        mtime: nfstime3 {
+            seconds: 0,
+            nseconds: 0,
+        },
+        ctime: nfstime3 {
+            seconds: 0,
+            nseconds: 0,
+        },
+    }
+}
+
+/// NFS filesystem implementation backed by `StorageBackend`
+///
+/// The inode mapping uses `(workspace_id, relative_path)` tuples, decoupling
+/// logical paths from physical storage locations.
 struct WorkspaceNfs {
-    base_dir: PathBuf,
-    exports: Arc<RwLock<HashMap<String, PathBuf>>>,
+    storage: Arc<dyn StorageBackend>,
+    exports: Arc<RwLock<HashMap<String, String>>>,
     /// File ID counter
     next_fileid: std::sync::atomic::AtomicU64,
-    /// Path to file ID mapping
-    path_to_id: std::sync::RwLock<HashMap<PathBuf, fileid3>>,
-    /// File ID to path mapping
-    id_to_path: std::sync::RwLock<HashMap<fileid3, PathBuf>>,
+    /// Logical path to file ID mapping
+    path_to_id: RwLock<HashMap<InodeKey, fileid3>>,
+    /// File ID to logical path mapping
+    id_to_path: RwLock<HashMap<fileid3, InodeKey>>,
 }
 
 impl WorkspaceNfs {
-    fn new(base_dir: PathBuf, exports: Arc<RwLock<HashMap<String, PathBuf>>>) -> Self {
+    fn new(
+        storage: Arc<dyn StorageBackend>,
+        exports: Arc<RwLock<HashMap<String, String>>>,
+    ) -> Self {
         Self {
-            base_dir,
+            storage,
             exports,
             next_fileid: std::sync::atomic::AtomicU64::new(2), // 1 is reserved for root
-            path_to_id: std::sync::RwLock::new(HashMap::new()),
-            id_to_path: std::sync::RwLock::new(HashMap::new()),
+            path_to_id: RwLock::new(HashMap::new()),
+            id_to_path: RwLock::new(HashMap::new()),
         }
     }
 
-    fn get_or_create_fileid(&self, path: &Path) -> fileid3 {
-        let mut path_to_id = self.path_to_id.write().unwrap();
-        if let Some(&id) = path_to_id.get(path) {
+    /// Get or create a file ID for a logical path
+    async fn get_or_create_fileid(&self, key: &InodeKey) -> fileid3 {
+        // Fast path: read lock
+        {
+            let path_to_id = self.path_to_id.read().await;
+            if let Some(&id) = path_to_id.get(key) {
+                return id;
+            }
+        }
+
+        // Slow path: write lock
+        let mut path_to_id = self.path_to_id.write().await;
+        // Double-check after acquiring write lock
+        if let Some(&id) = path_to_id.get(key) {
             return id;
         }
 
         let id = self
             .next_fileid
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        path_to_id.insert(path.to_path_buf(), id);
+        path_to_id.insert(key.clone(), id);
 
-        let mut id_to_path = self.id_to_path.write().unwrap();
-        id_to_path.insert(id, path.to_path_buf());
+        let mut id_to_path = self.id_to_path.write().await;
+        id_to_path.insert(id, key.clone());
 
         id
     }
 
-    fn get_path_by_id(&self, id: fileid3) -> Option<PathBuf> {
-        if id == 1 {
-            return Some(self.base_dir.clone());
-        }
-        let id_to_path = self.id_to_path.read().unwrap();
+    /// Get the logical path for a file ID
+    async fn get_key_by_id(&self, id: fileid3) -> Option<InodeKey> {
+        let id_to_path = self.id_to_path.read().await;
         id_to_path.get(&id).cloned()
     }
 
-    fn metadata_to_fattr(&self, metadata: &std::fs::Metadata, fileid: fileid3) -> fattr3 {
-        let ftype = if metadata.is_dir() {
-            ftype3::NF3DIR
-        } else if metadata.is_symlink() {
-            ftype3::NF3LNK
+    /// Remove inode mapping for a given key
+    async fn remove_inode(&self, key: &InodeKey) {
+        let mut path_to_id = self.path_to_id.write().await;
+        if let Some(id) = path_to_id.remove(key) {
+            let mut id_to_path = self.id_to_path.write().await;
+            id_to_path.remove(&id);
+        }
+    }
+
+    /// Remap inode from old key to new key (for rename operations)
+    async fn remap_inode(&self, old_key: &InodeKey, new_key: InodeKey) {
+        let mut path_to_id = self.path_to_id.write().await;
+        if let Some(id) = path_to_id.remove(old_key) {
+            path_to_id.insert(new_key.clone(), id);
+            let mut id_to_path = self.id_to_path.write().await;
+            id_to_path.insert(id, new_key);
+        }
+    }
+
+    /// Build a relative path for a child entry inside a directory.
+    /// If parent_path is empty (workspace root), return just the child name.
+    fn child_path(parent_path: &str, child_name: &str) -> String {
+        if parent_path.is_empty() {
+            child_name.to_string()
         } else {
-            ftype3::NF3REG
-        };
-
-        let mode = metadata.mode();
-        let nlink = metadata.nlink() as u32;
-        let uid = metadata.uid();
-        let gid = metadata.gid();
-        let size = metadata.len();
-        let used = metadata.blocks() * 512;
-
-        let atime = metadata
-            .accessed()
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| nfstime3 {
-                seconds: d.as_secs() as u32,
-                nseconds: d.subsec_nanos(),
-            })
-            .unwrap_or(nfstime3 {
-                seconds: 0,
-                nseconds: 0,
-            });
-
-        let mtime = metadata
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| nfstime3 {
-                seconds: d.as_secs() as u32,
-                nseconds: d.subsec_nanos(),
-            })
-            .unwrap_or(nfstime3 {
-                seconds: 0,
-                nseconds: 0,
-            });
-
-        let ctime = nfstime3 {
-            seconds: metadata.ctime() as u32,
-            nseconds: metadata.ctime_nsec() as u32,
-        };
-
-        fattr3 {
-            ftype,
-            mode,
-            nlink,
-            uid,
-            gid,
-            size,
-            used,
-            rdev: nfsserve::nfs::specdata3 {
-                specdata1: 0,
-                specdata2: 0,
-            },
-            fsid: 0,
-            fileid,
-            atime,
-            mtime,
-            ctime,
+            format!("{}/{}", parent_path, child_name)
         }
     }
 }
@@ -273,56 +360,139 @@ impl NFSFileSystem for WorkspaceNfs {
     }
 
     async fn lookup(&self, dirid: fileid3, filename: &filename3) -> Result<fileid3, nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let filename_str =
+            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-
-        let target_path = if dirid == 1 {
-            // Root directory - sandbox_id lookup
+        if dirid == 1 {
+            // Root directory — look up workspace export by name
             let exports = self.exports.read().await;
-            exports
+            let workspace_id = exports
                 .get(filename_str)
-                .cloned()
                 .ok_or(nfsstat3::NFS3ERR_NOENT)?
-        } else {
-            dir_path.join(filename_str)
-        };
+                .clone();
 
-        if !target_path.exists() {
+            // Verify workspace root exists via storage
+            self.storage
+                .exists(&workspace_id, "")
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+            let key = (workspace_id, String::new());
+            return Ok(self.get_or_create_fileid(&key).await);
+        }
+
+        // Non-root directory: resolve parent and build child path
+        let (workspace_id, parent_path) =
+            self.get_key_by_id(dirid).await.ok_or(nfsstat3::NFS3ERR_STALE)?;
+
+        let child_rel = Self::child_path(&parent_path, filename_str);
+
+        // Verify the child exists
+        let exists = self
+            .storage
+            .exists(&workspace_id, &child_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        if !exists {
             return Err(nfsstat3::NFS3ERR_NOENT);
         }
 
-        Ok(self.get_or_create_fileid(&target_path))
+        let key = (workspace_id, child_rel);
+        Ok(self.get_or_create_fileid(&key).await)
     }
 
     async fn getattr(&self, id: fileid3) -> Result<fattr3, nfsstat3> {
         if id == 1 {
-            // Root directory attributes
-            let metadata = std::fs::metadata(&self.base_dir).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-            return Ok(self.metadata_to_fattr(&metadata, id));
+            // Root directory: synthetic attributes
+            return Ok(default_dir_fattr(1));
         }
 
-        let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let metadata = std::fs::metadata(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(id)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        Ok(self.metadata_to_fattr(&metadata, id))
+        // stat the workspace root if rel_path is empty, otherwise stat the file
+        let stat = if rel_path.is_empty() {
+            // Workspace root — stat "." by checking if it exists and getting default dir attrs
+            match self.storage.stat(&workspace_id, ".").await {
+                Ok(s) => s,
+                Err(_) => {
+                    // Fallback: workspace root is always a directory
+                    return Ok(default_dir_fattr(id));
+                }
+            }
+        } else {
+            self.storage
+                .stat(&workspace_id, &rel_path)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?
+        };
+
+        Ok(file_stat_to_fattr(&stat, id))
     }
 
     async fn setattr(&self, id: fileid3, setattr: sattr3) -> Result<fattr3, nfsstat3> {
-        let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(id)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
         // Handle size truncation
         if let set_size3::size(size) = setattr.size {
-            let file = std::fs::OpenOptions::new()
-                .write(true)
-                .open(&path)
-                .map_err(|_| nfsstat3::NFS3ERR_IO)?;
-            file.set_len(size).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+            self.storage
+                .set_file_size(&workspace_id, &rel_path, size)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
         }
 
-        // Get updated attributes
-        let metadata = std::fs::metadata(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        Ok(self.metadata_to_fattr(&metadata, id))
+        // Handle permission mode change.
+        //
+        // NOTE: uid/gid changes (setattr.uid, setattr.gid) are intentionally ignored.
+        // Reasons:
+        // 1. In S3 mode via s3fs-fuse, chown operations have very limited effect —
+        //    uid/gid are stored as S3 object metadata headers, which is slow and
+        //    may not be respected by all S3-compatible backends.
+        // 2. Most workspace use cases don't require changing file ownership.
+        // 3. The StorageBackend trait doesn't expose set_uid/set_gid methods.
+        //
+        // If uid/gid support is needed in the future, consider:
+        // - Adding set_owner(uid, gid) to StorageBackend trait
+        // - Using libc::chown via spawn_blocking in LocalStorageBackend
+        if let set_mode3::mode(mode) = setattr.mode {
+            self.storage
+                .set_permissions(&workspace_id, &rel_path, mode)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
+        }
+
+        // Handle timestamp changes
+        let atime = match setattr.atime {
+            set_atime::SET_TO_CLIENT_TIME(t) => Some(nfstime3_to_datetime(t)),
+            set_atime::SET_TO_SERVER_TIME => Some(Utc::now()),
+            set_atime::DONT_CHANGE => None,
+        };
+        let mtime = match setattr.mtime {
+            set_mtime::SET_TO_CLIENT_TIME(t) => Some(nfstime3_to_datetime(t)),
+            set_mtime::SET_TO_SERVER_TIME => Some(Utc::now()),
+            set_mtime::DONT_CHANGE => None,
+        };
+        if atime.is_some() || mtime.is_some() {
+            self.storage
+                .set_times(&workspace_id, &rel_path, atime, mtime)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
+        }
+
+        // Return updated attributes
+        let stat = self
+            .storage
+            .stat(&workspace_id, &rel_path)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        Ok(file_stat_to_fattr(&stat, id))
     }
 
     async fn read(
@@ -331,36 +501,42 @@ impl NFSFileSystem for WorkspaceNfs {
         offset: u64,
         count: u32,
     ) -> Result<(Vec<u8>, bool), nfsstat3> {
-        let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(id)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let mut file = std::fs::File::open(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let data = self
+            .storage
+            .read_file_range(&workspace_id, &rel_path, offset, count)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
 
-        let mut buffer = vec![0u8; count as usize];
-        let bytes_read = file.read(&mut buffer).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        buffer.truncate(bytes_read);
+        // Determine EOF: if we read less than requested, we're at/past the end
+        let eof = (data.len() as u32) < count;
 
-        let metadata = file.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        let eof = offset + bytes_read as u64 >= metadata.len();
-
-        Ok((buffer, eof))
+        Ok((data, eof))
     }
 
     async fn write(&self, id: fileid3, offset: u64, data: &[u8]) -> Result<fattr3, nfsstat3> {
-        let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(id)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        self.storage
+            .write_file_at(&workspace_id, &rel_path, offset, data)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
 
-        file.seek(SeekFrom::Start(offset))
-            .map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        file.write_all(data).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        // Return updated attributes
+        let stat = self
+            .storage
+            .stat(&workspace_id, &rel_path)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
 
-        let metadata = file.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        Ok(self.metadata_to_fattr(&metadata, id))
+        Ok(file_stat_to_fattr(&stat, id))
     }
 
     async fn create(
@@ -369,16 +545,32 @@ impl NFSFileSystem for WorkspaceNfs {
         filename: &filename3,
         _setattr: sattr3,
     ) -> Result<(fileid3, fattr3), nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let file_path = dir_path.join(filename_str);
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        std::fs::File::create(&file_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let filename_str =
+            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        let id = self.get_or_create_fileid(&file_path);
-        let metadata = std::fs::metadata(&file_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let child_rel = Self::child_path(&parent_path, filename_str);
 
-        Ok((id, self.metadata_to_fattr(&metadata, id)))
+        // UNCHECKED create: truncate if exists, create if missing
+        self.storage
+            .create_file(&workspace_id, &child_rel, false)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        let key = (workspace_id.clone(), child_rel.clone());
+        let id = self.get_or_create_fileid(&key).await;
+
+        let stat = self
+            .storage
+            .stat(&workspace_id, &child_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        Ok((id, file_stat_to_fattr(&stat, id)))
     }
 
     async fn create_exclusive(
@@ -386,30 +578,60 @@ impl NFSFileSystem for WorkspaceNfs {
         dirid: fileid3,
         filename: &filename3,
     ) -> Result<fileid3, nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let file_path = dir_path.join(filename_str);
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        if file_path.exists() {
-            return Err(nfsstat3::NFS3ERR_EXIST);
-        }
+        let filename_str =
+            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        std::fs::File::create(&file_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        Ok(self.get_or_create_fileid(&file_path))
+        let child_rel = Self::child_path(&parent_path, filename_str);
+
+        // EXCLUSIVE create: must not exist
+        self.storage
+            .create_file(&workspace_id, &child_rel, true)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        let key = (workspace_id, child_rel);
+        Ok(self.get_or_create_fileid(&key).await)
     }
 
     async fn remove(&self, dirid: fileid3, filename: &filename3) -> Result<(), nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let file_path = dir_path.join(filename_str);
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        // Check if it's a directory or file
-        let metadata = std::fs::metadata(&file_path).map_err(|_| nfsstat3::NFS3ERR_NOENT)?;
-        if metadata.is_dir() {
-            std::fs::remove_dir(&file_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let filename_str =
+            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+
+        let child_rel = Self::child_path(&parent_path, filename_str);
+
+        // Determine if it's a file or directory and call appropriate method
+        let stat = self
+            .storage
+            .stat(&workspace_id, &child_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        if stat.file_type == FileType::Directory {
+            self.storage
+                .remove_dir(&workspace_id, &child_rel, false)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
         } else {
-            std::fs::remove_file(&file_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+            self.storage
+                .remove_file(&workspace_id, &child_rel)
+                .await
+                .map_err(|e| storage_error_to_nfsstat(&e))?;
         }
+
+        // Clean up inode mapping for the removed entry
+        let key = (workspace_id, child_rel);
+        self.remove_inode(&key).await;
+
         Ok(())
     }
 
@@ -420,21 +642,38 @@ impl NFSFileSystem for WorkspaceNfs {
         to_dirid: fileid3,
         to_filename: &filename3,
     ) -> Result<(), nfsstat3> {
-        let from_dir = self
-            .get_path_by_id(from_dirid)
+        let (from_ws, from_parent) = self
+            .get_key_by_id(from_dirid)
+            .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let to_dir = self
-            .get_path_by_id(to_dirid)
+        let (to_ws, to_parent) = self
+            .get_key_by_id(to_dirid)
+            .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
+
+        // Rename across workspaces is not supported
+        if from_ws != to_ws {
+            return Err(nfsstat3::NFS3ERR_NOTSUPP);
+        }
 
         let from_name =
             std::str::from_utf8(&from_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let to_name = std::str::from_utf8(&to_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let to_name =
+            std::str::from_utf8(&to_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        let from_path = from_dir.join(from_name);
-        let to_path = to_dir.join(to_name);
+        let from_rel = Self::child_path(&from_parent, from_name);
+        let to_rel = Self::child_path(&to_parent, to_name);
 
-        std::fs::rename(&from_path, &to_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        self.storage
+            .rename(&from_ws, &from_rel, &to_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        // Remap inode from old path to new path
+        let old_key = (from_ws, from_rel);
+        let new_key = (to_ws, to_rel);
+        self.remap_inode(&old_key, new_key).await;
+
         Ok(())
     }
 
@@ -443,16 +682,32 @@ impl NFSFileSystem for WorkspaceNfs {
         dirid: fileid3,
         dirname: &filename3,
     ) -> Result<(fileid3, fattr3), nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let dirname_str = std::str::from_utf8(&dirname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let new_dir_path = dir_path.join(dirname_str);
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        std::fs::create_dir(&new_dir_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let dirname_str =
+            std::str::from_utf8(&dirname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        let id = self.get_or_create_fileid(&new_dir_path);
-        let metadata = std::fs::metadata(&new_dir_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let child_rel = Self::child_path(&parent_path, dirname_str);
 
-        Ok((id, self.metadata_to_fattr(&metadata, id)))
+        // NFS mkdir: non-recursive (single level)
+        self.storage
+            .mkdir(&workspace_id, &child_rel, false)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        let key = (workspace_id.clone(), child_rel.clone());
+        let id = self.get_or_create_fileid(&key).await;
+
+        let stat = self
+            .storage
+            .stat(&workspace_id, &child_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        Ok((id, file_stat_to_fattr(&stat, id)))
     }
 
     async fn readdir(
@@ -462,78 +717,73 @@ impl NFSFileSystem for WorkspaceNfs {
         max_entries: usize,
     ) -> Result<ReadDirResult, nfsstat3> {
         if dirid == 1 {
-            // Root directory - list exported sandboxes
+            // Root directory: list exported workspaces
             let exports = self.exports.read().await;
-            let mut entries = Vec::new();
+            // Sort exports by name for deterministic ordering
+            let mut sorted_exports: Vec<_> = exports.iter().collect();
+            sorted_exports.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-            for (sandbox_id, path) in exports.iter() {
-                let id = self.get_or_create_fileid(path);
-                if start_after == 0 || id > start_after {
-                    let attr = match self.getattr(id).await {
-                        Ok(a) => a,
-                        Err(_) => fattr3 {
-                            ftype: ftype3::NF3DIR,
-                            mode: 0o755,
-                            nlink: 2,
-                            uid: 0,
-                            gid: 0,
-                            size: 4096,
-                            used: 4096,
-                            rdev: nfsserve::nfs::specdata3 {
-                                specdata1: 0,
-                                specdata2: 0,
-                            },
-                            fsid: 0,
-                            fileid: id,
-                            atime: nfstime3 {
-                                seconds: 0,
-                                nseconds: 0,
-                            },
-                            mtime: nfstime3 {
-                                seconds: 0,
-                                nseconds: 0,
-                            },
-                            ctime: nfstime3 {
-                                seconds: 0,
-                                nseconds: 0,
-                            },
-                        },
-                    };
-                    entries.push(DirEntry {
-                        fileid: id,
-                        name: sandbox_id.as_bytes().to_vec().into(),
-                        attr,
-                    });
-                }
+            let mut entries = Vec::new();
+            // start_after is used as a 1-based index cookie (0 means start from beginning)
+            let skip = start_after as usize;
+
+            for (export_name, workspace_id) in sorted_exports.iter().skip(skip) {
+                let key = (workspace_id.to_string(), String::new());
+                let id = self.get_or_create_fileid(&key).await;
+
+                let attr = match self.getattr(id).await {
+                    Ok(a) => a,
+                    Err(_) => default_dir_fattr(id),
+                };
+                entries.push(DirEntry {
+                    fileid: id,
+                    name: export_name.as_bytes().to_vec().into(),
+                    attr,
+                });
+
                 if entries.len() >= max_entries {
-                    break;
+                    let end = skip + entries.len() >= sorted_exports.len();
+                    return Ok(ReadDirResult { entries, end });
                 }
             }
 
             return Ok(ReadDirResult { entries, end: true });
         }
 
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
+        // Non-root: list directory contents via storage backend
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
+
+        let dir_path = if rel_path.is_empty() { "." } else { &rel_path };
+
+        let file_stats = self
+            .storage
+            .list_dir(&workspace_id, dir_path)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
 
         let mut entries = Vec::new();
-        let read_dir = std::fs::read_dir(&dir_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        // start_after is used as a 1-based index cookie (0 means start from beginning)
+        let skip = start_after as usize;
+        let total = file_stats.len();
 
-        for entry in read_dir {
-            let entry = entry.map_err(|_| nfsstat3::NFS3ERR_IO)?;
-            let path = entry.path();
-            let id = self.get_or_create_fileid(&path);
+        for stat in file_stats.into_iter().skip(skip) {
+            let child_rel = Self::child_path(&rel_path, &stat.name);
+            let key = (workspace_id.clone(), child_rel);
+            let id = self.get_or_create_fileid(&key).await;
 
-            if start_after == 0 || id > start_after {
-                let metadata = entry.metadata().map_err(|_| nfsstat3::NFS3ERR_IO)?;
-                entries.push(DirEntry {
-                    fileid: id,
-                    name: entry.file_name().as_encoded_bytes().to_vec().into(),
-                    attr: self.metadata_to_fattr(&metadata, id),
-                });
-            }
+            let attr = file_stat_to_fattr(&stat, id);
+            entries.push(DirEntry {
+                fileid: id,
+                name: stat.name.as_bytes().to_vec().into(),
+                attr,
+            });
 
             if entries.len() >= max_entries {
-                break;
+                let end = skip + entries.len() >= total;
+                return Ok(ReadDirResult { entries, end });
             }
         }
 
@@ -547,26 +797,48 @@ impl NFSFileSystem for WorkspaceNfs {
         symlink: &nfspath3,
         _attr: &sattr3,
     ) -> Result<(fileid3, fattr3), nfsstat3> {
-        let dir_path = self.get_path_by_id(dirid).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let linkname_str = std::str::from_utf8(&linkname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let target_str = std::str::from_utf8(&symlink.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let link_path = dir_path.join(linkname_str);
+        let linkname_str =
+            std::str::from_utf8(&linkname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let target_str =
+            std::str::from_utf8(&symlink.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(target_str, &link_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        let link_rel = Self::child_path(&parent_path, linkname_str);
 
-        let id = self.get_or_create_fileid(&link_path);
-        let metadata = std::fs::symlink_metadata(&link_path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
+        self.storage
+            .symlink(&workspace_id, &link_rel, target_str)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
 
-        Ok((id, self.metadata_to_fattr(&metadata, id)))
+        let key = (workspace_id.clone(), link_rel.clone());
+        let id = self.get_or_create_fileid(&key).await;
+
+        let stat = self
+            .storage
+            .stat(&workspace_id, &link_rel)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        Ok((id, file_stat_to_fattr(&stat, id)))
     }
 
     async fn readlink(&self, id: fileid3) -> Result<nfspath3, nfsstat3> {
-        let path = self.get_path_by_id(id).ok_or(nfsstat3::NFS3ERR_STALE)?;
-        let target = std::fs::read_link(&path).map_err(|_| nfsstat3::NFS3ERR_IO)?;
-        let target_bytes = target.as_os_str().as_encoded_bytes().to_vec();
+        let (workspace_id, rel_path) = self
+            .get_key_by_id(id)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
+        let target = self
+            .storage
+            .readlink(&workspace_id, &rel_path)
+            .await
+            .map_err(|e| storage_error_to_nfsstat(&e))?;
+
+        let target_bytes = target.as_bytes().to_vec();
         Ok(target_bytes.into())
     }
 }
