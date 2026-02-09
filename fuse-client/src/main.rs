@@ -88,8 +88,13 @@ fn mount(args: MountArgs) -> Result<()> {
         MountOption::Subtype("workspace".to_string()),
         MountOption::DefaultPermissions,
         MountOption::NoAtime,
-        MountOption::AutoUnmount,
     ];
+
+    // AutoUnmount requires allow_other (fuser adds it automatically)
+    // Only use AutoUnmount if allow_other is explicitly enabled or user_allow_other is set
+    if args.allow_other || args.allow_root {
+        mount_options.push(MountOption::AutoUnmount);
+    }
 
     if args.allow_other {
         mount_options.push(MountOption::AllowOther);
