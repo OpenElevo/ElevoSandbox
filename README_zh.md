@@ -3,65 +3,63 @@
 [![CI](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[中文文档](README_zh.md)
+ElevoSandbox 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
 
-ElevoSandbox is a unified sandbox workspace service that provides secure, isolated code execution environments for AI Agents.
+## 特性
 
-## Features
+- **容器隔离**: 基于 Docker 的安全沙盒环境
+- **多 SDK 支持**: Go、Python、TypeScript SDK
+- **MCP 协议**: 原生支持 Model Context Protocol
+- **NFS 共享**: 工作空间文件可通过 NFS 挂载到本地
+- **PTY 终端**: WebSocket 实时交互终端
 
-- **Container Isolation**: Docker-based secure sandbox environments
-- **Multi-SDK Support**: Go, Python, and TypeScript SDKs
-- **MCP Protocol**: Native support for Model Context Protocol
-- **NFS Sharing**: Mount workspace files locally via NFS
-- **PTY Terminal**: Real-time interactive terminal via WebSocket
-
-## Project Structure
+## 项目结构
 
 ```
 ElevoSandbox/
-├── server/                 # Rust server (HTTP API + MCP)
-├── agent/                  # Rust Agent (runs inside containers)
+├── server/                 # Rust 服务端 (HTTP API + MCP)
+├── agent/                  # Rust Agent (运行在容器内)
 ├── sdk-go/                 # Go SDK
 ├── sdk-python/             # Python SDK
 ├── sdk-typescript/         # TypeScript SDK
-├── docker/                 # Docker configuration
-├── images/                 # Container images
-├── proto/                  # gRPC Proto definitions
-├── scripts/                # Build and deployment scripts
-├── tests/                  # Tests
-└── docs/                   # Documentation
+├── docker/                 # Docker 配置
+├── images/                 # 容器镜像
+├── proto/                  # gRPC Proto 定义
+├── scripts/                # 构建和部署脚本
+├── tests/                  # 测试
+└── docs/                   # 文档
 ```
 
-## Implemented Features
+## 已实现功能
 
-| Service | Description | Status |
-|---------|-------------|--------|
-| **Workspace** | Workspace management (persistent storage, 1:N relationship with Sandbox) | ✅ Implemented |
-| **Sandbox** | Sandbox lifecycle management (create/delete/list, bound to Workspace) | ✅ Implemented |
-| **FileSystem** | File system operations (read/write/list/mkdir/delete via Workspace API) | ✅ Implemented |
-| **Process** | Process execution (sync/streaming output) | ✅ Implemented |
-| **PTY** | Pseudo-terminal interaction (WebSocket) | ✅ Implemented |
-| **MCP** | Model Context Protocol support | ✅ Implemented |
-| **NFS** | Network file system sharing (Workspace level) | ✅ Implemented |
-| Git | Git version control | ⏳ Planned |
-| LSP | Language Server Protocol | ⏳ Planned |
-| Snapshot | Snapshot management | ⏳ Planned |
+| 服务 | 描述 | 状态 |
+|-----|------|------|
+| **Workspace** | 工作空间管理 (持久存储，1:N 与 Sandbox 关系) | ✅ 已实现 |
+| **Sandbox** | 沙盒生命周期管理 (创建/删除/列表，绑定 Workspace) | ✅ 已实现 |
+| **FileSystem** | 文件系统操作 (通过 Workspace API 读/写/列表/创建目录/删除) | ✅ 已实现 |
+| **Process** | 进程执行 (同步/流式输出) | ✅ 已实现 |
+| **PTY** | 伪终端交互 (WebSocket) | ✅ 已实现 |
+| **MCP** | Model Context Protocol 支持 | ✅ 已实现 |
+| **NFS** | 网络文件系统共享 (Workspace 级别) | ✅ 已实现 |
+| Git | Git 版本控制 | ⏳ 规划中 |
+| LSP | 语言服务协议 | ⏳ 规划中 |
+| Snapshot | 快照管理 | ⏳ 规划中 |
 
-## Core Concepts
+## 核心概念
 
-### Workspace and Sandbox Relationship
+### Workspace 与 Sandbox 的关系
 
-- **Workspace**: Persistent working directory with independent lifecycle management; NFS mounts belong here
-- **Sandbox**: Temporary execution environment that must be bound to a Workspace when created
-- **Relationship**: 1:N (one Workspace can be used by multiple Sandboxes simultaneously)
+- **Workspace**：持久的工作目录，独立管理生命周期，NFS 挂载归属于此
+- **Sandbox**：临时执行环境，创建时必须绑定一个 Workspace
+- **关系**：1:N（一个 Workspace 可被多个 Sandbox 同时使用）
 
 ```
 ┌─────────────────────────────────────────────────┐
 │                   Workspace                       │
 │  ┌─────────────────────────────────────────────┐ │
-│  │  /workspace (persistent storage)             │ │
-│  │  - File operations via Workspace API         │ │
-│  │  - NFS mount to local machine               │ │
+│  │  /workspace (持久存储目录)                    │ │
+│  │  - 文件操作通过 Workspace API                 │ │
+│  │  - NFS 挂载到本地                            │ │
 │  └─────────────────────────────────────────────┘ │
 │           ▲              ▲              ▲        │
 │           │              │              │        │
@@ -72,151 +70,164 @@ ElevoSandbox/
 └─────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## 快速开始
 
-### Starting the Service
+### 启动服务
 
 ```bash
-# Development
+# 开发环境
 cd server && cargo run
 
-# Production (Docker)
+# 生产环境 (Docker)
 docker-compose -f docker/docker-compose.prod.yml up -d
 ```
 
-### Using Docker Images
+### 环境变量
 
 ```bash
-# Pull the server image
-docker pull ghcr.io/openelevo/elevosandbox-server:latest
-
-# Pull the base image
-docker pull ghcr.io/openelevo/elevosandbox-base:latest
-
-# Start the server
-docker run -d \
-  --name elevosandbox-server \
-  -p 8080:8080 \
-  -p 9090:9090 \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  ghcr.io/openelevo/elevosandbox-server:latest
-```
-
-### Environment Variables
-
-```bash
-# Service configuration
+# 服务配置
 WORKSPACE_HTTP_PORT=8080
 WORKSPACE_GRPC_PORT=9090
 WORKSPACE_DATABASE_URL=sqlite://data/workspace.db
 
-# Docker configuration
+# Docker 配置
 WORKSPACE_DOCKER_HOST=unix:///var/run/docker.sock
 WORKSPACE_DOCKER_NETWORK=workspace-network
 
-# NFS configuration
-WORKSPACE_NFS_PORT=2049           # NFS service port
-WORKSPACE_NFS_HOST=your-server-ip # NFS external access address
+# NFS 配置
+WORKSPACE_NFS_PORT=2049           # NFS 服务端口
+WORKSPACE_NFS_HOST=your-server-ip # NFS 外部访问地址 (用于返回给客户端的 nfs_url)
 
-# MCP configuration
+# MCP 配置
 WORKSPACE_MCP_MODE=http           # disabled / stdio / http
-WORKSPACE_MCP_PATH=/mcp           # HTTP mode endpoint path prefix
+WORKSPACE_MCP_PATH=/mcp           # HTTP 模式下的端点路径前缀
 WORKSPACE_MCP_PROFILE=developer   # executor / developer / full
 ```
 
-### NFS File Sharing
+### NFS 文件共享
 
-Each Workspace's `/workspace` directory can be mounted locally via NFS for bidirectional file synchronization.
+每个 Workspace 的 `/workspace` 目录可以通过 NFS 挂载到本地，实现文件双向同步。
 
-**Server Configuration**
+**服务端配置**
 
 ```bash
+# 设置 NFS 外部访问地址
 export WORKSPACE_NFS_HOST=your-server-ip
 export WORKSPACE_NFS_PORT=2049
 ```
 
-**Client Mount**
+**客户端挂载**
 
 ```bash
+# 设置服务器地址
 SERVER_IP=your-server-ip
 
-# Create workspace
+# 创建 workspace
 WORKSPACE_ID=$(curl -s -X POST http://${SERVER_IP}:8080/api/v1/workspaces \
   -H "Content-Type: application/json" \
   -d '{"name": "my-workspace"}' | jq -r '.id')
 
-# Mount NFS (requires nfs-common package)
+# 挂载 NFS (需要 nfs-common 包)
 sudo mkdir -p /mnt/workspace
 sudo mount -t nfs -o nfsvers=3,tcp,nolock,port=2049,mountport=2049 \
   ${SERVER_IP}:/${WORKSPACE_ID} /mnt/workspace
 
-# Now you can read/write /mnt/workspace, shared with all sandboxes bound to this workspace
+# 现在可以直接读写 /mnt/workspace，与所有绑定该 workspace 的 sandbox 共享
 echo "Hello" > /mnt/workspace/test.txt
 
-# Unmount
+# 创建 sandbox 并验证
+SANDBOX_ID=$(curl -s -X POST http://${SERVER_IP}:8080/api/v1/sandboxes \
+  -H "Content-Type: application/json" \
+  -d "{\"workspace_id\": \"$WORKSPACE_ID\"}" | jq -r '.id')
+
+curl -s -X POST "http://${SERVER_IP}:8080/api/v1/sandboxes/${SANDBOX_ID}/process/run" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "cat", "args": ["/workspace/test.txt"]}'
+
+# 卸载
 sudo umount /mnt/workspace
 ```
 
-**Notes**
-- Use `port=2049,mountport=2049` parameters as portmapper is not implemented
-- NFSv3 recommended (`nfsvers=3`)
-- Use `nolock` option to avoid lock service dependency
+**注意事项**
+- 需要指定 `port=2049,mountport=2049` 参数，因为服务未实现 portmapper
+- 推荐使用 NFSv3 (`nfsvers=3`)
+- 使用 `nolock` 选项避免锁服务依赖
 
-## MCP (Model Context Protocol)
+### MCP Profile
 
-### MCP Profiles
+MCP 支持三种 profile，适用于不同场景：
 
-| Profile | Tools | Use Case |
-|---------|-------|----------|
-| `executor` | 1 | Script execution only, sandbox managed by program |
-| `developer` | 6 | Regular development, includes file and process operations |
-| `full` | 14 | Full functionality, includes all sandbox management |
+| Profile | 工具数量 | 适用场景 |
+|---------|---------|---------|
+| `executor` | 1 | 仅执行脚本，sandbox 由程序管理 |
+| `developer` | 6 | 常规开发，包含文件和进程操作 |
+| `full` | 14 | 完整功能，包含所有 sandbox 管理 |
 
 **executor** (1 tool):
-- `process_run` - Execute command
+- `process_run` - 执行命令
 
 **developer** (6 tools):
-- `process_run` - Execute command
-- `file_read` - Read file
-- `file_write` - Write file
-- `file_list` - List directory
-- `file_mkdir` - Create directory
-- `file_remove` - Delete file/directory
+- `process_run` - 执行命令
+- `file_read` - 读取文件
+- `file_write` - 写入文件
+- `file_list` - 列出目录
+- `file_mkdir` - 创建目录
+- `file_remove` - 删除文件/目录
 
 **full** (14 tools):
-- All sandbox_* operations
-- All process_* operations
-- All file_* operations
+- 所有 sandbox_* 操作
+- 所有 process_* 操作
+- 所有 file_* 操作
 
-### HTTP Mode (Recommended)
+### MCP 使用
+
+MCP 支持两种传输模式：
+
+#### HTTP 模式 (推荐)
+
+HTTP 模式通过网络提供 MCP 服务，其他 Agent/大模型可以直接使用 MCP client 调用。
+
+**启动服务**
 
 ```bash
+# 设置环境变量
 export WORKSPACE_MCP_MODE=http
 export WORKSPACE_MCP_PATH=/mcp
+
+# 启动服务
 cargo run
 ```
 
-Available endpoints:
-| Endpoint | Tools | Use Case |
-|----------|-------|----------|
-| `http://localhost:8080/mcp/executor` | 1 | Script execution only |
-| `http://localhost:8080/mcp/developer` | 6 | Regular development |
-| `http://localhost:8080/mcp/full` | 14 | Full functionality |
+服务启动后，提供三个 MCP 端点，适用于不同场景：
 
-**MCP Client Example (Python)**
+| 端点 | 工具数 | 适用场景 |
+|-----|-------|---------|
+| `http://localhost:8080/mcp/executor` | 1 | 仅执行脚本，sandbox 由程序管理 |
+| `http://localhost:8080/mcp/developer` | 6 | 常规开发，包含文件和进程操作 |
+| `http://localhost:8080/mcp/full` | 14 | 完整功能，包含所有 sandbox 管理 |
+
+**MCP Client 调用示例**
 
 ```python
+# Python MCP Client 示例
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
 async def main():
+    # 根据需要选择端点
+    # - /mcp/executor  - 仅执行命令
+    # - /mcp/developer - 执行命令 + 文件操作
+    # - /mcp/full      - 完整功能
     async with streamablehttp_client("http://localhost:8080/mcp/developer") as (read, write):
         async with ClientSession(read, write) as session:
+            # 初始化
             await session.initialize()
 
+            # 列出可用工具
             tools = await session.list_tools()
             print(f"Available tools: {[t.name for t in tools.tools]}")
 
+            # 调用工具
             result = await session.call_tool(
                 "process_run",
                 arguments={
@@ -228,13 +239,21 @@ async def main():
             print(result)
 ```
 
-### Stdio Mode
+**环境变量**
 
-For local CLI integration like Claude Desktop.
+| 变量 | 默认值 | 说明 |
+|-----|-------|------|
+| `WORKSPACE_MCP_MODE` | `disabled` | MCP 模式: `disabled`, `stdio`, `http` |
+| `WORKSPACE_MCP_PATH` | `/mcp` | HTTP 模式下的端点路径前缀 |
+| `WORKSPACE_MCP_PROFILE` | `developer` | stdio 模式下的工具集 |
 
-**Claude Desktop Configuration**
+#### Stdio 模式
 
-Edit `~/.config/claude/claude_desktop_config.json`:
+Stdio 模式用于本地 CLI 集成，如 Claude Desktop。
+
+**Claude Desktop 配置**
+
+编辑 `~/.config/claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -251,7 +270,18 @@ Edit `~/.config/claude/claude_desktop_config.json`:
 }
 ```
 
-## SDK Usage
+**可用工具 (developer profile)**
+
+| 工具 | 描述 |
+|-----|------|
+| `process_run` | 在 sandbox 中执行命令 |
+| `file_read` | 读取文件内容 |
+| `file_write` | 写入文件内容 |
+| `file_list` | 列出目录内容 |
+| `file_mkdir` | 创建目录 |
+| `file_remove` | 删除文件或目录 |
+
+## SDK 使用
 
 ### Go SDK
 
@@ -274,7 +304,7 @@ func main() {
     client := workspace.NewClient("http://localhost:8080")
     ctx := context.Background()
 
-    // Create workspace (persistent storage)
+    // 创建 workspace (持久存储)
     ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
         Name: "my-workspace",
     })
@@ -283,7 +313,7 @@ func main() {
     }
     defer client.Workspace.Delete(ctx, ws.ID)
 
-    // Create sandbox bound to workspace
+    // 创建 sandbox 绑定到 workspace
     sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
         WorkspaceID: ws.ID,
         Template:    "workspace-test:latest",
@@ -293,7 +323,7 @@ func main() {
     }
     defer client.Sandbox.Delete(ctx, sandbox.ID, true)
 
-    // Execute command
+    // 执行命令
     result, err := client.Process.Run(ctx, sandbox.ID, "echo", &workspace.RunCommandOptions{
         Args: []string{"Hello", "World"},
     })
@@ -302,7 +332,7 @@ func main() {
     }
     fmt.Printf("Output: %s", result.Stdout)
 
-    // File operations via workspace API
+    // 文件操作通过 workspace API
     client.Workspace.WriteFileString(ctx, ws.ID, "hello.txt", "Hello!")
     content, _ := client.Workspace.ReadFileString(ctx, ws.ID, "hello.txt")
     fmt.Printf("File: %s\n", content)
@@ -319,21 +349,21 @@ pip install -e sdk-python
 from workspace_sdk import WorkspaceClient, CreateWorkspaceParams, CreateSandboxParams
 
 with WorkspaceClient("http://localhost:8080") as client:
-    # Create workspace (persistent storage)
+    # 创建 workspace (持久存储)
     workspace = client.workspace.create(CreateWorkspaceParams(name="my-workspace"))
 
-    # Create sandbox bound to workspace
+    # 创建 sandbox 绑定到 workspace
     sandbox = client.sandbox.create(CreateSandboxParams(
         workspace_id=workspace.id,
         template="workspace-test:latest"
     ))
 
     try:
-        # Execute command
+        # 执行命令
         result = client.process.run(sandbox.id, "echo", args=["Hello", "World"])
         print(result.stdout)
 
-        # File operations via workspace API
+        # 文件操作通过 workspace API
         client.workspace.write_file(workspace.id, "hello.txt", "Hello!")
         content = client.workspace.read_file(workspace.id, "hello.txt")
         print(f"File: {content}")
@@ -349,23 +379,23 @@ import { WorkspaceClient } from '@elevo/workspace-sdk'
 
 const client = new WorkspaceClient({ apiUrl: 'http://localhost:8080' })
 
-// Create workspace (persistent storage)
+// 创建 workspace (持久存储)
 const workspace = await client.workspace.create({ name: 'my-workspace' })
 
-// Create sandbox bound to workspace
+// 创建 sandbox 绑定到 workspace
 const sandbox = await client.sandbox.create({
   workspaceId: workspace.id,
   template: 'workspace-test:latest'
 })
 
 try {
-  // Execute command
+  // 执行命令
   const result = await client.process.run(sandbox.id, 'echo', {
     args: ['Hello', 'World']
   })
   console.log(result.stdout)
 
-  // File operations via workspace API
+  // 文件操作通过 workspace API
   await client.workspace.writeFile(workspace.id, 'hello.txt', 'Hello!')
   const content = await client.workspace.readFile(workspace.id, 'hello.txt')
   console.log(`File: ${content}`)
@@ -375,7 +405,7 @@ try {
 }
 ```
 
-## Architecture
+## 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -392,7 +422,7 @@ try {
 │                    Workspace Server (Rust)                   │
 │  ┌──────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐          │
 │  │Workspace │ │ Sandbox │ │ Process │ │   PTY   │          │
-│  │(persist) │ │ (temp)  │ │         │ │         │          │
+│  │ (持久)   │ │ (临时)  │ │         │ │         │          │
 │  └──────────┘ └─────────┘ └─────────┘ └─────────┘          │
 │  ┌─────────────────────────────────────────────┐           │
 │  │              MCP Handler                     │           │
@@ -400,63 +430,59 @@ try {
 │  └─────────────────────────────────────────────┘           │
 │  ┌─────────────────────────────────────────────┐           │
 │  │              NFS Server                      │           │
-│  │  (Workspace-level file sharing)             │           │
+│  │  (Workspace 级别文件共享)                     │           │
 │  └─────────────────────────────────────────────┘           │
 └────────────────────────────┬────────────────────────────────┘
                              │
-                        gRPC (internal)
+                        gRPC (内部)
                              │
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    Docker Container                          │
 │  ┌─────────────────────────────────────────────┐           │
 │  │           Workspace Agent (Rust)             │           │
-│  │  - Process execution                         │           │
-│  │  - PTY management                            │           │
-│  │  - /workspace (mounted Workspace directory)  │           │
+│  │  - 进程执行                                   │           │
+│  │  - PTY 管理                                   │           │
+│  │  - /workspace (挂载 Workspace 目录)           │           │
 │  └─────────────────────────────────────────────┘           │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Development
+## 开发
 
-### Building
+### 构建
 
 ```bash
-# Build all components
+# 构建所有组件
 ./scripts/build.sh
 
-# Build server only
+# 仅构建 server
 cd server && cargo build --release
 
-# Build agent only
+# 仅构建 agent
 cd agent && cargo build --release
 ```
 
-### Testing
+### 测试
 
 ```bash
-# Run tests
-cargo test --workspace --lib --bins
+# 运行测试
+./scripts/test.sh
 
-# Integration tests (requires running server)
+# 集成测试
 ./scripts/run-integration-tests.sh
 ```
 
-### Deployment
+### 部署
 
 ```bash
-# Build and push images
+# 构建并推送镜像
 ./scripts/build-and-push.sh
 
-# Deploy
+# 部署
 ./scripts/deploy.sh
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## License
+## 许可证
 
 MIT
