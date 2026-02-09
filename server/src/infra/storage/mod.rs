@@ -219,6 +219,31 @@ pub trait StorageBackend: Send + Sync + 'static {
     /// Rename or move a file/directory
     async fn rename(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()>;
 
+    /// Rename with NOREPLACE semantics (atomic, fails if destination exists)
+    ///
+    /// Uses `renameat2(RENAME_NOREPLACE)` on Linux for atomic operation.
+    /// Returns `AlreadyExists` if the destination already exists.
+    ///
+    /// Default implementation falls back to stat + rename (non-atomic, has TOCTOU race).
+    async fn rename_noreplace(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()> {
+        // Default: non-atomic fallback (TOCTOU race possible)
+        if self.exists(workspace_id, dst).await? {
+            return Err(StorageError::AlreadyExists(dst.to_string()));
+        }
+        self.rename(workspace_id, src, dst).await
+    }
+
+    /// Rename with EXCHANGE semantics (atomic swap of two paths)
+    ///
+    /// Uses `renameat2(RENAME_EXCHANGE)` on Linux for atomic operation.
+    /// Returns `NotSupported` if the filesystem doesn't support this operation.
+    ///
+    /// Default implementation returns `NotSupported`.
+    async fn rename_exchange(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()> {
+        let _ = (workspace_id, src, dst);
+        Err(StorageError::NotSupported("RENAME_EXCHANGE".to_string()))
+    }
+
     /// Copy a file or directory
     async fn copy(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()>;
 
@@ -273,6 +298,54 @@ pub trait StorageBackend: Send + Sync + 'static {
 
     /// Read the target of a symbolic link
     async fn readlink(&self, workspace_id: &str, path: &str) -> StorageResult<String>;
+
+    /// Get filesystem statistics for a workspace
+    ///
+    /// Returns filesystem statistics (total/free/available space, inodes, etc.)
+    /// for the underlying storage of the given workspace.
+    ///
+    /// Default implementation returns reasonable defaults for systems where
+    /// statvfs is not available or not meaningful (e.g., object storage).
+    async fn stat_fs(&self, workspace_id: &str) -> StorageResult<FsStats> {
+        let _ = workspace_id;
+        Ok(FsStats::default())
+    }
+}
+
+/// Filesystem statistics (corresponds to POSIX statvfs)
+#[derive(Debug, Clone)]
+pub struct FsStats {
+    /// Total number of blocks
+    pub blocks: u64,
+    /// Free blocks
+    pub bfree: u64,
+    /// Free blocks available to non-privileged users
+    pub bavail: u64,
+    /// Total number of file nodes (inodes)
+    pub files: u64,
+    /// Free file nodes
+    pub ffree: u64,
+    /// Filesystem block size
+    pub bsize: u32,
+    /// Maximum filename length
+    pub namelen: u32,
+    /// Fragment size (usually same as bsize)
+    pub frsize: u32,
+}
+
+impl Default for FsStats {
+    fn default() -> Self {
+        Self {
+            blocks: 1024 * 1024 * 100, // 100GB in 4K blocks
+            bfree: 1024 * 1024 * 50,   // 50GB free
+            bavail: 1024 * 1024 * 50,  // 50GB available
+            files: 1_000_000,          // 1M total inodes
+            ffree: 900_000,            // 900K free inodes
+            bsize: 4096,               // 4KB block size
+            namelen: 255,              // Max filename length
+            frsize: 4096,              // Fragment size
+        }
+    }
 }
 
 /// Convert storage-layer `FileStat` to HTTP API `FileInfo`

@@ -97,6 +97,11 @@ pub struct Config {
     #[serde(default = "default_mcp_profile")]
     pub mcp_profile: String,
 
+    /// FileSystem API token for gRPC authentication
+    /// Required for FUSE client connections to FileSystemService
+    #[serde(default)]
+    pub fs_api_token: Option<String>,
+
     /// Storage backend configuration
     #[serde(skip)]
     pub storage: StorageConfig,
@@ -301,6 +306,9 @@ impl Config {
         if let Ok(val) = std::env::var("WORKSPACE_MCP_PROFILE") {
             config.mcp_profile = val;
         }
+        if let Ok(val) = std::env::var("WORKSPACE_FS_API_TOKEN") {
+            config.fs_api_token = Some(val);
+        }
 
         // Build StorageConfig from environment variables
         config.storage = Self::load_storage_config(&config.workspace_dir)?;
@@ -425,6 +433,7 @@ impl Default for Config {
             mcp_mode: default_mcp_mode(),
             mcp_path: default_mcp_path(),
             mcp_profile: default_mcp_profile(),
+            fs_api_token: None,
             storage: StorageConfig::default(),
         }
     }

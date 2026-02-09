@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::signal;
 use tonic::transport::Server;
-use tracing::{error, info, Level};
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod api;
@@ -22,6 +22,7 @@ mod service;
 pub use config::Config;
 pub use error::{Error, Result};
 
+use api::grpc::{AuthInterceptor, FileSystemServiceImpl};
 use config::StorageConfig;
 use infra::agent_pool::AgentConnPool;
 use infra::docker::DockerManager;
@@ -33,6 +34,7 @@ use infra::storage::local::LocalStorageBackend;
 use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonitor};
 use infra::storage::StorageBackend;
 use infra::workspace_repository::WorkspaceRepository;
+use proto::file_system_service_server::FileSystemServiceServer;
 use service::process::ProcessService;
 use service::pty::PtyService;
 use service::sandbox::SandboxService;
@@ -272,7 +274,21 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // Start gRPC server for agent connections
-    let grpc_server = api::grpc::create_server(agent_pool.clone());
+    let agent_grpc_server = api::grpc::create_server(agent_pool.clone());
+
+    // Build gRPC router with all services
+    let grpc_router = if let Some(ref token) = config.fs_api_token {
+        info!("FileSystemService enabled with token authentication");
+        let fs_service = FileSystemServiceImpl::new(storage.clone());
+        let auth_interceptor = AuthInterceptor::new(token.clone());
+        let fs_grpc_server = FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
+        Server::builder()
+            .add_service(agent_grpc_server)
+            .add_service(fs_grpc_server)
+    } else {
+        warn!("FileSystemService disabled: WORKSPACE_FS_API_TOKEN not set");
+        Server::builder().add_service(agent_grpc_server)
+    };
 
     // Run both servers concurrently
     tokio::select! {
@@ -281,9 +297,7 @@ async fn main() -> anyhow::Result<()> {
                 tracing::error!("HTTP server error: {}", e);
             }
         }
-        result = Server::builder()
-            .add_service(grpc_server)
-            .serve_with_shutdown(grpc_addr, shutdown_signal()) => {
+        result = grpc_router.serve_with_shutdown(grpc_addr, shutdown_signal()) => {
             if let Err(e) = result {
                 tracing::error!("gRPC server error: {}", e);
             }

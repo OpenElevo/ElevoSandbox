@@ -528,6 +528,42 @@ impl StorageBackend for LocalStorageBackend {
 
         Ok(target.to_string_lossy().to_string())
     }
+
+    async fn stat_fs(&self, workspace_id: &str) -> StorageResult<super::FsStats> {
+        let workspace_dir = self.workspace_dir(workspace_id);
+
+        // Use statvfs to get real filesystem statistics
+        let path_cstr = std::ffi::CString::new(
+            workspace_dir.to_str().ok_or_else(|| {
+                StorageError::Internal(format!("invalid path: {}", workspace_dir.display()))
+            })?,
+        )
+        .map_err(|e| StorageError::Internal(format!("invalid path bytes: {}", e)))?;
+
+        let result = tokio::task::spawn_blocking(move || {
+            let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+            let ret = unsafe { libc::statvfs(path_cstr.as_ptr(), &mut stat) };
+            if ret == 0 {
+                Ok(stat)
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        })
+        .await
+        .map_err(|e| StorageError::Internal(format!("spawn_blocking failed: {}", e)))?
+        .map_err(|e| StorageError::from_io(e, workspace_id))?;
+
+        Ok(super::FsStats {
+            blocks: result.f_blocks,
+            bfree: result.f_bfree,
+            bavail: result.f_bavail,
+            files: result.f_files,
+            ffree: result.f_ffree,
+            bsize: result.f_bsize as u32,
+            namelen: result.f_namemax as u32,
+            frsize: result.f_frsize as u32,
+        })
+    }
 }
 
 /// Recursively copy a directory tree

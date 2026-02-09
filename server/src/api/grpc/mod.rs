@@ -1,4 +1,7 @@
-//! gRPC API handlers for Agent communication
+//! gRPC API handlers for Agent communication and FileSystem operations
+
+pub mod auth;
+pub mod filesystem;
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,6 +18,9 @@ use crate::proto::{
     agent_service_server::{AgentService, AgentServiceServer},
     server_message, AgentMessage, ServerHandshakeAck, ServerHeartbeatAck, ServerMessage,
 };
+
+pub use auth::AuthInterceptor;
+pub use filesystem::FileSystemServiceImpl;
 
 /// gRPC service implementation for Agent connections
 pub struct AgentServiceImpl {
