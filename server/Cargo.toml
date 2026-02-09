@@ -55,12 +55,20 @@ dotenvy = { workspace = true }
 # NFS server
 nfsserve = { workspace = true }
 
+# System
+libc = { workspace = true }
+
+# Metrics
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+
 # MCP Protocol
 rmcp = { workspace = true }
 schemars = { workspace = true }
 
 [dev-dependencies]
 mockall = { workspace = true }
+tempfile = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

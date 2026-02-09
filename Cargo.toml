@@ -63,12 +63,20 @@ portable-pty = "0.8"
 # NFS server
 nfsserve = "0.10"
 
+# System
+libc = "0.2"
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
 # Configuration
 config = "0.14"
 dotenvy = "0.15"
 
 # Testing
 mockall = "0.13"
+tempfile = "3"
 
 # MCP Protocol
 rmcp = { version = "0.12", features = ["server", "client", "transport-io", "transport-streamable-http-server", "transport-child-process"] }

@@ -1,20 +1,20 @@
 //! Workspace service
 
-use std::path::{Path, PathBuf};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use tokio::fs;
 use tracing::{error, info, warn};
 
 use crate::domain::workspace::{CreateWorkspaceParams, Workspace};
 use crate::error::{Error, Result};
 use crate::infra::nfs::NfsManager;
+use crate::infra::storage::lease::{LeaseRenewalTask, WorkspaceLeaseManager};
+use crate::infra::storage::StorageBackend;
 use crate::infra::workspace_repository::WorkspaceRepository;
-use crate::Config;
 
-/// File information
+/// File information (HTTP API DTO)
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
     pub name: String,
@@ -29,7 +29,10 @@ pub struct FileInfo {
 pub struct WorkspaceService {
     repository: Arc<WorkspaceRepository>,
     nfs_manager: Arc<NfsManager>,
-    config: Arc<Config>,
+    storage: Arc<dyn StorageBackend>,
+    lease_manager: Arc<dyn WorkspaceLeaseManager>,
+    holder_id: String,
+    active_leases: Arc<tokio::sync::RwLock<HashSet<String>>>,
 }
 
 impl WorkspaceService {
@@ -37,12 +40,73 @@ impl WorkspaceService {
     pub fn new(
         repository: Arc<WorkspaceRepository>,
         nfs_manager: Arc<NfsManager>,
-        config: Arc<Config>,
+        storage: Arc<dyn StorageBackend>,
+        lease_manager: Arc<dyn WorkspaceLeaseManager>,
+        holder_id: String,
     ) -> Self {
+        let renewal_task = LeaseRenewalTask::new(lease_manager.clone(), holder_id.clone());
+        let active_leases = renewal_task.active_leases();
+        renewal_task.start();
+
         Self {
             repository,
             nfs_manager,
-            config,
+            storage,
+            lease_manager,
+            holder_id,
+            active_leases,
+        }
+    }
+
+    /// Check if this server instance holds the lease for a workspace.
+    /// Used to ensure write operations only proceed if we have the lease.
+    async fn ensure_lease_held(&self, workspace_id: &str) -> Result<()> {
+        // Fast path: check our local active leases set
+        {
+            let leases = self.active_leases.read().await;
+            if leases.contains(workspace_id) {
+                return Ok(());
+            }
+        }
+
+        // Slow path: check the database and try to acquire if needed
+        match self.lease_manager.check(workspace_id).await {
+            Ok(Some(lease)) if lease.holder_id == self.holder_id => {
+                // We hold the lease but it's not in our active set (maybe server restarted)
+                // Add it back to the active set for renewal
+                let mut leases = self.active_leases.write().await;
+                leases.insert(workspace_id.to_string());
+                Ok(())
+            }
+            Ok(Some(lease)) => {
+                // Another server holds the lease
+                Err(Error::Internal(format!(
+                    "Workspace '{}' is currently held by another server instance (holder: {})",
+                    workspace_id, lease.holder_id
+                )))
+            }
+            Ok(None) => {
+                // No active lease - try to acquire one
+                match self
+                    .lease_manager
+                    .acquire(workspace_id, &self.holder_id)
+                    .await
+                {
+                    Ok(_) => {
+                        let mut leases = self.active_leases.write().await;
+                        leases.insert(workspace_id.to_string());
+                        Ok(())
+                    }
+                    Err(e) => Err(Error::Internal(format!(
+                        "Failed to acquire lease for workspace '{}': {}",
+                        workspace_id, e
+                    ))),
+                }
+            }
+            Err(e) => Err(Error::Internal(format!(
+                "Failed to check lease for workspace '{}': {}",
+                workspace_id, e
+            ))),
         }
     }
 
@@ -54,11 +118,32 @@ impl WorkspaceService {
         let workspace = self.repository.create(params).await?;
         let workspace_id = workspace.id.clone();
 
-        // Create workspace directory
-        let workspace_dir = self.get_workspace_dir(&workspace_id);
-        if let Err(e) = std::fs::create_dir_all(&workspace_dir) {
+        // Acquire lease on the workspace
+        if let Err(e) = self
+            .lease_manager
+            .acquire(&workspace_id, &self.holder_id)
+            .await
+        {
+            error!("Failed to acquire lease for workspace {}: {}", workspace_id, e);
+            let _ = self.repository.delete(&workspace_id).await;
+            return Err(Error::Internal(format!(
+                "Failed to acquire workspace lease: {}",
+                e
+            )));
+        }
+
+        // Add to active leases for background renewal
+        {
+            let mut leases = self.active_leases.write().await;
+            leases.insert(workspace_id.clone());
+        }
+
+        // Create workspace directory via storage backend (async, non-blocking)
+        if let Err(e) = self.storage.create_workspace_root(&workspace_id).await {
             error!("Failed to create workspace directory: {}", e);
-            // Clean up database record
+            // Clean up lease and database record
+            let _ = self.lease_manager.release(&workspace_id, &self.holder_id).await;
+            self.remove_from_active_leases(&workspace_id).await;
             let _ = self.repository.delete(&workspace_id).await;
             return Err(Error::Internal(format!(
                 "Failed to create workspace directory: {}",
@@ -67,7 +152,11 @@ impl WorkspaceService {
         }
 
         // Export workspace via NFS
-        match self.nfs_manager.export(&workspace_id, &workspace_dir).await {
+        match self
+            .nfs_manager
+            .export(&workspace_id)
+            .await
+        {
             Ok(nfs_url) => {
                 info!(
                     "NFS export created for workspace {}: {}",
@@ -83,7 +172,10 @@ impl WorkspaceService {
                 }
             }
             Err(e) => {
-                warn!("Failed to export NFS for workspace {}: {}", workspace_id, e);
+                warn!(
+                    "Failed to export NFS for workspace {}: {}",
+                    workspace_id, e
+                );
                 // Non-fatal error, continue
             }
         }
@@ -112,13 +204,16 @@ impl WorkspaceService {
         // Unexport NFS
         self.nfs_manager.unexport(id).await;
 
-        // Remove workspace directory
-        let workspace_dir = self.get_workspace_dir(id);
-        if workspace_dir.exists() {
-            if let Err(e) = std::fs::remove_dir_all(&workspace_dir) {
-                warn!("Failed to remove workspace directory: {}", e);
-            }
+        // Remove workspace directory via storage backend (async, non-blocking)
+        if let Err(e) = self.storage.delete_workspace_root(id).await {
+            warn!("Failed to remove workspace directory: {}", e);
         }
+
+        // Release lease and remove from active renewal list
+        if let Err(e) = self.lease_manager.release(id, &self.holder_id).await {
+            warn!("Failed to release lease for workspace {}: {}", id, e);
+        }
+        self.remove_from_active_leases(id).await;
 
         // Delete from database
         self.repository.delete(id).await?;
@@ -127,9 +222,10 @@ impl WorkspaceService {
         Ok(())
     }
 
-    /// Get workspace directory path
-    pub fn get_workspace_dir(&self, workspace_id: &str) -> PathBuf {
-        PathBuf::from(&self.config.workspace_dir).join(workspace_id)
+    /// Remove a workspace ID from the active leases renewal set
+    async fn remove_from_active_leases(&self, workspace_id: &str) {
+        let mut leases = self.active_leases.write().await;
+        leases.remove(workspace_id);
     }
 
     /// Get NFS URL for a workspace
@@ -139,44 +235,11 @@ impl WorkspaceService {
 
     // ==================== File Operations ====================
 
-    /// Validate and resolve file path within workspace
-    fn resolve_path(&self, workspace_id: &str, path: &str) -> Result<PathBuf> {
-        let workspace_dir = self.get_workspace_dir(workspace_id);
-
-        // Normalize the path and prevent directory traversal
-        let normalized = Path::new(path)
-            .components()
-            .filter(|c| !matches!(c, std::path::Component::ParentDir))
-            .collect::<PathBuf>();
-
-        let full_path = workspace_dir.join(&normalized);
-
-        // Ensure the resolved path is within the workspace directory
-        if !full_path.starts_with(&workspace_dir) {
-            return Err(Error::PathNotAllowed(path.to_string()));
-        }
-
-        Ok(full_path)
-    }
-
     /// Read file content as bytes
     pub async fn read_file(&self, workspace_id: &str, path: &str) -> Result<Vec<u8>> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        if !full_path.exists() {
-            return Err(Error::FileNotFound(path.to_string()));
-        }
-
-        if full_path.is_dir() {
-            return Err(Error::NotADirectory(path.to_string()));
-        }
-
-        fs::read(&full_path)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to read file: {}", e)))
+        Ok(self.storage.read_file(workspace_id, path).await?)
     }
 
     /// Read file content as string
@@ -189,247 +252,95 @@ impl WorkspaceService {
     pub async fn write_file(&self, workspace_id: &str, path: &str, content: &[u8]) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        // Create parent directories if they don't exist
-        if let Some(parent) = full_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create directories: {}", e)))?;
-        }
-
-        fs::write(&full_path, content)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to write file: {}", e)))
+        // Ensure we hold the lease for write operations
+        self.ensure_lease_held(workspace_id).await?;
+        Ok(self.storage.write_file(workspace_id, path, content).await?)
     }
 
     /// List directory contents
     pub async fn list_files(&self, workspace_id: &str, path: &str) -> Result<Vec<FileInfo>> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        if !full_path.exists() {
-            return Err(Error::FileNotFound(path.to_string()));
-        }
-
-        if !full_path.is_dir() {
-            return Err(Error::NotADirectory(path.to_string()));
-        }
-
-        let mut entries = fs::read_dir(&full_path)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to read directory: {}", e)))?;
-
-        let mut files = Vec::new();
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to read entry: {}", e)))?
-        {
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to get metadata: {}", e)))?;
-
-            let name = entry.file_name().to_string_lossy().to_string();
-            let entry_path = Path::new(path).join(&name);
-
-            let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-
-            files.push(FileInfo {
-                name,
-                path: entry_path.to_string_lossy().to_string(),
-                file_type: if metadata.is_dir() {
-                    "directory".to_string()
-                } else {
-                    "file".to_string()
-                },
-                size: metadata.len(),
-                modified_at,
-            });
-        }
-
-        // Sort by name
-        files.sort_by(|a, b| a.name.cmp(&b.name));
-
-        Ok(files)
+        let entries = self.storage.list_dir(workspace_id, path).await?;
+        Ok(entries.into_iter().map(FileInfo::from).collect())
     }
 
     /// Create directory
     pub async fn mkdir(&self, workspace_id: &str, path: &str) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        fs::create_dir_all(&full_path)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to create directory: {}", e)))
+        // Ensure we hold the lease for write operations
+        self.ensure_lease_held(workspace_id).await?;
+        Ok(self.storage.mkdir(workspace_id, path, true).await?)
     }
 
     /// Delete file or directory
-    pub async fn delete_file(&self, workspace_id: &str, path: &str, recursive: bool) -> Result<()> {
+    pub async fn delete_file(
+        &self,
+        workspace_id: &str,
+        path: &str,
+        recursive: bool,
+    ) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
+        // Ensure we hold the lease for write operations
+        self.ensure_lease_held(workspace_id).await?;
 
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        if !full_path.exists() {
-            return Err(Error::FileNotFound(path.to_string()));
-        }
-
-        if full_path.is_dir() {
-            if recursive {
-                fs::remove_dir_all(&full_path)
-                    .await
-                    .map_err(|e| Error::Internal(format!("Failed to remove directory: {}", e)))?;
-            } else {
-                fs::remove_dir(&full_path).await.map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::Other {
-                        Error::DirectoryNotEmpty(path.to_string())
-                    } else {
-                        Error::Internal(format!("Failed to remove directory: {}", e))
-                    }
-                })?;
-            }
+        // Check what we're deleting to dispatch correctly
+        let stat = self.storage.stat(workspace_id, path).await?;
+        if stat.file_type == crate::infra::storage::FileType::Directory {
+            Ok(self
+                .storage
+                .remove_dir(workspace_id, path, recursive)
+                .await?)
         } else {
-            fs::remove_file(&full_path)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to remove file: {}", e)))?;
+            Ok(self.storage.remove_file(workspace_id, path).await?)
         }
-
-        Ok(())
     }
 
     /// Move file or directory
     pub async fn move_file(&self, workspace_id: &str, src: &str, dst: &str) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
+        // Ensure we hold the lease for write operations
+        self.ensure_lease_held(workspace_id).await?;
 
-        let src_path = self.resolve_path(workspace_id, src)?;
-        let dst_path = self.resolve_path(workspace_id, dst)?;
-
-        if !src_path.exists() {
-            return Err(Error::FileNotFound(src.to_string()));
+        // Ensure destination parent directory exists (user-facing convenience).
+        // The storage backend rename() follows POSIX semantics and does not
+        // auto-create parent directories (NFS requires this strict behavior).
+        if let Some(parent) = std::path::Path::new(dst).parent() {
+            let parent_str = parent.to_string_lossy();
+            if !parent_str.is_empty() && parent_str != "." {
+                self.storage
+                    .mkdir(workspace_id, &parent_str, true)
+                    .await?;
+            }
         }
 
-        // Create parent directories for destination
-        if let Some(parent) = dst_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create directories: {}", e)))?;
-        }
-
-        fs::rename(&src_path, &dst_path)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to move file: {}", e)))
+        Ok(self.storage.rename(workspace_id, src, dst).await?)
     }
 
     /// Copy file or directory
     pub async fn copy_file(&self, workspace_id: &str, src: &str, dst: &str) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let src_path = self.resolve_path(workspace_id, src)?;
-        let dst_path = self.resolve_path(workspace_id, dst)?;
-
-        if !src_path.exists() {
-            return Err(Error::FileNotFound(src.to_string()));
-        }
-
-        // Create parent directories for destination
-        if let Some(parent) = dst_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to create directories: {}", e)))?;
-        }
-
-        if src_path.is_dir() {
-            // Recursive copy for directories
-            copy_dir_recursive(&src_path, &dst_path).await?;
-        } else {
-            fs::copy(&src_path, &dst_path)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to copy file: {}", e)))?;
-        }
-
-        Ok(())
+        // Ensure we hold the lease for write operations
+        self.ensure_lease_held(workspace_id).await?;
+        Ok(self.storage.copy(workspace_id, src, dst).await?)
     }
 
     /// Get file info
     pub async fn get_file_info(&self, workspace_id: &str, path: &str) -> Result<FileInfo> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-
-        if !full_path.exists() {
-            return Err(Error::FileNotFound(path.to_string()));
-        }
-
-        let metadata = fs::metadata(&full_path)
-            .await
-            .map_err(|e| Error::Internal(format!("Failed to get metadata: {}", e)))?;
-
-        let name = full_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-
-        let modified_at = metadata.modified().ok().map(DateTime::<Utc>::from);
-
-        Ok(FileInfo {
-            name,
-            path: path.to_string(),
-            file_type: if metadata.is_dir() {
-                "directory".to_string()
-            } else {
-                "file".to_string()
-            },
-            size: metadata.len(),
-            modified_at,
-        })
+        let stat = self.storage.stat(workspace_id, path).await?;
+        Ok(FileInfo::from(stat))
     }
 
     /// Check if file exists
     pub async fn exists(&self, workspace_id: &str, path: &str) -> Result<bool> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
-
-        let full_path = self.resolve_path(workspace_id, path)?;
-        Ok(full_path.exists())
+        Ok(self.storage.exists(workspace_id, path).await?)
     }
-}
-
-/// Recursively copy directory
-async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
-    fs::create_dir_all(dst)
-        .await
-        .map_err(|e| Error::Internal(format!("Failed to create directory: {}", e)))?;
-
-    let mut entries = fs::read_dir(src)
-        .await
-        .map_err(|e| Error::Internal(format!("Failed to read directory: {}", e)))?;
-
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| Error::Internal(format!("Failed to read entry: {}", e)))?
-    {
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-
-        if src_path.is_dir() {
-            Box::pin(copy_dir_recursive(&src_path, &dst_path)).await?;
-        } else {
-            fs::copy(&src_path, &dst_path)
-                .await
-                .map_err(|e| Error::Internal(format!("Failed to copy file: {}", e)))?;
-        }
-    }
-
-    Ok(())
 }
