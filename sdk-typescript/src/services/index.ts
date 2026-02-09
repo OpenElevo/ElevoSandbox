@@ -7,3 +7,4 @@ export { SandboxService } from './sandbox';
 export { ProcessService } from './process';
 export { PtyService } from './pty';
 export { NfsService, NfsMount, type NfsMountOptions } from './nfs';
+export { FuseService, FuseMount, type FuseMountOptions } from './fuse';

@@ -7,6 +7,7 @@ from workspace_sdk.services.sandbox import SandboxService, AsyncSandboxService
 from workspace_sdk.services.process import ProcessService, AsyncProcessService
 from workspace_sdk.services.pty import PtyService, AsyncPtyService
 from workspace_sdk.services.nfs import NfsService, NfsMount
+from workspace_sdk.services.fuse import FuseService, FuseMount
 
 __all__ = [
     "WorkspaceService",
@@ -19,4 +20,6 @@ __all__ = [
     "AsyncPtyService",
     "NfsService",
     "NfsMount",
+    "FuseService",
+    "FuseMount",
 ]
