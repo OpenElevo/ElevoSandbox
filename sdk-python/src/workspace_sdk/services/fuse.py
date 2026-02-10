@@ -288,6 +288,27 @@ class FuseMount:
         """Check if currently mounted."""
         return self._mounted and self._process is not None and self._process.poll() is None
 
+    def _is_fuse_mounted(self, path: str) -> bool:
+        """Check if path is a FUSE mount point by checking /proc/mounts."""
+        try:
+            with open("/proc/mounts", "r") as f:
+                for line in f:
+                    parts = line.split()
+                    if len(parts) >= 2 and parts[1] == path:
+                        # Check if it's a FUSE mount
+                        if "fuse" in parts[2].lower():
+                            return True
+            return False
+        except Exception:
+            # Fallback: check if we can stat the directory and it's different from parent
+            try:
+                mount_stat = os.stat(path)
+                parent_stat = os.stat(os.path.dirname(path))
+                # Different device means it's a mount point
+                return mount_stat.st_dev != parent_stat.st_dev
+            except Exception:
+                return False
+
     def mount(self, timeout: float = 30.0) -> str:
         """
         Mount the workspace.
@@ -354,14 +375,13 @@ class FuseMount:
                     self._temp_dir = None
                 raise RuntimeError(f"workspace-fuse exited unexpectedly: {stderr}")
 
-            # Check if mount is ready by trying to access it
-            try:
-                os.listdir(mount_path)
+            # Check if mount is ready by verifying it's actually a FUSE mount
+            if self._is_fuse_mounted(mount_path):
                 self._mounted = True
                 self._mount_point = mount_path
                 return mount_path
-            except OSError:
-                time.sleep(0.1)
+
+            time.sleep(0.1)
 
         # Timeout
         self._cleanup()

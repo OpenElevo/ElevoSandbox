@@ -8,6 +8,8 @@ Supports both synchronous and asynchronous APIs.
 from workspace_sdk.client import WorkspaceClient
 from workspace_sdk.async_client import AsyncWorkspaceClient
 from workspace_sdk.types import (
+    Workspace,
+    CreateWorkspaceParams,
     Sandbox,
     SandboxState,
     CreateSandboxParams,
@@ -37,6 +39,8 @@ __all__ = [
     "WorkspaceClient",
     "AsyncWorkspaceClient",
     # Types
+    "Workspace",
+    "CreateWorkspaceParams",
     "Sandbox",
     "SandboxState",
     "CreateSandboxParams",
