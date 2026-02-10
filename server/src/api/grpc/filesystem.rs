@@ -17,15 +17,14 @@ use tracing::debug;
 
 use crate::infra::storage::{FileStat, FileType, StorageBackend, StorageError};
 use crate::proto::{
-    file_system_service_server::FileSystemService, fs_write_file_request::Payload,
-    FsCreateRequest, FsCreateResponse, FsDirEntry, FsFileAttr, FsFileType, FsListDirRequest,
-    FsListDirResponse, FsMkdirRequest, FsMkdirResponse, FsReadAtRequest, FsReadAtResponse,
-    FsReadFileRequest, FsReadFileResponse, FsReadLinkRequest, FsReadLinkResponse,
-    FsRemoveDirRequest, FsRemoveDirResponse, FsRemoveFileRequest, FsRemoveFileResponse,
-    FsRenameFlags, FsRenameRequest, FsRenameResponse, FsSetAttrRequest, FsSetAttrResponse,
-    FsStatFsRequest, FsStatFsResponse, FsStatRequest, FsStatResponse, FsSymlinkRequest,
-    FsSymlinkResponse, FsWriteAtRequest, FsWriteAtResponse, FsWriteFileRequest,
-    FsWriteFileResponse,
+    file_system_service_server::FileSystemService, fs_write_file_request::Payload, FsCreateRequest,
+    FsCreateResponse, FsDirEntry, FsFileAttr, FsFileType, FsListDirRequest, FsListDirResponse,
+    FsMkdirRequest, FsMkdirResponse, FsReadAtRequest, FsReadAtResponse, FsReadFileRequest,
+    FsReadFileResponse, FsReadLinkRequest, FsReadLinkResponse, FsRemoveDirRequest,
+    FsRemoveDirResponse, FsRemoveFileRequest, FsRemoveFileResponse, FsRenameFlags, FsRenameRequest,
+    FsRenameResponse, FsSetAttrRequest, FsSetAttrResponse, FsStatFsRequest, FsStatFsResponse,
+    FsStatRequest, FsStatResponse, FsSymlinkRequest, FsSymlinkResponse, FsWriteAtRequest,
+    FsWriteAtResponse, FsWriteFileRequest, FsWriteFileResponse,
 };
 
 /// Default chunk size for streaming file reads (64KB)
@@ -161,7 +160,10 @@ fn timestamp_to_datetime(ts: &Timestamp) -> Option<DateTime<Utc>> {
 #[tonic::async_trait]
 impl FileSystemService for FileSystemServiceImpl {
     /// Get file/directory metadata
-    async fn stat(&self, request: Request<FsStatRequest>) -> Result<Response<FsStatResponse>, Status> {
+    async fn stat(
+        &self,
+        request: Request<FsStatRequest>,
+    ) -> Result<Response<FsStatResponse>, Status> {
         let req = request.into_inner();
         debug!(workspace_id = %req.workspace_id, path = %req.path, "stat");
 

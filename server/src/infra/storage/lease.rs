@@ -42,7 +42,11 @@ pub trait WorkspaceLeaseManager: Send + Sync + 'static {
     ) -> Result<WorkspaceLease, LeaseError>;
 
     /// Renew an existing lease held by the given holder.
-    async fn renew(&self, workspace_id: &str, holder_id: &str) -> Result<WorkspaceLease, LeaseError>;
+    async fn renew(
+        &self,
+        workspace_id: &str,
+        holder_id: &str,
+    ) -> Result<WorkspaceLease, LeaseError>;
 
     /// Release a lease held by the given holder.
     async fn release(&self, workspace_id: &str, holder_id: &str) -> Result<(), LeaseError>;
@@ -231,7 +235,8 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         .fetch_optional(&self.pool)
         .await?;
 
-        let (current_holder,) = result.ok_or_else(|| LeaseError::NotFound(workspace_id.to_string()))?;
+        let (current_holder,) =
+            result.ok_or_else(|| LeaseError::NotFound(workspace_id.to_string()))?;
 
         if current_holder != holder_id {
             return Err(LeaseError::HolderMismatch {
@@ -255,12 +260,11 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         .await?;
 
         // Fetch the updated lease
-        let (acquired_str,): (String,) = sqlx::query_as(
-            "SELECT acquired_at FROM workspace_leases WHERE workspace_id = ?",
-        )
-        .bind(workspace_id)
-        .fetch_one(&self.pool)
-        .await?;
+        let (acquired_str,): (String,) =
+            sqlx::query_as("SELECT acquired_at FROM workspace_leases WHERE workspace_id = ?")
+                .bind(workspace_id)
+                .fetch_one(&self.pool)
+                .await?;
 
         let acquired_at: DateTime<Utc> = acquired_str
             .parse()
@@ -283,7 +287,8 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         .fetch_optional(&self.pool)
         .await?;
 
-        let (current_holder,) = result.ok_or_else(|| LeaseError::NotFound(workspace_id.to_string()))?;
+        let (current_holder,) =
+            result.ok_or_else(|| LeaseError::NotFound(workspace_id.to_string()))?;
 
         if current_holder != holder_id {
             return Err(LeaseError::HolderMismatch {
@@ -357,10 +362,7 @@ pub struct LeaseRenewalTask {
 }
 
 impl LeaseRenewalTask {
-    pub fn new(
-        lease_manager: Arc<dyn WorkspaceLeaseManager>,
-        holder_id: String,
-    ) -> Self {
+    pub fn new(lease_manager: Arc<dyn WorkspaceLeaseManager>, holder_id: String) -> Self {
         Self {
             lease_manager,
             holder_id,

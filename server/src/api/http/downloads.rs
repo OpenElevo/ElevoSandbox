@@ -28,7 +28,10 @@ pub async fn download_workspace_fuse(
     if !["linux", "darwin"].contains(&platform.as_str()) {
         return (
             StatusCode::BAD_REQUEST,
-            format!("Unsupported platform: {}. Supported: linux, darwin", platform),
+            format!(
+                "Unsupported platform: {}. Supported: linux, darwin",
+                platform
+            ),
         )
             .into_response();
     }
@@ -37,7 +40,10 @@ pub async fn download_workspace_fuse(
     if !["amd64", "arm64"].contains(&arch.as_str()) {
         return (
             StatusCode::BAD_REQUEST,
-            format!("Unsupported architecture: {}. Supported: amd64, arm64", arch),
+            format!(
+                "Unsupported architecture: {}. Supported: amd64, arm64",
+                arch
+            ),
         )
             .into_response();
     }
@@ -56,7 +62,11 @@ pub async fn download_workspace_fuse(
         warn!(path = %file_path.display(), "workspace-fuse binary not found");
         return (
             StatusCode::NOT_FOUND,
-            format!("Binary not found: {}. Place it at {}", filename, file_path.display()),
+            format!(
+                "Binary not found: {}. Place it at {}",
+                filename,
+                file_path.display()
+            ),
         )
             .into_response();
     }

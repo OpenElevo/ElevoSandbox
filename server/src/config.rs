@@ -331,8 +331,8 @@ impl Config {
 
     /// Build storage configuration from environment variables
     fn load_storage_config(workspace_dir: &str) -> anyhow::Result<StorageConfig> {
-        let storage_type = std::env::var("WORKSPACE_STORAGE_TYPE")
-            .unwrap_or_else(|_| "local".to_string());
+        let storage_type =
+            std::env::var("WORKSPACE_STORAGE_TYPE").unwrap_or_else(|_| "local".to_string());
 
         let workspace_path = PathBuf::from(workspace_dir);
 
@@ -346,19 +346,17 @@ impl Config {
 
         match storage_type.as_str() {
             "s3" => {
-                let endpoint = std::env::var("WORKSPACE_S3_ENDPOINT")
-                    .map_err(|_| {
-                        anyhow::anyhow!(
-                            "WORKSPACE_S3_ENDPOINT is required when WORKSPACE_STORAGE_TYPE=s3"
-                        )
-                    })?;
+                let endpoint = std::env::var("WORKSPACE_S3_ENDPOINT").map_err(|_| {
+                    anyhow::anyhow!(
+                        "WORKSPACE_S3_ENDPOINT is required when WORKSPACE_STORAGE_TYPE=s3"
+                    )
+                })?;
 
-                let bucket = std::env::var("WORKSPACE_S3_BUCKET")
-                    .map_err(|_| {
-                        anyhow::anyhow!(
-                            "WORKSPACE_S3_BUCKET is required when WORKSPACE_STORAGE_TYPE=s3"
-                        )
-                    })?;
+                let bucket = std::env::var("WORKSPACE_S3_BUCKET").map_err(|_| {
+                    anyhow::anyhow!(
+                        "WORKSPACE_S3_BUCKET is required when WORKSPACE_STORAGE_TYPE=s3"
+                    )
+                })?;
 
                 let access_key = std::env::var("WORKSPACE_S3_ACCESS_KEY").ok();
                 let secret_key = std::env::var("WORKSPACE_S3_SECRET_KEY").ok();

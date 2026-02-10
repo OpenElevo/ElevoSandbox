@@ -85,7 +85,7 @@ func testHealth(ctx context.Context, client *workspace.Client) {
 	if err := client.Health(ctx); err != nil {
 		log.Fatalf("Health check failed: %v", err)
 	}
-	fmt.Println("   OK\n")
+	fmt.Println("   OK")
 }
 
 func testWorkspace(ctx context.Context, client *workspace.Client) string {
@@ -122,7 +122,7 @@ func testCommand(ctx context.Context, client *workspace.Client, sandboxID string
 		log.Fatalf("Failed to run command: %v", err)
 	}
 	fmt.Printf("   Output: %s", result.Stdout)
-	fmt.Println("   OK\n")
+	fmt.Println("   OK")
 }
 
 func testShell(ctx context.Context, client *workspace.Client, sandboxID string) {
@@ -135,7 +135,7 @@ func testShell(ctx context.Context, client *workspace.Client, sandboxID string) 
 		log.Fatalf("Failed to run shell: %v", err)
 	}
 	fmt.Printf("   File content: %s", result.Stdout)
-	fmt.Println("   OK\n")
+	fmt.Println("   OK")
 }
 
 func testDirectoryListing(ctx context.Context, client *workspace.Client, sandboxID string) {
@@ -147,7 +147,7 @@ func testDirectoryListing(ctx context.Context, client *workspace.Client, sandbox
 		log.Fatalf("Failed to list directory: %v", err)
 	}
 	fmt.Printf("   Directory listing:\n%s", result.Stdout)
-	fmt.Println("   OK\n")
+	fmt.Println("   OK")
 }
 
 func testFuse(ctx context.Context, grpcURL, httpURL, token, workspaceID string) {

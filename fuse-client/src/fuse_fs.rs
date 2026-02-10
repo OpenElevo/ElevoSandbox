@@ -19,7 +19,9 @@ use tonic_types::StatusExt;
 use tracing::{debug, warn};
 use workspace_proto::{FsFileAttr, FsFileType};
 
-use crate::cache::{fs_file_type_to_fuse, i32_to_fs_file_type, DirCache, MetadataCache, ReadCache, StatfsCache};
+use crate::cache::{
+    fs_file_type_to_fuse, i32_to_fs_file_type, DirCache, MetadataCache, ReadCache, StatfsCache,
+};
 use crate::inode::{join_path, InodeTable, ROOT_INODE};
 use crate::rpc::FileSystemRpcClient;
 
@@ -224,7 +226,9 @@ impl WorkspaceFuse {
         // Fetch from server
         let rpc = self.rpc.clone();
         let path_owned = path.to_string();
-        let attr = self.runtime.block_on(async move { rpc.stat(&path_owned).await })?;
+        let attr = self
+            .runtime
+            .block_on(async move { rpc.stat(&path_owned).await })?;
 
         // Cache the result
         self.meta_cache.insert(path, attr.clone());
@@ -375,9 +379,9 @@ impl Filesystem for WorkspaceFuse {
 
         let rpc = self.rpc.clone();
         let path_owned = path.clone();
-        let result = self.runtime.block_on(async move {
-            rpc.set_attr(&path_owned, size, mode, atime, mtime).await
-        });
+        let result = self
+            .runtime
+            .block_on(async move { rpc.set_attr(&path_owned, size, mode, atime, mtime).await });
 
         match result {
             Ok(attr) => {
@@ -426,7 +430,8 @@ impl Filesystem for WorkspaceFuse {
         let end_block = if size == 0 {
             start_block
         } else {
-            self.read_cache.offset_to_block_idx(offset + size as u64 - 1)
+            self.read_cache
+                .offset_to_block_idx(offset + size as u64 - 1)
         };
 
         // Check for sequential read pattern and determine if we should prefetch

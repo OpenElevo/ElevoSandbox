@@ -59,10 +59,7 @@ pub struct AppState {
 ///   mount point. Returns the mount manager for shutdown cleanup.
 async fn init_storage(
     config: &StorageConfig,
-) -> anyhow::Result<(
-    Arc<dyn StorageBackend>,
-    Option<Arc<S3fsMountManager>>,
-)> {
+) -> anyhow::Result<(Arc<dyn StorageBackend>, Option<Arc<S3fsMountManager>>)> {
     match config {
         StorageConfig::Local { workspace_dir } => {
             info!("Using local storage backend at {:?}", workspace_dir);
@@ -104,10 +101,8 @@ async fn init_storage(
             mount_manager.health_check().await?;
 
             // Start background mount health monitor (checks every 30s, auto-remounts)
-            let monitor = S3fsMountMonitor::new(
-                mount_manager.clone(),
-                std::time::Duration::from_secs(30),
-            );
+            let monitor =
+                S3fsMountMonitor::new(mount_manager.clone(), std::time::Duration::from_secs(30));
             monitor.start();
 
             info!("S3 storage mounted at {:?}", workspace_dir);
@@ -282,7 +277,8 @@ async fn main() -> anyhow::Result<()> {
         if let Some(ref token) = config.fs_api_token {
             info!("FileSystemService enabled with token authentication");
             let auth_interceptor = AuthInterceptor::new(token.clone());
-            let fs_grpc_server = FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
+            let fs_grpc_server =
+                FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
             Server::builder()
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)

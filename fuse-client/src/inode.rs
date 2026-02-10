@@ -345,7 +345,10 @@ mod tests {
         assert_eq!(table.get_inode("newdir"), Some(dir_inode));
         assert_eq!(table.get_inode("newdir/file.txt"), Some(file_inode));
         assert_eq!(table.get_inode("newdir/subdir"), Some(subdir_inode));
-        assert_eq!(table.get_inode("newdir/subdir/nested.txt"), Some(subfile_inode));
+        assert_eq!(
+            table.get_inode("newdir/subdir/nested.txt"),
+            Some(subfile_inode)
+        );
     }
 
     #[test]

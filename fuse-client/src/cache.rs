@@ -265,10 +265,7 @@ impl StatfsCache {
     /// Create a new statfs cache with custom TTL
     pub fn with_ttl(ttl: Duration) -> Self {
         Self {
-            cache: Cache::builder()
-                .max_capacity(1)
-                .time_to_live(ttl)
-                .build(),
+            cache: Cache::builder().max_capacity(1).time_to_live(ttl).build(),
         }
     }
 

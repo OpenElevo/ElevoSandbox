@@ -4,8 +4,8 @@
 //! concrete storage implementations. All path parameters are workspace-relative
 //! paths (e.g., "src/main.rs") — the backend maps them to physical locations.
 
-pub mod local;
 pub mod lease;
+pub mod local;
 pub mod s3fs_mount;
 
 use async_trait::async_trait;
@@ -138,12 +138,8 @@ pub trait StorageBackend: Send + Sync + 'static {
     ) -> StorageResult<Vec<u8>>;
 
     /// Write file content (full overwrite; creates if missing, overwrites if exists)
-    async fn write_file(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        content: &[u8],
-    ) -> StorageResult<()>;
+    async fn write_file(&self, workspace_id: &str, path: &str, content: &[u8])
+        -> StorageResult<()>;
 
     /// Write data at a specific offset (for NFS offset writes)
     async fn write_file_at(
@@ -187,12 +183,7 @@ pub trait StorageBackend: Send + Sync + 'static {
     /// - `recursive = true`: create parent directories as needed (`mkdir -p`)
     /// - `recursive = false`: create only the leaf directory; returns `NotFound`
     ///   if the parent does not exist (NFS mkdir semantics)
-    async fn mkdir(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        recursive: bool,
-    ) -> StorageResult<()>;
+    async fn mkdir(&self, workspace_id: &str, path: &str, recursive: bool) -> StorageResult<()>;
 
     // ── Remove Operations ──
 
@@ -225,7 +216,12 @@ pub trait StorageBackend: Send + Sync + 'static {
     /// Returns `AlreadyExists` if the destination already exists.
     ///
     /// Default implementation falls back to stat + rename (non-atomic, has TOCTOU race).
-    async fn rename_noreplace(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()> {
+    async fn rename_noreplace(
+        &self,
+        workspace_id: &str,
+        src: &str,
+        dst: &str,
+    ) -> StorageResult<()> {
         // Default: non-atomic fallback (TOCTOU race possible)
         if self.exists(workspace_id, dst).await? {
             return Err(StorageError::AlreadyExists(dst.to_string()));
@@ -258,20 +254,11 @@ pub trait StorageBackend: Send + Sync + 'static {
     // ── NFS Extended Operations ──
 
     /// Set file size (truncate, used by NFS setattr)
-    async fn set_file_size(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        size: u64,
-    ) -> StorageResult<()>;
+    async fn set_file_size(&self, workspace_id: &str, path: &str, size: u64) -> StorageResult<()>;
 
     /// Set file permission mode (e.g., 0o644, used by NFS setattr)
-    async fn set_permissions(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        mode: u32,
-    ) -> StorageResult<()>;
+    async fn set_permissions(&self, workspace_id: &str, path: &str, mode: u32)
+        -> StorageResult<()>;
 
     /// Set file access and modification times (used by NFS setattr)
     ///
@@ -289,12 +276,8 @@ pub trait StorageBackend: Send + Sync + 'static {
     /// `target` is the symlink target path. NFS allows arbitrary target strings
     /// (relative, absolute, or non-existent paths). Only `link_path` is subject
     /// to workspace path validation; `target` is passed through as-is.
-    async fn symlink(
-        &self,
-        workspace_id: &str,
-        link_path: &str,
-        target: &str,
-    ) -> StorageResult<()>;
+    async fn symlink(&self, workspace_id: &str, link_path: &str, target: &str)
+        -> StorageResult<()>;
 
     /// Read the target of a symbolic link
     async fn readlink(&self, workspace_id: &str, path: &str) -> StorageResult<String>;
