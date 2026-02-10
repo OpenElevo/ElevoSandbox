@@ -22,6 +22,7 @@ impl AuthInterceptor {
     }
 
     /// Validate the request and return the authenticated request or an error.
+    #[allow(clippy::result_large_err)]
     pub fn authenticate<T>(&self, request: Request<T>) -> Result<Request<T>, Status> {
         // Extract the Authorization header
         let token = request
