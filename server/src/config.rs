@@ -97,8 +97,14 @@ pub struct Config {
     #[serde(default = "default_mcp_profile")]
     pub mcp_profile: String,
 
+    /// Enable FileSystem API for gRPC (FUSE client connections)
+    /// Default: true (enabled without authentication)
+    #[serde(default = "default_fs_api_enabled")]
+    pub fs_api_enabled: bool,
+
     /// FileSystem API token for gRPC authentication
-    /// Required for FUSE client connections to FileSystemService
+    /// If set, FUSE clients must provide this token to access FileSystemService
+    /// If not set, FileSystemService is accessible without authentication
     #[serde(default)]
     pub fs_api_token: Option<String>,
 
@@ -224,6 +230,10 @@ fn default_mcp_profile() -> String {
     "developer".to_string()
 }
 
+fn default_fs_api_enabled() -> bool {
+    true
+}
+
 impl Config {
     /// Load configuration from environment variables
     pub fn load() -> anyhow::Result<Self> {
@@ -308,6 +318,9 @@ impl Config {
         }
         if let Ok(val) = std::env::var("WORKSPACE_FS_API_TOKEN") {
             config.fs_api_token = Some(val);
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_FS_API_ENABLED") {
+            config.fs_api_enabled = val.to_lowercase() == "true" || val == "1";
         }
 
         // Build StorageConfig from environment variables
@@ -433,6 +446,7 @@ impl Default for Config {
             mcp_mode: default_mcp_mode(),
             mcp_path: default_mcp_path(),
             mcp_profile: default_mcp_profile(),
+            fs_api_enabled: default_fs_api_enabled(),
             fs_api_token: None,
             storage: StorageConfig::default(),
         }
