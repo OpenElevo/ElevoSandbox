@@ -140,27 +140,77 @@ function downloadFile(url: string, destPath: string, proxy?: string): Promise<vo
 }
 
 /**
- * Download workspace-fuse binary for current platform
+ * Try to download file from URL, returns true if successful
  */
-async function downloadBinary(version: string = DEFAULT_VERSION, proxy?: string): Promise<string> {
+async function tryDownloadFile(url: string, destPath: string, proxy?: string): Promise<boolean> {
+  try {
+    await downloadFile(url, destPath, proxy);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Try to download workspace-fuse binary from workspace server
+ */
+async function tryDownloadFromServer(
+  serverUrl: string,
+  destPath: string,
+  proxy?: string
+): Promise<boolean> {
+  const { platform, arch } = getPlatformInfo();
+
+  // Convert gRPC URL to HTTP URL if needed
+  let httpUrl = serverUrl;
+  if (httpUrl.includes(':9090') || httpUrl.includes(':19090')) {
+    httpUrl = httpUrl.replace(':9090', ':8080').replace(':19090', ':18080');
+  }
+
+  const downloadUrl = `${httpUrl}/api/v1/downloads/workspace-fuse/${platform}/${arch}`;
+  return tryDownloadFile(downloadUrl, destPath, proxy);
+}
+
+/**
+ * Download workspace-fuse binary for current platform
+ *
+ * Download priority:
+ * 1. From workspace server (if serverUrl provided and binary available)
+ * 2. From GitHub Releases (fallback)
+ */
+async function downloadBinary(
+  version: string = DEFAULT_VERSION,
+  proxy?: string,
+  serverUrl?: string
+): Promise<string> {
   const { platform, arch } = getPlatformInfo();
   const binDir = getBinDir();
   const binPath = path.join(binDir, 'workspace-fuse');
-
-  // Build download URL
-  let url: string;
-  if (version === 'latest') {
-    url = GITHUB_LATEST_URL.replace('{platform}', platform).replace('{arch}', arch);
-  } else {
-    url = GITHUB_RELEASE_URL.replace('{version}', version)
-      .replace('{platform}', platform)
-      .replace('{arch}', arch);
-  }
-
   const tempPath = binPath + '.tmp';
 
   try {
-    await downloadFile(url, tempPath, proxy);
+    let downloaded = false;
+
+    // Try server first if URL provided
+    if (serverUrl) {
+      downloaded = await tryDownloadFromServer(serverUrl, tempPath, proxy);
+    }
+
+    // Fallback to GitHub
+    if (!downloaded) {
+      let url: string;
+      if (version === 'latest') {
+        url = GITHUB_LATEST_URL.replace('{platform}', platform).replace('{arch}', arch);
+      } else {
+        url = GITHUB_RELEASE_URL.replace('{version}', version)
+          .replace('{platform}', platform)
+          .replace('{arch}', arch);
+      }
+
+      if (!(await tryDownloadFile(url, tempPath, proxy))) {
+        throw new Error('Failed to download workspace-fuse from both server and GitHub');
+      }
+    }
 
     // Make executable
     fs.chmodSync(tempPath, 0o755);
@@ -189,7 +239,8 @@ async function downloadBinary(version: string = DEFAULT_VERSION, proxy?: string)
 async function ensureBinary(
   version: string = DEFAULT_VERSION,
   forceDownload: boolean = false,
-  proxy?: string
+  proxy?: string,
+  serverUrl?: string
 ): Promise<string> {
   const binDir = getBinDir();
   const binPath = path.join(binDir, 'workspace-fuse');
@@ -202,7 +253,7 @@ async function ensureBinary(
     } catch {}
   }
 
-  return downloadBinary(version, proxy);
+  return downloadBinary(version, proxy, serverUrl);
 }
 
 /**
@@ -433,6 +484,7 @@ export class FuseService {
   private readonly defaultToken?: string;
   private readonly binaryVersion: string;
   private readonly proxy?: string;
+  private readonly httpServer: string;
   private _binaryPath: string | null = null;
   private _mounts: Map<string, FuseMount> = new Map();
 
@@ -442,22 +494,25 @@ export class FuseService {
    * @param defaultToken Default authentication token
    * @param binaryVersion workspace-fuse version to use
    * @param proxy HTTP proxy for downloading binary
+   * @param httpServer HTTP server URL for downloading binary (optional, auto-derived from server if not set)
    */
   constructor(
     server: string,
     defaultToken?: string,
     binaryVersion: string = DEFAULT_VERSION,
-    proxy?: string
+    proxy?: string,
+    httpServer?: string
   ) {
     this.server = server;
     this.defaultToken = defaultToken;
     this.binaryVersion = binaryVersion;
     this.proxy = proxy;
+    this.httpServer = httpServer || server;
   }
 
   private async _ensureBinary(): Promise<string> {
     if (!this._binaryPath) {
-      this._binaryPath = await ensureBinary(this.binaryVersion, false, this.proxy);
+      this._binaryPath = await ensureBinary(this.binaryVersion, false, this.proxy, this.httpServer);
     }
     return this._binaryPath;
   }
