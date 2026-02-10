@@ -329,7 +329,7 @@ mod tests {
             blocks: 1,
         };
 
-        cache.insert("test.txt", attr.clone());
+        cache.insert("test.txt", attr);
 
         let cached = cache.get("test.txt");
         assert!(cached.is_some());
