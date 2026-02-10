@@ -199,7 +199,7 @@ impl WorkspaceFuse {
             blocks: if attr.blocks > 0 {
                 attr.blocks
             } else {
-                (attr.size + 511) / 512
+                attr.size.div_ceil(512)
             },
             atime,
             mtime,
@@ -217,6 +217,7 @@ impl WorkspaceFuse {
     }
 
     /// Get attributes with caching
+    #[allow(clippy::result_large_err)]
     fn get_attr_cached(&self, path: &str) -> Result<FsFileAttr, Status> {
         // Check cache first
         if let Some(cached) = self.meta_cache.get(path) {
@@ -231,7 +232,7 @@ impl WorkspaceFuse {
             .block_on(async move { rpc.stat(&path_owned).await })?;
 
         // Cache the result
-        self.meta_cache.insert(path, attr.clone());
+        self.meta_cache.insert(path, attr);
 
         Ok(attr)
     }
@@ -632,11 +633,9 @@ impl Filesystem for WorkspaceFuse {
         };
 
         // Add . and ..
-        if offset == 0 {
-            if reply.add(ino, 1, FileType::Directory, ".") {
-                reply.ok();
-                return;
-            }
+        if offset == 0 && reply.add(ino, 1, FileType::Directory, ".") {
+            reply.ok();
+            return;
         }
         if offset <= 1 {
             let parent_ino = if ino == ROOT_INODE {
@@ -674,7 +673,7 @@ impl Filesystem for WorkspaceFuse {
 
             // Cache the metadata if available
             if let Some(ref attr) = entry.attr {
-                self.meta_cache.insert(&child_path, attr.clone());
+                self.meta_cache.insert(&child_path, *attr);
             }
 
             if reply.add(child_ino, entry_offset + 1, file_type, &entry.name) {
@@ -1181,7 +1180,7 @@ impl Filesystem for WorkspaceFuse {
         match result {
             Ok(stat) => {
                 // Cache the result
-                self.statfs_cache.insert(stat.clone());
+                self.statfs_cache.insert(stat);
                 reply.statfs(
                     stat.blocks,
                     stat.bfree,

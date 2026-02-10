@@ -140,7 +140,7 @@ fn file_stat_to_attr(stat: &FileStat) -> FsFileAttr {
             1
         },
         blksize: 4096,
-        blocks: (stat.size + 511) / 512, // Round up to 512-byte blocks
+        blocks: stat.size.div_ceil(512), // Round up to 512-byte blocks
     }
 }
 
@@ -482,7 +482,7 @@ impl FileSystemService for FileSystemServiceImpl {
                         .into_iter()
                         .collect();
                 details.set_error_info(
-                    &format!("ERRNO_{}", libc::ENOSYS),
+                    format!("ERRNO_{}", libc::ENOSYS),
                     "workspace.v1",
                     metadata,
                 );
