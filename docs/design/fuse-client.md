@@ -1516,7 +1516,176 @@ Cargo.toml                          # 修改：workspace members 新增 workspac
 
 > 注意：storage-backend-ha 中只有 `LocalStorageBackend` 一个实现。S3 模式通过 s3fs-fuse 挂载后，`LocalStorageBackend` 直接操作挂载点目录，不存在单独的 S3StorageBackend。fuse-client 不感知后端是 local 还是 S3——所有请求通过 gRPC 到达 Server，由 Server 统一通过 StorageBackend 访问。
 
-## 8. 风险与缓解
+## 8. SDK 集成与二进制分发
+
+### 8.1 二进制分发架构
+
+`workspace-fuse` 二进制文件通过以下方式分发给 SDK 用户：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        SDK Client                                │
+│                                                                  │
+│   1. 检查本地缓存 (~/.cache/workspace-fuse/workspace-fuse)       │
+│      ↓ (未命中)                                                  │
+│   2. 从 Server 下载                                              │
+│      GET /api/v1/downloads/workspace-fuse/{platform}/{arch}      │
+│      ↓ (失败时)                                                  │
+│   3. 从 GitHub Releases 下载 (fallback)                          │
+│      https://github.com/OpenElevo/ElevoSandbox/releases/...      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 8.2 Server 端下载 API
+
+Server 提供二进制下载端点：
+
+```
+GET /api/v1/downloads/workspace-fuse/{platform}/{arch}
+
+参数：
+- platform: linux | darwin
+- arch: amd64 | arm64
+
+响应：
+- 200 OK: 返回二进制文件 (application/octet-stream)
+- 404 Not Found: 平台/架构不支持
+
+示例：
+curl -O http://localhost:8080/api/v1/downloads/workspace-fuse/linux/amd64
+```
+
+Server 从 `WORKSPACE_DOWNLOADS_DIR` 环境变量指定的目录读取二进制文件：
+
+```
+$WORKSPACE_DOWNLOADS_DIR/
+├── workspace-fuse-linux-amd64
+├── workspace-fuse-linux-arm64
+├── workspace-fuse-darwin-amd64
+└── workspace-fuse-darwin-arm64
+```
+
+### 8.3 Docker 镜像集成
+
+Docker 镜像构建时将预编译的二进制文件打包：
+
+```dockerfile
+# Dockerfile.server
+FROM rust:1.75 AS builder
+# ... 构建 server 和 workspace-fuse ...
+
+FROM debian:bookworm-slim
+# 复制 server 二进制
+COPY --from=builder /app/target/release/workspace-server /usr/local/bin/
+
+# 复制 workspace-fuse 二进制到下载目录
+COPY --from=builder /app/target/release/workspace-fuse \
+    /var/lib/workspace/downloads/workspace-fuse-linux-amd64
+COPY --from=builder /app/target/aarch64-unknown-linux-gnu/release/workspace-fuse \
+    /var/lib/workspace/downloads/workspace-fuse-linux-arm64
+
+ENV WORKSPACE_DOWNLOADS_DIR=/var/lib/workspace/downloads
+```
+
+### 8.4 SDK 实现
+
+各 SDK 提供 `FuseService` 类/模块：
+
+#### Python SDK
+
+```python
+from workspace_sdk.services.fuse import FuseService
+
+fuse = FuseService(
+    server="http://localhost:9090",
+    default_token="your-token",
+    http_server="http://localhost:8080",  # 用于下载二进制
+)
+
+mount = fuse.mount(workspace_id)
+with mount.mounted() as path:
+    # 使用标准文件操作
+    pass
+```
+
+#### Go SDK
+
+```go
+fuseService := workspace.NewFuseService(workspace.FuseServiceOptions{
+    Server:     "http://localhost:9090",
+    Token:      "your-token",
+    HTTPServer: "http://localhost:8080",
+})
+
+mount := fuseService.Mount(workspaceID)
+mount.WithMount(func(path string) error {
+    // 使用标准文件操作
+    return nil
+})
+```
+
+#### TypeScript SDK
+
+```typescript
+const fuseService = new FuseService({
+  server: 'http://localhost:9090',
+  defaultToken: 'your-token',
+  httpServer: 'http://localhost:8080',
+});
+
+const mount = fuseService.mount(workspaceId);
+await mount.withMount(async (path) => {
+  // 使用标准文件操作
+});
+```
+
+### 8.5 二进制缓存
+
+SDK 将下载的二进制缓存到用户目录：
+
+| 平台 | 缓存路径 |
+|------|---------|
+| Linux | `~/.cache/workspace-fuse/workspace-fuse` |
+| macOS | `~/Library/Caches/workspace-fuse/workspace-fuse` |
+
+缓存策略：
+- 首次使用时下载
+- 后续使用直接使用缓存
+- 可通过 `force_download=True` 强制重新下载
+
+### 8.6 跨平台编译
+
+使用 `cross` 工具进行 ARM64 交叉编译：
+
+```bash
+# 安装 cross
+cargo install cross
+
+# 编译 ARM64 版本
+cross build --release --target aarch64-unknown-linux-gnu -p workspace-fuse
+```
+
+`Cross.toml` 配置：
+
+```toml
+[target.aarch64-unknown-linux-gnu]
+pre-build = [
+    "dpkg --add-architecture arm64",
+    "apt-get update && apt-get install -y libfuse3-dev curl unzip",
+    "curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip && unzip protoc-25.1-linux-x86_64.zip -d /usr/local && rm protoc-25.1-linux-x86_64.zip"
+]
+
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install -y libfuse3-dev curl unzip",
+    "curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v25.1/protoc-25.1-linux-x86_64.zip && unzip protoc-25.1-linux-x86_64.zip -d /usr/local && rm protoc-25.1-linux-x86_64.zip"
+]
+```
+
+> 注意：需要手动安装 protoc v25.1，因为 Ubuntu 仓库的 protobuf-compiler 版本过旧（3.6.1），不支持 proto3 的 `optional` 关键字。
+
+## 9. 风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|---------|
