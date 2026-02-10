@@ -39,7 +39,7 @@ import (
 var (
 	serverURL = flag.String("server", "http://localhost:8080", "HTTP server URL")
 	grpcURL   = flag.String("grpc", "", "gRPC server URL (default: derived from server)")
-	fuseToken = flag.String("token", "test-token", "FUSE API token")
+	fuseToken = flag.String("token", "", "FUSE API token (optional, empty means no auth)")
 )
 
 func main() {

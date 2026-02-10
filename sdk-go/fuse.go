@@ -343,12 +343,16 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		"mount",
 		"--server", m.server,
 		"--workspace", m.workspaceID,
-		"--token", m.token,
 		"--target", m.mountPoint,
 		"--foreground",
 		"--cache-ttl", fmt.Sprintf("%d", m.cacheTTL),
 		"--read-cache-size", fmt.Sprintf("%d", m.readCacheSize),
 		"--block-size", fmt.Sprintf("%d", m.blockSize),
+	}
+
+	// Token is optional
+	if m.token != "" {
+		args = append(args, "--token", m.token)
 	}
 
 	if m.debug {
@@ -536,9 +540,7 @@ func (s *FuseService) Mount(workspaceID string, opts ...FuseMountServiceOptions)
 	if token == "" {
 		token = s.defaultToken
 	}
-	if token == "" {
-		return nil, fmt.Errorf("token not specified and no default configured")
-	}
+	// Token is now optional - server may not require authentication
 
 	// Check if already mounted
 	if existing, ok := s.mounts[workspaceID]; ok && existing.IsMounted() {
