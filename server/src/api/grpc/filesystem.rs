@@ -481,11 +481,7 @@ impl FileSystemService for FileSystemServiceImpl {
                     [("errno".to_string(), libc::ENOSYS.to_string())]
                         .into_iter()
                         .collect();
-                details.set_error_info(
-                    format!("ERRNO_{}", libc::ENOSYS),
-                    "workspace.v1",
-                    metadata,
-                );
+                details.set_error_info(format!("ERRNO_{}", libc::ENOSYS), "workspace.v1", metadata);
                 return Err(Status::with_error_details(
                     tonic::Code::Unimplemented,
                     "RENAME_EXCHANGE is not supported",
