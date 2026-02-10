@@ -104,12 +104,15 @@ def test_fuse(grpc_url: str, http_url: str, token: str, workspace_id: str) -> No
     print("   Creating FUSE service...")
     fuse_service = FuseService(
         server=grpc_url,
-        default_token=token,
+        default_token=token if token else None,
         http_server=http_url
     )
 
     print("   Mounting workspace...")
-    with fuse_service.mount(workspace_id, token=token) as mount:
+    mount_kwargs = {}
+    if token:
+        mount_kwargs["token"] = token
+    with fuse_service.mount(workspace_id, **mount_kwargs) as mount:
         mount_point = mount.mount()
         print(f"   Mounted at: {mount_point}")
 
@@ -166,7 +169,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test Elevo Workspace Python SDK")
     parser.add_argument("--server", default="http://localhost:8080", help="HTTP server URL")
     parser.add_argument("--grpc", default=None, help="gRPC server URL (default: derived from server)")
-    parser.add_argument("--token", default="test-token", help="FUSE API token")
+    parser.add_argument("--token", default="", help="FUSE API token (optional, empty means no auth)")
     args = parser.parse_args()
 
     # Derive gRPC URL from HTTP URL if not specified

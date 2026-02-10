@@ -340,13 +340,16 @@ class FuseMount:
             "mount",
             "--server", self.server,
             "--workspace", self.workspace_id,
-            "--token", self.token,
             "--target", mount_path,
             "--foreground",
             "--cache-ttl", str(self.cache_ttl),
             "--read-cache-size", str(self.read_cache_size),
             "--block-size", str(self.block_size),
         ]
+
+        # Token is optional
+        if self.token:
+            cmd.extend(["--token", self.token])
 
         if self.debug:
             cmd.append("--debug")
@@ -517,8 +520,7 @@ class FuseService:
                     f.write("Hello")
         """
         token = token or self.default_token
-        if not token:
-            raise ValueError("Token not specified and no default configured")
+        # Token is now optional - server may not require authentication
 
         # Check if already mounted
         if workspace_id in self._mounts:
