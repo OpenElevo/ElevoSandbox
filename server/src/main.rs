@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::signal;
 use tonic::transport::Server;
-use tracing::{error, info, warn, Level};
+use tracing::{error, info, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod api;
@@ -277,16 +277,24 @@ async fn main() -> anyhow::Result<()> {
     let agent_grpc_server = api::grpc::create_server(agent_pool.clone());
 
     // Build gRPC router with all services
-    let grpc_router = if let Some(ref token) = config.fs_api_token {
-        info!("FileSystemService enabled with token authentication");
+    let grpc_router = if config.fs_api_enabled {
         let fs_service = FileSystemServiceImpl::new(storage.clone());
-        let auth_interceptor = AuthInterceptor::new(token.clone());
-        let fs_grpc_server = FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
-        Server::builder()
-            .add_service(agent_grpc_server)
-            .add_service(fs_grpc_server)
+        if let Some(ref token) = config.fs_api_token {
+            info!("FileSystemService enabled with token authentication");
+            let auth_interceptor = AuthInterceptor::new(token.clone());
+            let fs_grpc_server = FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
+            Server::builder()
+                .add_service(agent_grpc_server)
+                .add_service(fs_grpc_server)
+        } else {
+            info!("FileSystemService enabled without authentication");
+            let fs_grpc_server = FileSystemServiceServer::new(fs_service);
+            Server::builder()
+                .add_service(agent_grpc_server)
+                .add_service(fs_grpc_server)
+        }
     } else {
-        warn!("FileSystemService disabled: WORKSPACE_FS_API_TOKEN not set");
+        info!("FileSystemService disabled");
         Server::builder().add_service(agent_grpc_server)
     };
 
