@@ -31,7 +31,7 @@ function parseArgs(): { server: string; grpc: string; token: string } {
   const args = process.argv.slice(2);
   let server = 'http://localhost:8080';
   let grpc = '';
-  let token = 'test-token';
+  let token = '';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--server' && args[i + 1]) {
@@ -114,10 +114,14 @@ async function testFuse(grpcUrl: string, httpUrl: string, token: string, workspa
   }
 
   console.log('   Creating FUSE service...');
-  const fuseService = new FuseService(grpcUrl, token, 'latest', undefined, httpUrl);
+  const fuseService = new FuseService(grpcUrl, token || undefined, 'latest', undefined, httpUrl);
 
   console.log('   Mounting workspace...');
-  const mount = await fuseService.mount(workspaceId);
+  const mountOptions: { token?: string } = {};
+  if (token) {
+    mountOptions.token = token;
+  }
+  const mount = await fuseService.mount(workspaceId, mountOptions);
   const mountPoint = await mount.mount();
   console.log(`   Mounted at: ${mountPoint}`);
 

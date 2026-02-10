@@ -264,8 +264,8 @@ export interface FuseMountOptions {
   server: string;
   /** Workspace ID to mount */
   workspaceId: string;
-  /** Authentication token */
-  token: string;
+  /** Authentication token (optional if server doesn't require auth) */
+  token?: string;
   /** Local mount point (auto-created if not specified) */
   mountPoint?: string;
   /** Path to workspace-fuse binary */
@@ -286,7 +286,7 @@ export interface FuseMountOptions {
 export class FuseMount {
   private readonly server: string;
   private readonly workspaceId: string;
-  private readonly token: string;
+  private readonly token?: string;
   private _mountPoint: string;
   private _binaryPath: string | null;
   private readonly cacheTtl: number;
@@ -364,8 +364,6 @@ export class FuseMount {
       this.server,
       '--workspace',
       this.workspaceId,
-      '--token',
-      this.token,
       '--target',
       this._mountPoint,
       '--foreground',
@@ -376,6 +374,11 @@ export class FuseMount {
       '--block-size',
       String(this.blockSize),
     ];
+
+    // Token is optional
+    if (this.token) {
+      args.push('--token', this.token);
+    }
 
     if (this.debug) {
       args.push('--debug');
@@ -547,9 +550,7 @@ export class FuseService {
     }
   ): Promise<FuseMount> {
     const token = options?.token ?? this.defaultToken;
-    if (!token) {
-      throw new Error('Token not specified and no default configured');
-    }
+    // Token is now optional - server may not require authentication
 
     // Check if already mounted
     const existing = this._mounts.get(workspaceId);
