@@ -116,8 +116,7 @@ impl S3fsMountManager {
         // s3fs uses "endpoint=<region>" to specify the AWS region
         // (e.g., "us-east-1"). For non-AWS endpoints this is typically not needed.
         if let Some(ref region) = self.region {
-            cmd.arg("-o")
-                .arg(format!("endpoint={}", region));
+            cmd.arg("-o").arg(format!("endpoint={}", region));
         }
 
         if let Some(ref passwd_path) = passwd_file {
@@ -132,7 +131,10 @@ impl S3fsMountManager {
         }
 
         // Enable s3fs logging for troubleshooting
-        let log_dir = self.mount_point.parent().unwrap_or(std::path::Path::new("/var/log"));
+        let log_dir = self
+            .mount_point
+            .parent()
+            .unwrap_or(std::path::Path::new("/var/log"));
         let log_file = log_dir.join("s3fs.log");
         cmd.arg("-o")
             .arg(format!("logfile={}", log_file.display()))
@@ -237,14 +239,14 @@ impl S3fsMountManager {
         let test_file = self.mount_point.join(".workspace_health_check");
 
         // Write test file
-        tokio::fs::write(&test_file, b"ok").await.map_err(|e| {
-            S3fsMountError::HealthCheckFailed(format!("write failed: {}", e))
-        })?;
+        tokio::fs::write(&test_file, b"ok")
+            .await
+            .map_err(|e| S3fsMountError::HealthCheckFailed(format!("write failed: {}", e)))?;
 
         // Read it back
-        let content = tokio::fs::read(&test_file).await.map_err(|e| {
-            S3fsMountError::HealthCheckFailed(format!("read failed: {}", e))
-        })?;
+        let content = tokio::fs::read(&test_file)
+            .await
+            .map_err(|e| S3fsMountError::HealthCheckFailed(format!("read failed: {}", e)))?;
 
         if content != b"ok" {
             return Err(S3fsMountError::HealthCheckFailed(

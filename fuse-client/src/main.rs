@@ -30,7 +30,11 @@ fn main() -> Result<()> {
 /// Mount a workspace
 fn mount(args: MountArgs) -> Result<()> {
     // Initialize logging
-    let level = if args.debug { Level::DEBUG } else { Level::INFO };
+    let level = if args.debug {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
     tracing_subscriber::registry()
         .with(fmt::layer())
         .with(
@@ -159,9 +163,7 @@ fn umount(args: UmountArgs) -> Result<()> {
 
     cmd.arg(&args.target);
 
-    let status = cmd
-        .status()
-        .context("Failed to execute fusermount")?;
+    let status = cmd.status().context("Failed to execute fusermount")?;
 
     if !status.success() {
         if args.force {
@@ -174,10 +176,7 @@ fn umount(args: UmountArgs) -> Result<()> {
                 .context("Failed to execute umount")?;
 
             if !status.success() {
-                return Err(anyhow::anyhow!(
-                    "Failed to unmount {:?}",
-                    args.target
-                ));
+                return Err(anyhow::anyhow!("Failed to unmount {:?}", args.target));
             }
         } else {
             return Err(anyhow::anyhow!(

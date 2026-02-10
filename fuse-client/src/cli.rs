@@ -258,13 +258,8 @@ mod tests {
 
     #[test]
     fn test_umount_args() {
-        let args = Cli::try_parse_from([
-            "workspace-fuse",
-            "umount",
-            "/mnt/workspace",
-            "--lazy",
-        ])
-        .unwrap();
+        let args =
+            Cli::try_parse_from(["workspace-fuse", "umount", "/mnt/workspace", "--lazy"]).unwrap();
 
         match args.command {
             Command::Umount(umount) => {

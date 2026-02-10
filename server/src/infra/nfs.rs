@@ -9,8 +9,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use nfsserve::nfs::{
-    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_atime,
-    set_mode3, set_mtime, set_size3, specdata3,
+    fattr3, fileid3, filename3, ftype3, nfspath3, nfsstat3, nfstime3, sattr3, set_atime, set_mode3,
+    set_mtime, set_size3, specdata3,
 };
 use nfsserve::tcp::{NFSTcp, NFSTcpListener};
 use nfsserve::vfs::{DirEntry, NFSFileSystem, ReadDirResult, VFSCapabilities};
@@ -360,8 +360,7 @@ impl NFSFileSystem for WorkspaceNfs {
     }
 
     async fn lookup(&self, dirid: fileid3, filename: &filename3) -> Result<fileid3, nfsstat3> {
-        let filename_str =
-            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         if dirid == 1 {
             // Root directory — look up workspace export by name
@@ -382,8 +381,10 @@ impl NFSFileSystem for WorkspaceNfs {
         }
 
         // Non-root directory: resolve parent and build child path
-        let (workspace_id, parent_path) =
-            self.get_key_by_id(dirid).await.ok_or(nfsstat3::NFS3ERR_STALE)?;
+        let (workspace_id, parent_path) = self
+            .get_key_by_id(dirid)
+            .await
+            .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
         let child_rel = Self::child_path(&parent_path, filename_str);
 
@@ -550,8 +551,7 @@ impl NFSFileSystem for WorkspaceNfs {
             .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let filename_str =
-            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let child_rel = Self::child_path(&parent_path, filename_str);
 
@@ -583,8 +583,7 @@ impl NFSFileSystem for WorkspaceNfs {
             .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let filename_str =
-            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let child_rel = Self::child_path(&parent_path, filename_str);
 
@@ -604,8 +603,7 @@ impl NFSFileSystem for WorkspaceNfs {
             .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let filename_str =
-            std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let filename_str = std::str::from_utf8(&filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let child_rel = Self::child_path(&parent_path, filename_str);
 
@@ -658,8 +656,7 @@ impl NFSFileSystem for WorkspaceNfs {
 
         let from_name =
             std::str::from_utf8(&from_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let to_name =
-            std::str::from_utf8(&to_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let to_name = std::str::from_utf8(&to_filename.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let from_rel = Self::child_path(&from_parent, from_name);
         let to_rel = Self::child_path(&to_parent, to_name);
@@ -687,8 +684,7 @@ impl NFSFileSystem for WorkspaceNfs {
             .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let dirname_str =
-            std::str::from_utf8(&dirname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let dirname_str = std::str::from_utf8(&dirname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let child_rel = Self::child_path(&parent_path, dirname_str);
 
@@ -802,10 +798,8 @@ impl NFSFileSystem for WorkspaceNfs {
             .await
             .ok_or(nfsstat3::NFS3ERR_STALE)?;
 
-        let linkname_str =
-            std::str::from_utf8(&linkname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
-        let target_str =
-            std::str::from_utf8(&symlink.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let linkname_str = std::str::from_utf8(&linkname.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
+        let target_str = std::str::from_utf8(&symlink.0).map_err(|_| nfsstat3::NFS3ERR_INVAL)?;
 
         let link_rel = Self::child_path(&parent_path, linkname_str);
 

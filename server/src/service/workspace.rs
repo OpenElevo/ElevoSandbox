@@ -124,7 +124,10 @@ impl WorkspaceService {
             .acquire(&workspace_id, &self.holder_id)
             .await
         {
-            error!("Failed to acquire lease for workspace {}: {}", workspace_id, e);
+            error!(
+                "Failed to acquire lease for workspace {}: {}",
+                workspace_id, e
+            );
             let _ = self.repository.delete(&workspace_id).await;
             return Err(Error::Internal(format!(
                 "Failed to acquire workspace lease: {}",
@@ -142,7 +145,10 @@ impl WorkspaceService {
         if let Err(e) = self.storage.create_workspace_root(&workspace_id).await {
             error!("Failed to create workspace directory: {}", e);
             // Clean up lease and database record
-            let _ = self.lease_manager.release(&workspace_id, &self.holder_id).await;
+            let _ = self
+                .lease_manager
+                .release(&workspace_id, &self.holder_id)
+                .await;
             self.remove_from_active_leases(&workspace_id).await;
             let _ = self.repository.delete(&workspace_id).await;
             return Err(Error::Internal(format!(
@@ -152,11 +158,7 @@ impl WorkspaceService {
         }
 
         // Export workspace via NFS
-        match self
-            .nfs_manager
-            .export(&workspace_id)
-            .await
-        {
+        match self.nfs_manager.export(&workspace_id).await {
             Ok(nfs_url) => {
                 info!(
                     "NFS export created for workspace {}: {}",
@@ -172,10 +174,7 @@ impl WorkspaceService {
                 }
             }
             Err(e) => {
-                warn!(
-                    "Failed to export NFS for workspace {}: {}",
-                    workspace_id, e
-                );
+                warn!("Failed to export NFS for workspace {}: {}", workspace_id, e);
                 // Non-fatal error, continue
             }
         }
@@ -275,12 +274,7 @@ impl WorkspaceService {
     }
 
     /// Delete file or directory
-    pub async fn delete_file(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        recursive: bool,
-    ) -> Result<()> {
+    pub async fn delete_file(&self, workspace_id: &str, path: &str, recursive: bool) -> Result<()> {
         // Verify workspace exists
         self.repository.get(workspace_id).await?;
         // Ensure we hold the lease for write operations
@@ -311,9 +305,7 @@ impl WorkspaceService {
         if let Some(parent) = std::path::Path::new(dst).parent() {
             let parent_str = parent.to_string_lossy();
             if !parent_str.is_empty() && parent_str != "." {
-                self.storage
-                    .mkdir(workspace_id, &parent_str, true)
-                    .await?;
+                self.storage.mkdir(workspace_id, &parent_str, true).await?;
             }
         }
 
