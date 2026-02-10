@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 
 
 # Default version and download URL template
@@ -75,16 +75,72 @@ def get_bin_dir() -> Path:
     raise RuntimeError("Cannot find writable directory for workspace-fuse binary")
 
 
+def _download_from_url(url: str, dest_path: Path, proxy: Optional[str] = None) -> bool:
+    """
+    Download file from URL to destination path.
+
+    Returns True if successful, False otherwise.
+    """
+    try:
+        request = Request(url)
+        if proxy:
+            os.environ["http_proxy"] = proxy
+            os.environ["https_proxy"] = proxy
+
+        with urlopen(request, timeout=60) as response:
+            with open(dest_path, "wb") as f:
+                shutil.copyfileobj(response, f)
+        return True
+    except (URLError, HTTPError, OSError):
+        return False
+
+
+def _try_download_from_server(
+    server_url: str,
+    dest_path: Path,
+    proxy: Optional[str] = None,
+) -> bool:
+    """
+    Try to download workspace-fuse binary from workspace server.
+
+    Args:
+        server_url: Base server URL (e.g., http://localhost:8080)
+        dest_path: Destination path for the binary
+        proxy: HTTP proxy URL (optional)
+
+    Returns:
+        True if download succeeded, False otherwise
+    """
+    plat, arch = get_platform_info()
+
+    # Convert gRPC URL to HTTP URL if needed
+    # gRPC is typically on port 9090, HTTP on 8080
+    http_url = server_url
+    if ":9090" in http_url or ":19090" in http_url:
+        http_url = http_url.replace(":9090", ":8080").replace(":19090", ":18080")
+
+    # Build download URL
+    download_url = f"{http_url}/api/v1/downloads/workspace-fuse/{plat}/{arch}"
+
+    return _download_from_url(download_url, dest_path, proxy)
+
+
 def download_binary(
     version: str = DEFAULT_VERSION,
     proxy: Optional[str] = None,
+    server_url: Optional[str] = None,
 ) -> Path:
     """
     Download workspace-fuse binary for current platform.
 
+    Download priority:
+    1. From workspace server (if server_url provided and binary available)
+    2. From GitHub Releases (fallback)
+
     Args:
         version: Version to download (default: "latest")
         proxy: HTTP proxy URL (optional)
+        server_url: Workspace server URL for downloading binary (optional)
 
     Returns:
         Path to the downloaded binary
@@ -92,26 +148,24 @@ def download_binary(
     plat, arch = get_platform_info()
     bin_dir = get_bin_dir()
     bin_path = bin_dir / "workspace-fuse"
-
-    # Build download URL
-    if version == "latest":
-        url = GITHUB_LATEST_URL.format(platform=plat, arch=arch)
-    else:
-        url = GITHUB_RELEASE_URL.format(version=version, platform=plat, arch=arch)
-
-    # Download to temp file first
     temp_path = bin_path.with_suffix(".tmp")
 
     try:
-        request = Request(url)
-        if proxy:
-            # Set proxy via environment for urllib
-            os.environ["http_proxy"] = proxy
-            os.environ["https_proxy"] = proxy
+        downloaded = False
 
-        with urlopen(request, timeout=300) as response:
-            with open(temp_path, "wb") as f:
-                shutil.copyfileobj(response, f)
+        # Try server first if URL provided
+        if server_url:
+            downloaded = _try_download_from_server(server_url, temp_path, proxy)
+
+        # Fallback to GitHub
+        if not downloaded:
+            if version == "latest":
+                url = GITHUB_LATEST_URL.format(platform=plat, arch=arch)
+            else:
+                url = GITHUB_RELEASE_URL.format(version=version, platform=plat, arch=arch)
+
+            if not _download_from_url(url, temp_path, proxy):
+                raise RuntimeError(f"Failed to download workspace-fuse from both server and GitHub")
 
         # Make executable
         temp_path.chmod(temp_path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -129,10 +183,6 @@ def download_binary(
         temp_path.rename(bin_path)
         return bin_path
 
-    except URLError as e:
-        if temp_path.exists():
-            temp_path.unlink()
-        raise RuntimeError(f"Failed to download workspace-fuse: {e}") from e
     except Exception:
         if temp_path.exists():
             temp_path.unlink()
@@ -143,6 +193,7 @@ def ensure_binary(
     version: str = DEFAULT_VERSION,
     force_download: bool = False,
     proxy: Optional[str] = None,
+    server_url: Optional[str] = None,
 ) -> Path:
     """
     Ensure workspace-fuse binary is available.
@@ -151,6 +202,7 @@ def ensure_binary(
         version: Version to use (default: "latest")
         force_download: Force re-download even if binary exists
         proxy: HTTP proxy URL (optional)
+        server_url: Workspace server URL for downloading binary (optional)
 
     Returns:
         Path to the binary
@@ -171,7 +223,7 @@ def ensure_binary(
         except Exception:
             pass
 
-    return download_binary(version=version, proxy=proxy)
+    return download_binary(version=version, proxy=proxy, server_url=server_url)
 
 
 class FuseMount:
@@ -383,6 +435,7 @@ class FuseService:
         default_token: Optional[str] = None,
         binary_version: str = DEFAULT_VERSION,
         proxy: Optional[str] = None,
+        http_server: Optional[str] = None,
     ):
         """
         Initialize FUSE service.
@@ -392,11 +445,13 @@ class FuseService:
             default_token: Default authentication token
             binary_version: workspace-fuse version to use
             proxy: HTTP proxy for downloading binary
+            http_server: HTTP server URL for downloading binary (optional, auto-derived from server if not set)
         """
         self.server = server
         self.default_token = default_token
         self.binary_version = binary_version
         self.proxy = proxy
+        self.http_server = http_server or server
         self._binary_path: Optional[Path] = None
         self._mounts: Dict[str, FuseMount] = {}
 
@@ -406,6 +461,7 @@ class FuseService:
             self._binary_path = ensure_binary(
                 version=self.binary_version,
                 proxy=self.proxy,
+                server_url=self.http_server,
             )
         return self._binary_path
 

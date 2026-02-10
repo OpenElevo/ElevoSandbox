@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -74,8 +75,61 @@ func getBinDir() (string, error) {
 	return "", fmt.Errorf("cannot find writable directory for workspace-fuse binary")
 }
 
+// downloadFromURL downloads a file from URL to destPath, returns true if successful
+func downloadFromURL(downloadURL string, destPath string, proxy string) bool {
+	client := &http.Client{
+		Timeout: 60 * time.Second,
+	}
+	if proxy != "" {
+		client.Transport = &http.Transport{
+			Proxy: http.ProxyURL(mustParseURL(proxy)),
+		}
+	}
+
+	resp, err := client.Get(downloadURL)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	f, err := os.Create(destPath)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, resp.Body)
+	return err == nil
+}
+
+// tryDownloadFromServer tries to download workspace-fuse binary from workspace server
+func tryDownloadFromServer(serverURL string, destPath string, proxy string) bool {
+	plat, arch, err := getPlatformInfo()
+	if err != nil {
+		return false
+	}
+
+	// Convert gRPC URL to HTTP URL if needed
+	httpURL := serverURL
+	if strings.Contains(httpURL, ":9090") || strings.Contains(httpURL, ":19090") {
+		httpURL = strings.Replace(httpURL, ":9090", ":8080", 1)
+		httpURL = strings.Replace(httpURL, ":19090", ":18080", 1)
+	}
+
+	downloadURL := fmt.Sprintf("%s/api/v1/downloads/workspace-fuse/%s/%s", httpURL, plat, arch)
+	return downloadFromURL(downloadURL, destPath, proxy)
+}
+
 // downloadBinary downloads workspace-fuse binary for current platform
-func downloadBinary(version string, proxy string) (string, error) {
+//
+// Download priority:
+// 1. From workspace server (if serverURL provided and binary available)
+// 2. From GitHub Releases (fallback)
+func downloadBinary(version string, proxy string, serverURL string) (string, error) {
 	plat, arch, err := getPlatformInfo()
 	if err != nil {
 		return "", err
@@ -87,49 +141,27 @@ func downloadBinary(version string, proxy string) (string, error) {
 	}
 
 	binPath := filepath.Join(binDir, "workspace-fuse")
-
-	// Build download URL
-	var url string
-	if version == "latest" || version == "" {
-		url = fmt.Sprintf(GitHubLatestURL, plat, arch)
-	} else {
-		url = fmt.Sprintf(GitHubReleaseURL, version, plat, arch)
-	}
-
 	tempPath := binPath + ".tmp"
 
-	// Create HTTP client with optional proxy
-	client := &http.Client{
-		Timeout: 5 * time.Minute,
+	downloaded := false
+
+	// Try server first if URL provided
+	if serverURL != "" {
+		downloaded = tryDownloadFromServer(serverURL, tempPath, proxy)
 	}
-	if proxy != "" {
-		client.Transport = &http.Transport{
-			Proxy: http.ProxyURL(mustParseURL(proxy)),
+
+	// Fallback to GitHub
+	if !downloaded {
+		var downloadURL string
+		if version == "latest" || version == "" {
+			downloadURL = fmt.Sprintf(GitHubLatestURL, plat, arch)
+		} else {
+			downloadURL = fmt.Sprintf(GitHubReleaseURL, version, plat, arch)
 		}
-	}
 
-	// Download
-	resp, err := client.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("failed to download: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download: HTTP %d", resp.StatusCode)
-	}
-
-	// Write to temp file
-	f, err := os.Create(tempPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-
-	_, err = io.Copy(f, resp.Body)
-	f.Close()
-	if err != nil {
-		os.Remove(tempPath)
-		return "", fmt.Errorf("failed to write binary: %w", err)
+		if !downloadFromURL(downloadURL, tempPath, proxy) {
+			return "", fmt.Errorf("failed to download workspace-fuse from both server and GitHub")
+		}
 	}
 
 	// Make executable
@@ -157,7 +189,7 @@ func downloadBinary(version string, proxy string) (string, error) {
 }
 
 // EnsureBinary ensures workspace-fuse binary is available
-func EnsureBinary(version string, forceDownload bool, proxy string) (string, error) {
+func EnsureBinary(version string, forceDownload bool, proxy string, serverURL string) (string, error) {
 	binDir, err := getBinDir()
 	if err != nil && !forceDownload {
 		return "", err
@@ -177,7 +209,7 @@ func EnsureBinary(version string, forceDownload bool, proxy string) (string, err
 		}
 	}
 
-	return downloadBinary(version, proxy)
+	return downloadBinary(version, proxy, serverURL)
 }
 
 func mustParseURL(rawURL string) *url.URL {
@@ -285,7 +317,7 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 
 	// Ensure binary is available
 	if m.binaryPath == "" {
-		binPath, err := EnsureBinary(DefaultVersion, false, "")
+		binPath, err := EnsureBinary(DefaultVersion, false, "", "")
 		if err != nil {
 			return "", fmt.Errorf("failed to ensure binary: %w", err)
 		}
@@ -449,21 +481,27 @@ type FuseService struct {
 	defaultToken  string
 	binaryVersion string
 	proxy         string
+	httpServer    string
 	binaryPath    string
 	mounts        map[string]*FuseMount
 	mu            sync.Mutex
 }
 
 // NewFuseService creates a new FUSE service
-func NewFuseService(server string, defaultToken string, binaryVersion string, proxy string) *FuseService {
+// httpServer is optional - if empty, it will be derived from server URL
+func NewFuseService(server string, defaultToken string, binaryVersion string, proxy string, httpServer string) *FuseService {
 	if binaryVersion == "" {
 		binaryVersion = DefaultVersion
+	}
+	if httpServer == "" {
+		httpServer = server
 	}
 	return &FuseService{
 		server:        server,
 		defaultToken:  defaultToken,
 		binaryVersion: binaryVersion,
 		proxy:         proxy,
+		httpServer:    httpServer,
 		mounts:        make(map[string]*FuseMount),
 	}
 }
@@ -509,7 +547,7 @@ func (s *FuseService) Mount(workspaceID string, opts ...FuseMountServiceOptions)
 
 	// Ensure binary
 	if s.binaryPath == "" {
-		binPath, err := EnsureBinary(s.binaryVersion, false, s.proxy)
+		binPath, err := EnsureBinary(s.binaryVersion, false, s.proxy, s.httpServer)
 		if err != nil {
 			return nil, fmt.Errorf("failed to ensure binary: %w", err)
 		}
