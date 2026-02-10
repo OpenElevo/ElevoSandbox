@@ -276,6 +276,49 @@ nfsURL := client.Nfs.GetNfsURL(ws.ID)
 // Returns: nfs://192.168.1.100:2049/workspace-id
 ```
 
+### FUSE Service
+
+Mount workspaces as local directories using FUSE. The SDK automatically downloads the `workspace-fuse` binary from the server (with GitHub Releases as fallback).
+
+```go
+// Create FUSE service
+fuseService := workspace.NewFuseService(workspace.FuseServiceOptions{
+    Server:     "http://localhost:9090",  // gRPC server URL
+    Token:      "your-api-token",
+    HTTPServer: "http://localhost:8080",  // Optional: HTTP server for binary download
+})
+
+// Create a mount for a workspace
+mount := fuseService.Mount(ws.ID)
+
+// Mount the workspace (returns mount point path)
+mountPoint, err := mount.Mount(30 * time.Second)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Mounted at: %s\n", mountPoint)
+
+// Use standard file operations
+files, _ := os.ReadDir(mountPoint)
+os.WriteFile(filepath.Join(mountPoint, "test.txt"), []byte("Hello from FUSE!"), 0644)
+
+// Unmount when done
+err = mount.Unmount()
+
+// Or use context manager pattern for automatic cleanup
+err = mount.WithMount(func(path string) error {
+    // Work with files at path
+    return nil
+})
+
+// Unmount all workspaces
+fuseService.UnmountAll()
+```
+
+**Requirements:**
+- Linux with FUSE support (`/dev/fuse` and `fusermount`)
+- User must have access to `/dev/fuse` (typically `fuse` group membership)
+
 ## Error Handling
 
 ```go

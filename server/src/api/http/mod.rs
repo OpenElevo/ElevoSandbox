@@ -1,5 +1,6 @@
 //! HTTP API handlers
 
+mod downloads;
 mod health;
 mod process;
 mod pty;
@@ -7,7 +8,7 @@ mod sandbox;
 mod workspace;
 
 use axum::{
-    routing::{delete, get, post, put},
+    routing::{delete, get, head, post, put},
     Router,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -25,6 +26,15 @@ pub fn create_router(state: AppState) -> Router {
     let api_routes = Router::new()
         // Health check
         .route("/health", get(health::health_check))
+        // Downloads (workspace-fuse binary)
+        .route(
+            "/downloads/workspace-fuse/{platform}/{arch}",
+            get(downloads::download_workspace_fuse),
+        )
+        .route(
+            "/downloads/workspace-fuse/{platform}/{arch}",
+            head(downloads::check_workspace_fuse),
+        )
         // Workspace routes
         .route("/workspaces", post(workspace::create_workspace))
         .route("/workspaces", get(workspace::list_workspaces))
