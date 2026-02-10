@@ -14,15 +14,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create data directory
-RUN mkdir -p /data/workspaces
+# Create data directories
+RUN mkdir -p /data/workspaces /var/lib/workspace/downloads
 
 # Copy pre-built binary
 COPY target/release/workspace-server /app/workspace-server
 RUN chmod +x /app/workspace-server
 
+# Copy workspace-fuse client binaries for SDK download
+# These are built by CI for linux-amd64 and linux-arm64
+ARG TARGETARCH
+COPY target/workspace-fuse-linux-* /var/lib/workspace/downloads/
+RUN chmod +x /var/lib/workspace/downloads/workspace-fuse-* 2>/dev/null || true
+
 # Copy migrations if needed
 COPY server/migrations /app/migrations
+
+# Set downloads directory environment variable
+ENV WORKSPACE_DOWNLOADS_DIR=/var/lib/workspace/downloads
 
 # Expose ports
 EXPOSE 8080 9090
