@@ -247,6 +247,49 @@ const isMounted = await client.nfs.isMounted('/mnt/workspace');
 await client.nfs.unmount('/mnt/workspace');
 ```
 
+### FUSE Service
+
+Mount workspaces as local directories using FUSE. The SDK automatically downloads the `workspace-fuse` binary from the server (with GitHub Releases as fallback).
+
+```typescript
+import { FuseService } from '@elevo/workspace-sdk';
+import * as fs from 'fs';
+import * as path from 'path';
+
+// Create FUSE service
+const fuseService = new FuseService({
+  server: 'http://localhost:9090',      // gRPC server URL
+  defaultToken: 'your-api-token',
+  httpServer: 'http://localhost:8080',  // Optional: HTTP server for binary download
+});
+
+// Create a mount for a workspace
+const mount = fuseService.mount(workspace.id);
+
+// Mount the workspace (returns mount point path)
+const mountPoint = await mount.mount({ timeout: 30000 });
+console.log(`Mounted at: ${mountPoint}`);
+
+// Use standard file operations
+fs.readdirSync(mountPoint);
+fs.writeFileSync(path.join(mountPoint, 'test.txt'), 'Hello from FUSE!');
+
+// Unmount when done
+await mount.unmount();
+
+// Or use context manager pattern for automatic cleanup
+await mount.withMount(async (mountPath) => {
+  // Work with files at mountPath
+});
+
+// Unmount all workspaces
+await fuseService.unmountAll();
+```
+
+**Requirements:**
+- Linux with FUSE support (`/dev/fuse` and `fusermount`)
+- User must have access to `/dev/fuse` (typically `fuse` group membership)
+
 ## Error Handling
 
 ```typescript

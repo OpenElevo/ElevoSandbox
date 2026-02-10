@@ -306,6 +306,49 @@ is_mounted = client.nfs.is_mounted("/mnt/workspace")
 client.nfs.unmount("/mnt/workspace")
 ```
 
+### FUSE Service
+
+Mount workspaces as local directories using FUSE. The SDK automatically downloads the `workspace-fuse` binary from the server (with GitHub Releases as fallback).
+
+```python
+from workspace_sdk.services.fuse import FuseService
+
+# Create FUSE service
+fuse = FuseService(
+    server="http://localhost:9090",  # gRPC server URL
+    default_token="your-api-token",
+    http_server="http://localhost:8080",  # Optional: HTTP server for binary download
+)
+
+# Create a mount for a workspace
+mount = fuse.mount(workspace.id)
+
+# Mount the workspace (returns mount point path)
+mount_point = mount.mount(timeout=30.0)
+print(f"Mounted at: {mount_point}")
+
+# Use standard file operations
+import os
+os.listdir(mount_point)
+with open(os.path.join(mount_point, "test.txt"), "w") as f:
+    f.write("Hello from FUSE!")
+
+# Unmount when done
+mount.unmount()
+
+# Or use context manager for automatic cleanup
+with mount.mounted() as path:
+    # Work with files at path
+    pass
+
+# Unmount all workspaces
+fuse.unmount_all()
+```
+
+**Requirements:**
+- Linux with FUSE support (`/dev/fuse` and `fusermount`)
+- User must have access to `/dev/fuse` (typically `fuse` group membership)
+
 ## Error Handling
 
 ```python
