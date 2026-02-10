@@ -1,0 +1,337 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// FileSystemService provides complete POSIX-like filesystem operations
+// for FUSE clients to mount remote workspaces as local directories.
+service FileSystemService {
+  // Get file/directory metadata
+  rpc Stat(FsStatRequest) returns (FsStatResponse);
+
+  // Read file content (streaming for large files)
+  rpc ReadFile(FsReadFileRequest) returns (stream FsReadFileResponse);
+
+  // Write file content (streaming for large files)
+  rpc WriteFile(stream FsWriteFileRequest) returns (FsWriteFileResponse);
+
+  // List directory contents (streaming for large directories)
+  rpc ListDir(FsListDirRequest) returns (stream FsListDirResponse);
+
+  // Create a directory
+  rpc Mkdir(FsMkdirRequest) returns (FsMkdirResponse);
+
+  // Remove a file
+  rpc RemoveFile(FsRemoveFileRequest) returns (FsRemoveFileResponse);
+
+  // Remove a directory
+  rpc RemoveDir(FsRemoveDirRequest) returns (FsRemoveDirResponse);
+
+  // Rename or move a file/directory
+  rpc Rename(FsRenameRequest) returns (FsRenameResponse);
+
+  // Create a new file
+  rpc Create(FsCreateRequest) returns (FsCreateResponse);
+
+  // Set file attributes (size, mode, times)
+  rpc SetAttr(FsSetAttrRequest) returns (FsSetAttrResponse);
+
+  // Create a symbolic link
+  rpc Symlink(FsSymlinkRequest) returns (FsSymlinkResponse);
+
+  // Read symbolic link target
+  rpc ReadLink(FsReadLinkRequest) returns (FsReadLinkResponse);
+
+  // Read file at specific offset (random access)
+  rpc ReadAt(FsReadAtRequest) returns (FsReadAtResponse);
+
+  // Write file at specific offset (random access)
+  rpc WriteAt(FsWriteAtRequest) returns (FsWriteAtResponse);
+
+  // Get filesystem statistics
+  rpc StatFs(FsStatFsRequest) returns (FsStatFsResponse);
+}
+
+// File type enumeration
+enum FsFileType {
+  FS_FILE_TYPE_UNSPECIFIED = 0;
+  FS_FILE_TYPE_FILE = 1;
+  FS_FILE_TYPE_DIRECTORY = 2;
+  FS_FILE_TYPE_SYMLINK = 3;
+}
+
+// File attributes (POSIX metadata)
+message FsFileAttr {
+  // File type
+  FsFileType file_type = 1;
+
+  // File size in bytes
+  uint64 size = 2;
+
+  // Unix permission mode (e.g., 0644)
+  uint32 mode = 3;
+
+  // Owner user ID
+  uint32 uid = 4;
+
+  // Owner group ID
+  uint32 gid = 5;
+
+  // Last access time
+  google.protobuf.Timestamp atime = 6;
+
+  // Last modification time
+  google.protobuf.Timestamp mtime = 7;
+
+  // Creation time (birth time)
+  google.protobuf.Timestamp ctime = 8;
+
+  // Number of hard links
+  uint32 nlink = 9;
+
+  // Block size for filesystem I/O
+  uint32 blksize = 10;
+
+  // Number of 512-byte blocks allocated
+  uint64 blocks = 11;
+}
+
+// Directory entry
+message FsDirEntry {
+  // Entry name (basename)
+  string name = 1;
+
+  // File attributes (full metadata for readdir optimization)
+  FsFileAttr attr = 2;
+}
+
+// Stat request
+message FsStatRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// Stat response
+message FsStatResponse {
+  FsFileAttr attr = 1;
+}
+
+// Read file request (streaming)
+message FsReadFileRequest {
+  string workspace_id = 1;
+  string path = 2;
+  // Chunk size hint (0 for default)
+  uint32 chunk_size = 3;
+}
+
+// Read file response chunk
+message FsReadFileResponse {
+  bytes data = 1;
+  // End of file indicator
+  bool eof = 2;
+}
+
+// Write file request (streaming)
+// First message must include header, subsequent messages contain data
+message FsWriteFileRequest {
+  oneof payload {
+    FsWriteFileHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+// Write file header (first message in stream)
+message FsWriteFileHeader {
+  string workspace_id = 1;
+  string path = 2;
+  // Whether to truncate existing content
+  bool truncate = 3;
+}
+
+// Write file response
+message FsWriteFileResponse {
+  // Total bytes written
+  uint64 bytes_written = 1;
+}
+
+// List directory request
+message FsListDirRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// List directory response (streaming)
+message FsListDirResponse {
+  repeated FsDirEntry entries = 1;
+}
+
+// Mkdir request
+message FsMkdirRequest {
+  string workspace_id = 1;
+  string path = 2;
+  // Permission mode for the new directory
+  uint32 mode = 3;
+}
+
+// Mkdir response
+message FsMkdirResponse {
+  FsFileAttr attr = 1;
+}
+
+// Remove file request
+message FsRemoveFileRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// Remove file response
+message FsRemoveFileResponse {}
+
+// Remove directory request
+message FsRemoveDirRequest {
+  string workspace_id = 1;
+  string path = 2;
+  // If true, recursively delete directory and all contents
+  // If false, directory must be empty (FUSE rmdir semantics)
+  bool recursive = 3;
+}
+
+// Remove directory response
+message FsRemoveDirResponse {}
+
+// Rename flags (corresponds to Linux renameat2 flags)
+enum FsRenameFlags {
+  FS_RENAME_FLAGS_NONE = 0;
+  // Return error if destination exists (RENAME_NOREPLACE)
+  FS_RENAME_FLAGS_NOREPLACE = 1;
+  // Atomically exchange source and destination (RENAME_EXCHANGE)
+  FS_RENAME_FLAGS_EXCHANGE = 2;
+}
+
+// Rename request
+message FsRenameRequest {
+  string workspace_id = 1;
+  string old_path = 2;
+  string new_path = 3;
+  FsRenameFlags flags = 4;
+}
+
+// Rename response
+message FsRenameResponse {}
+
+// Create file request
+message FsCreateRequest {
+  string workspace_id = 1;
+  string path = 2;
+  // Permission mode for the new file
+  uint32 mode = 3;
+  // If true, fail if file already exists
+  bool exclusive = 4;
+}
+
+// Create file response
+message FsCreateResponse {
+  FsFileAttr attr = 1;
+}
+
+// Set attributes request
+message FsSetAttrRequest {
+  string workspace_id = 1;
+  string path = 2;
+
+  // Fields to set (only set fields will be modified)
+  optional uint64 size = 3;
+  optional uint32 mode = 4;
+  // uid/gid fields are included for protocol completeness but may be ignored
+  // by the server since remote workspace uid/gid semantics differ from local
+  optional uint32 uid = 5;
+  optional uint32 gid = 6;
+  optional google.protobuf.Timestamp atime = 7;
+  optional google.protobuf.Timestamp mtime = 8;
+}
+
+// Set attributes response
+message FsSetAttrResponse {
+  FsFileAttr attr = 1;
+}
+
+// Symlink request
+message FsSymlinkRequest {
+  string workspace_id = 1;
+  // Path where the symlink will be created
+  string link_path = 2;
+  // Target the symlink points to
+  string target = 3;
+}
+
+// Symlink response
+message FsSymlinkResponse {
+  FsFileAttr attr = 1;
+}
+
+// ReadLink request
+message FsReadLinkRequest {
+  string workspace_id = 1;
+  string path = 2;
+}
+
+// ReadLink response
+message FsReadLinkResponse {
+  string target = 1;
+}
+
+// ReadAt request (random access read)
+message FsReadAtRequest {
+  string workspace_id = 1;
+  string path = 2;
+  uint64 offset = 3;
+  uint32 size = 4;
+}
+
+// ReadAt response
+message FsReadAtResponse {
+  bytes data = 1;
+  // End of file indicator (data length < requested size also indicates EOF)
+  bool eof = 2;
+}
+
+// WriteAt request (random access write)
+message FsWriteAtRequest {
+  string workspace_id = 1;
+  string path = 2;
+  uint64 offset = 3;
+  bytes data = 4;
+}
+
+// WriteAt response
+message FsWriteAtResponse {
+  uint64 bytes_written = 1;
+}
+
+// StatFs request (filesystem statistics)
+message FsStatFsRequest {
+  string workspace_id = 1;
+}
+
+// StatFs response
+message FsStatFsResponse {
+  // Total number of blocks
+  uint64 blocks = 1;
+  // Free blocks
+  uint64 bfree = 2;
+  // Available blocks (for unprivileged users)
+  uint64 bavail = 3;
+  // Total inodes
+  uint64 files = 4;
+  // Free inodes
+  uint64 ffree = 5;
+  // Block size
+  uint32 bsize = 6;
+  // Maximum filename length
+  uint32 namelen = 7;
+  // Fragment size
+  uint32 frsize = 8;
+}

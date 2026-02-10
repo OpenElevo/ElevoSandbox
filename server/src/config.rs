@@ -1,6 +1,9 @@
 //! Server configuration
 
+use std::path::{Path, PathBuf};
+
 use serde::Deserialize;
+use tracing::warn;
 
 /// Server configuration
 #[derive(Debug, Clone, Deserialize)]
@@ -30,6 +33,7 @@ pub struct Config {
     pub docker_socket: String,
 
     /// Workspace base directory for sandbox volumes (path inside server container)
+    /// Also used by SandboxService for Docker bind mount paths.
     #[serde(default = "default_workspace_dir")]
     pub workspace_dir: String,
 
@@ -92,6 +96,73 @@ pub struct Config {
     /// - full: all tools (14 tools) - sandbox + process + file ops
     #[serde(default = "default_mcp_profile")]
     pub mcp_profile: String,
+
+    /// Enable FileSystem API for gRPC (FUSE client connections)
+    /// Default: true (enabled without authentication)
+    #[serde(default = "default_fs_api_enabled")]
+    pub fs_api_enabled: bool,
+
+    /// FileSystem API token for gRPC authentication
+    /// If set, FUSE clients must provide this token to access FileSystemService
+    /// If not set, FileSystemService is accessible without authentication
+    #[serde(default)]
+    pub fs_api_token: Option<String>,
+
+    /// Storage backend configuration
+    #[serde(skip)]
+    pub storage: StorageConfig,
+}
+
+/// Storage backend configuration
+#[derive(Debug, Clone)]
+pub enum StorageConfig {
+    /// Local filesystem storage (default)
+    Local {
+        /// Workspace root directory
+        workspace_dir: PathBuf,
+    },
+    /// S3 storage via s3fs-fuse
+    S3 {
+        /// Workspace root directory (also serves as s3fs-fuse mount point)
+        workspace_dir: PathBuf,
+        /// S3 connection configuration
+        s3: S3Config,
+    },
+}
+
+impl Default for StorageConfig {
+    fn default() -> Self {
+        StorageConfig::Local {
+            workspace_dir: PathBuf::from(default_workspace_dir()),
+        }
+    }
+}
+
+impl StorageConfig {
+    /// Get the workspace root directory (both modes have one)
+    pub fn workspace_dir(&self) -> &Path {
+        match self {
+            StorageConfig::Local { workspace_dir } => workspace_dir,
+            StorageConfig::S3 { workspace_dir, .. } => workspace_dir,
+        }
+    }
+}
+
+/// S3 connection configuration
+#[derive(Debug, Clone)]
+pub struct S3Config {
+    /// S3 endpoint URL
+    pub endpoint: String,
+    /// S3 bucket name
+    pub bucket: String,
+    /// S3 access key (optional; falls back to env vars or IAM role)
+    pub access_key: Option<String>,
+    /// S3 secret key (optional; falls back to env vars or IAM role)
+    pub secret_key: Option<String>,
+    /// S3 region
+    pub region: Option<String>,
+    /// s3fs-fuse local cache directory (optional; enables read caching)
+    pub cache_dir: Option<PathBuf>,
 }
 
 fn default_http_host() -> String {
@@ -157,6 +228,10 @@ fn default_mcp_path() -> String {
 
 fn default_mcp_profile() -> String {
     "developer".to_string()
+}
+
+fn default_fs_api_enabled() -> bool {
+    true
 }
 
 impl Config {
@@ -241,8 +316,93 @@ impl Config {
         if let Ok(val) = std::env::var("WORKSPACE_MCP_PROFILE") {
             config.mcp_profile = val;
         }
+        if let Ok(val) = std::env::var("WORKSPACE_FS_API_TOKEN") {
+            config.fs_api_token = Some(val);
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_FS_API_ENABLED") {
+            config.fs_api_enabled = val.to_lowercase() == "true" || val == "1";
+        }
+
+        // Build StorageConfig from environment variables
+        config.storage = Self::load_storage_config(&config.workspace_dir)?;
 
         Ok(config)
+    }
+
+    /// Build storage configuration from environment variables
+    fn load_storage_config(workspace_dir: &str) -> anyhow::Result<StorageConfig> {
+        let storage_type =
+            std::env::var("WORKSPACE_STORAGE_TYPE").unwrap_or_else(|_| "local".to_string());
+
+        let workspace_path = PathBuf::from(workspace_dir);
+
+        // Validate: workspace_dir must be an absolute path
+        if !workspace_path.is_absolute() {
+            return Err(anyhow::anyhow!(
+                "WORKSPACE_WORKSPACE_DIR must be an absolute path, got: {}",
+                workspace_dir
+            ));
+        }
+
+        match storage_type.as_str() {
+            "s3" => {
+                let endpoint = std::env::var("WORKSPACE_S3_ENDPOINT").map_err(|_| {
+                    anyhow::anyhow!(
+                        "WORKSPACE_S3_ENDPOINT is required when WORKSPACE_STORAGE_TYPE=s3"
+                    )
+                })?;
+
+                let bucket = std::env::var("WORKSPACE_S3_BUCKET").map_err(|_| {
+                    anyhow::anyhow!(
+                        "WORKSPACE_S3_BUCKET is required when WORKSPACE_STORAGE_TYPE=s3"
+                    )
+                })?;
+
+                let access_key = std::env::var("WORKSPACE_S3_ACCESS_KEY").ok();
+                let secret_key = std::env::var("WORKSPACE_S3_SECRET_KEY").ok();
+                // Default region to us-east-1 as per design doc
+                let region = std::env::var("WORKSPACE_S3_REGION")
+                    .ok()
+                    .or_else(|| Some("us-east-1".to_string()));
+                let cache_dir = std::env::var("WORKSPACE_S3_CACHE_DIR")
+                    .ok()
+                    .map(PathBuf::from);
+
+                // Validate: cache_dir must be an absolute path if specified
+                if let Some(ref dir) = cache_dir {
+                    if !dir.is_absolute() {
+                        return Err(anyhow::anyhow!(
+                            "WORKSPACE_S3_CACHE_DIR must be an absolute path, got: {}",
+                            dir.display()
+                        ));
+                    }
+                }
+
+                // Warn if S3 credentials are not configured via environment variables
+                // (user may rely on ~/.passwd-s3fs or IAM role instead)
+                if access_key.is_none() || secret_key.is_none() {
+                    warn!(
+                        "WORKSPACE_S3_ACCESS_KEY and/or WORKSPACE_S3_SECRET_KEY not set. \
+                         s3fs will fall back to ~/.passwd-s3fs file or IAM role for credentials."
+                    );
+                }
+
+                Ok(StorageConfig::S3 {
+                    workspace_dir: workspace_path,
+                    s3: S3Config {
+                        endpoint,
+                        bucket,
+                        access_key,
+                        secret_key,
+                        region,
+                        cache_dir,
+                    },
+                })
+            }
+            _ => Ok(StorageConfig::Local {
+                workspace_dir: workspace_path,
+            }),
+        }
     }
 
     /// Get the host path for a sandbox workspace directory
@@ -284,6 +444,9 @@ impl Default for Config {
             mcp_mode: default_mcp_mode(),
             mcp_path: default_mcp_path(),
             mcp_profile: default_mcp_profile(),
+            fs_api_enabled: default_fs_api_enabled(),
+            fs_api_token: None,
+            storage: StorageConfig::default(),
         }
     }
 }

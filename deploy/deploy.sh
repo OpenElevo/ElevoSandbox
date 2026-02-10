@@ -27,6 +27,8 @@ SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/openelevo/elevosandbox-server:latest}"
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/openelevo/elevosandbox-base:latest}"
 MCP_MODE="${MCP_MODE:-http}"
 MCP_PATH="${MCP_PATH:-/mcp}"
+FS_API_ENABLED="${FS_API_ENABLED:-true}"
+FS_API_TOKEN="${FS_API_TOKEN:-}"
 AGENT_TIMEOUT="${AGENT_TIMEOUT:-60}"
 MAX_IDLE_TIME="${MAX_IDLE_TIME:-7200}"
 LOG_LEVEL="${LOG_LEVEL:-info}"
@@ -93,6 +95,12 @@ start() {
         NFS_HOST_ENV="-e WORKSPACE_NFS_HOST=$NFS_HOST"
     fi
 
+    # 构建 FS_API 环境变量
+    FS_API_ENV="-e WORKSPACE_FS_API_ENABLED=$FS_API_ENABLED"
+    if [ -n "$FS_API_TOKEN" ]; then
+        FS_API_ENV="$FS_API_ENV -e WORKSPACE_FS_API_TOKEN=$FS_API_TOKEN"
+    fi
+
     docker run -d \
         --name "$CONTAINER_NAME" \
         --restart unless-stopped \
@@ -114,6 +122,7 @@ start() {
         -e WORKSPACE_MCP_PATH="$MCP_PATH" \
         -e WORKSPACE_NFS_PORT=2049 \
         $NFS_HOST_ENV \
+        $FS_API_ENV \
         --add-host=host.docker.internal:host-gateway \
         "$SERVER_IMAGE"
 

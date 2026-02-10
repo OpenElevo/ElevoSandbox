@@ -53,6 +53,9 @@ pub enum Error {
     #[error("Invalid path: {0}")]
     InvalidPath(String),
 
+    #[error("Is a directory: {0}")]
+    IsADirectory(String),
+
     #[error("Not a directory: {0}")]
     NotADirectory(String),
 
@@ -134,8 +137,9 @@ impl Error {
             Error::FileAlreadyExists(_) => 3002,
             Error::PermissionDenied(_) => 3003,
             Error::InvalidPath(_) => 3004,
-            Error::NotADirectory(_) => 3005,
-            Error::DirectoryNotEmpty(_) => 3006,
+            Error::IsADirectory(_) => 3005,
+            Error::NotADirectory(_) => 3006,
+            Error::DirectoryNotEmpty(_) => 3007,
 
             // Process errors (4000-4099)
             Error::ProcessNotFound(_) => 4001,
@@ -185,6 +189,7 @@ impl Error {
             | Error::InvalidParameter(_)
             | Error::InvalidPath(_)
             | Error::InvalidSandboxState { .. }
+            | Error::IsADirectory(_)
             | Error::NotADirectory(_)
             | Error::DirectoryNotEmpty(_) => StatusCode::BAD_REQUEST,
 
@@ -241,5 +246,26 @@ impl From<bollard::errors::Error> for Error {
 impl From<std::io::Error> for Error {
     fn from(err: std::io::Error) -> Self {
         Error::Internal(err.to_string())
+    }
+}
+
+impl From<crate::infra::storage::StorageError> for Error {
+    fn from(err: crate::infra::storage::StorageError) -> Self {
+        use crate::infra::storage::StorageError;
+        match err {
+            StorageError::NotFound(p) => Error::FileNotFound(p),
+            StorageError::AlreadyExists(p) => Error::FileAlreadyExists(p),
+            StorageError::IsADirectory(p) => Error::IsADirectory(p),
+            StorageError::NotADirectory(p) => Error::NotADirectory(p),
+            StorageError::NotAFile(p) => Error::InvalidPath(p),
+            StorageError::DirectoryNotEmpty(p) => Error::DirectoryNotEmpty(p),
+            StorageError::PermissionDenied(p) => Error::PermissionDenied(p),
+            StorageError::PathTraversalDenied(p) => Error::PathNotAllowed(p),
+            StorageError::NotSupported(msg) => Error::Internal(msg),
+            StorageError::Io { path, source } => {
+                Error::Internal(format!("I/O error on {}: {}", path, source))
+            }
+            StorageError::Internal(msg) => Error::Internal(msg),
+        }
     }
 }
