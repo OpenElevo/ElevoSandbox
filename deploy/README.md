@@ -22,6 +22,7 @@ deploy/
 # 端口
 HTTP_PORT=8080          # HTTP API 端口
 GRPC_PORT=9090          # gRPC 端口 (Agent 连接)
+NFS_PORT=2049           # NFS 端口
 
 # 存储
 WORKSPACE_HOST_DIR=/var/lib/elevo-workspace/workspaces
@@ -33,6 +34,9 @@ BASE_IMAGE=ghcr.io/openelevo/elevosandbox-base:latest
 # MCP
 MCP_MODE=http           # disabled 或 http
 MCP_PATH=/mcp           # MCP 端点路径前缀
+
+# FUSE 文件系统 API (可选)
+FS_API_TOKEN=your-token # 设置后启用 gRPC FileSystemService
 ```
 
 ## 命令
@@ -55,6 +59,57 @@ MCP_PATH=/mcp           # MCP 端点路径前缀
 | `http://<host>:8080/mcp/executor` | 1 | 仅 process_run |
 | `http://<host>:8080/mcp/developer` | 6 | process + file 操作 |
 | `http://<host>:8080/mcp/full` | 14 | 全部操作 |
+
+## FUSE 文件系统挂载
+
+启用 `FS_API_TOKEN` 后，可以使用 FUSE 客户端将工作空间挂载到本地文件系统。
+
+### 前置条件
+
+- 安装 FUSE: `apt install fuse` (Linux) 或 `brew install macfuse` (macOS)
+- 确保 `/dev/fuse` 存在且有访问权限
+
+### Python SDK 示例
+
+```python
+from workspace_sdk import WorkspaceClient
+
+client = WorkspaceClient("http://localhost:8080")
+
+# 创建工作空间
+workspace = client.workspaces.create()
+
+# 挂载工作空间
+with client.fuse.mount(workspace.id, token="your-fs-api-token") as mount:
+    # 通过本地文件系统访问工作空间
+    with open(f"{mount.path}/test.txt", "w") as f:
+        f.write("Hello from FUSE!")
+
+    # 读取文件
+    with open(f"{mount.path}/test.txt", "r") as f:
+        print(f.read())
+
+# 退出 with 块后自动卸载
+```
+
+### 手动使用 workspace-fuse
+
+```bash
+# 下载 workspace-fuse 二进制
+curl -L -o workspace-fuse \
+  "http://localhost:8080/api/v1/downloads/workspace-fuse/linux/amd64"
+chmod +x workspace-fuse
+
+# 挂载工作空间
+./workspace-fuse mount \
+  --server http://localhost:9090 \
+  --workspace <workspace-id> \
+  --token <fs-api-token> \
+  --target /mnt/workspace
+
+# 卸载
+fusermount -u /mnt/workspace
+```
 
 ## Python MCP Client 示例
 
