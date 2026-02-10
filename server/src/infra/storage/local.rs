@@ -58,7 +58,9 @@ impl LocalStorageBackend {
         // Layer 2: canonicalize both paths and verify containment.
         // If canonicalize fails (e.g., path doesn't exist yet), fall back to the
         // raw path — the component check above already guards against traversal.
-        let canonical_workspace = workspace_dir.canonicalize().unwrap_or(workspace_dir.clone());
+        let canonical_workspace = workspace_dir
+            .canonicalize()
+            .unwrap_or(workspace_dir.clone());
         let canonical_full = full_path.canonicalize().unwrap_or(full_path.clone());
         if !canonical_full.starts_with(&canonical_workspace) {
             return Err(StorageError::PathTraversalDenied(format!(
@@ -76,11 +78,7 @@ impl LocalStorageBackend {
     }
 
     /// Build a `FileStat` from tokio metadata
-    fn build_file_stat(
-        path: &str,
-        name: &str,
-        metadata: &std::fs::Metadata,
-    ) -> FileStat {
+    fn build_file_stat(path: &str, name: &str, metadata: &std::fs::Metadata) -> FileStat {
         use std::os::unix::fs::MetadataExt;
 
         let file_type = if metadata.is_dir() {
@@ -264,7 +262,11 @@ impl StorageBackend for LocalStorageBackend {
                 .await
                 .map_err(|e| StorageError::from_io(e, &entry_rel_path))?;
 
-            results.push(Self::build_file_stat(&entry_rel_path, &entry_name, &metadata));
+            results.push(Self::build_file_stat(
+                &entry_rel_path,
+                &entry_name,
+                &metadata,
+            ));
         }
 
         // Sort by name for deterministic output
@@ -279,12 +281,7 @@ impl StorageBackend for LocalStorageBackend {
 
     // ── Directory Operations ──
 
-    async fn mkdir(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        recursive: bool,
-    ) -> StorageResult<()> {
+    async fn mkdir(&self, workspace_id: &str, path: &str, recursive: bool) -> StorageResult<()> {
         let full_path = self.resolve_path(workspace_id, path)?;
 
         if recursive {
@@ -398,12 +395,7 @@ impl StorageBackend for LocalStorageBackend {
 
     // ── NFS Extended Operations ──
 
-    async fn set_file_size(
-        &self,
-        workspace_id: &str,
-        path: &str,
-        size: u64,
-    ) -> StorageResult<()> {
+    async fn set_file_size(&self, workspace_id: &str, path: &str, size: u64) -> StorageResult<()> {
         let full_path = self.resolve_path(workspace_id, path)?;
         let file = fs::OpenOptions::new()
             .write(true)
@@ -467,11 +459,9 @@ impl StorageBackend for LocalStorageBackend {
         };
 
         // Use libc::utimensat for precise timestamp setting
-        let path_cstr = std::ffi::CString::new(
-            full_path.to_str().ok_or_else(|| {
-                StorageError::Internal(format!("invalid path: {}", full_path.display()))
-            })?
-        )
+        let path_cstr = std::ffi::CString::new(full_path.to_str().ok_or_else(|| {
+            StorageError::Internal(format!("invalid path: {}", full_path.display()))
+        })?)
         .map_err(|e| StorageError::Internal(format!("invalid path bytes: {}", e)))?;
 
         let atime_dur = new_atime.duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -533,11 +523,9 @@ impl StorageBackend for LocalStorageBackend {
         let workspace_dir = self.workspace_dir(workspace_id);
 
         // Use statvfs to get real filesystem statistics
-        let path_cstr = std::ffi::CString::new(
-            workspace_dir.to_str().ok_or_else(|| {
-                StorageError::Internal(format!("invalid path: {}", workspace_dir.display()))
-            })?,
-        )
+        let path_cstr = std::ffi::CString::new(workspace_dir.to_str().ok_or_else(|| {
+            StorageError::Internal(format!("invalid path: {}", workspace_dir.display()))
+        })?)
         .map_err(|e| StorageError::Internal(format!("invalid path bytes: {}", e)))?;
 
         let result = tokio::task::spawn_blocking(move || {
@@ -627,7 +615,10 @@ mod tests {
             .write_file("ws1", "data.txt", b"0123456789")
             .await
             .unwrap();
-        let range = backend.read_file_range("ws1", "data.txt", 3, 4).await.unwrap();
+        let range = backend
+            .read_file_range("ws1", "data.txt", 3, 4)
+            .await
+            .unwrap();
         assert_eq!(range, b"3456");
     }
 
@@ -649,10 +640,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_file_exclusive() {
         let (_tmp, backend) = setup().await;
-        backend
-            .create_file("ws1", "new.txt", true)
-            .await
-            .unwrap();
+        backend.create_file("ws1", "new.txt", true).await.unwrap();
         // Second exclusive create should fail
         let err = backend
             .create_file("ws1", "new.txt", true)
@@ -693,14 +681,8 @@ mod tests {
     #[tokio::test]
     async fn test_list_dir() {
         let (_tmp, backend) = setup().await;
-        backend
-            .write_file("ws1", "a.txt", b"a")
-            .await
-            .unwrap();
-        backend
-            .write_file("ws1", "b.txt", b"b")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "a.txt", b"a").await.unwrap();
+        backend.write_file("ws1", "b.txt", b"b").await.unwrap();
         backend.mkdir("ws1", "subdir", false).await.unwrap();
 
         let entries = backend.list_dir("ws1", "").await.unwrap();
@@ -714,10 +696,7 @@ mod tests {
     async fn test_exists() {
         let (_tmp, backend) = setup().await;
         assert!(!backend.exists("ws1", "nope.txt").await.unwrap());
-        backend
-            .write_file("ws1", "yes.txt", b"y")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "yes.txt", b"y").await.unwrap();
         assert!(backend.exists("ws1", "yes.txt").await.unwrap());
     }
 
@@ -725,10 +704,7 @@ mod tests {
     async fn test_mkdir_recursive_and_non_recursive() {
         let (_tmp, backend) = setup().await;
         // Recursive should create parents
-        backend
-            .mkdir("ws1", "a/b/c", true)
-            .await
-            .unwrap();
+        backend.mkdir("ws1", "a/b/c", true).await.unwrap();
         assert!(backend.exists("ws1", "a/b/c").await.unwrap());
 
         // Non-recursive should fail if parent missing
@@ -739,10 +715,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_file() {
         let (_tmp, backend) = setup().await;
-        backend
-            .write_file("ws1", "del.txt", b"bye")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "del.txt", b"bye").await.unwrap();
         backend.remove_file("ws1", "del.txt").await.unwrap();
         assert!(!backend.exists("ws1", "del.txt").await.unwrap());
     }
@@ -763,10 +736,7 @@ mod tests {
             .write_file("ws1", "dir/file.txt", b"f")
             .await
             .unwrap();
-        let err = backend
-            .remove_dir("ws1", "dir", false)
-            .await
-            .unwrap_err();
+        let err = backend.remove_dir("ws1", "dir", false).await.unwrap_err();
         assert!(matches!(
             err,
             StorageError::DirectoryNotEmpty(_) | StorageError::Io { .. }
@@ -776,10 +746,7 @@ mod tests {
     #[tokio::test]
     async fn test_remove_dir_on_file() {
         let (_tmp, backend) = setup().await;
-        backend
-            .write_file("ws1", "file.txt", b"f")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "file.txt", b"f").await.unwrap();
         let err = backend
             .remove_dir("ws1", "file.txt", false)
             .await
@@ -802,10 +769,7 @@ mod tests {
     #[tokio::test]
     async fn test_rename() {
         let (_tmp, backend) = setup().await;
-        backend
-            .write_file("ws1", "old.txt", b"data")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "old.txt", b"data").await.unwrap();
         backend.rename("ws1", "old.txt", "new.txt").await.unwrap();
         assert!(!backend.exists("ws1", "old.txt").await.unwrap());
         let content = backend.read_file("ws1", "new.txt").await.unwrap();
@@ -831,14 +795,8 @@ mod tests {
     #[tokio::test]
     async fn test_copy_directory() {
         let (_tmp, backend) = setup().await;
-        backend
-            .write_file("ws1", "dir/a.txt", b"a")
-            .await
-            .unwrap();
-        backend
-            .write_file("ws1", "dir/b.txt", b"b")
-            .await
-            .unwrap();
+        backend.write_file("ws1", "dir/a.txt", b"a").await.unwrap();
+        backend.write_file("ws1", "dir/b.txt", b"b").await.unwrap();
         backend.copy("ws1", "dir", "dir_copy").await.unwrap();
         assert_eq!(
             backend.read_file("ws1", "dir_copy/a.txt").await.unwrap(),
@@ -900,9 +858,15 @@ mod tests {
 
         let stat = backend.stat("ws1", "times.txt").await.unwrap();
         // Verify mtime was set (second-level precision)
-        assert_eq!(stat.modified_at.unwrap().timestamp(), target_mtime.timestamp());
+        assert_eq!(
+            stat.modified_at.unwrap().timestamp(),
+            target_mtime.timestamp()
+        );
         // Verify atime was set
-        assert_eq!(stat.accessed_at.unwrap().timestamp(), target_atime.timestamp());
+        assert_eq!(
+            stat.accessed_at.unwrap().timestamp(),
+            target_atime.timestamp()
+        );
     }
 
     #[tokio::test]

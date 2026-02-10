@@ -131,7 +131,12 @@ impl FileSystemRpcClient {
     }
 
     /// Create a new file
-    pub async fn create(&self, path: &str, mode: u32, exclusive: bool) -> Result<FsFileAttr, Status> {
+    pub async fn create(
+        &self,
+        path: &str,
+        mode: u32,
+        exclusive: bool,
+    ) -> Result<FsFileAttr, Status> {
         debug!(path = %path, mode = mode, exclusive = exclusive, "rpc: create");
         let request = self.authorize(Request::new(FsCreateRequest {
             workspace_id: self.workspace_id.clone(),
