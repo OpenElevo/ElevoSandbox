@@ -3,6 +3,9 @@ package workspace
 import (
 	"fmt"
 	"net/http"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Error represents an API error
@@ -90,4 +93,54 @@ func IsTimeout(err error) bool {
 	}
 	_, ok := err.(*TimeoutError)
 	return ok
+}
+
+// convertGrpcError converts a gRPC error to a workspace error
+func convertGrpcError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		return &Error{
+			StatusCode: http.StatusInternalServerError,
+			Message:    err.Error(),
+		}
+	}
+
+	var statusCode int
+	switch st.Code() {
+	case codes.OK:
+		return nil
+	case codes.NotFound:
+		statusCode = http.StatusNotFound
+	case codes.InvalidArgument:
+		statusCode = http.StatusBadRequest
+	case codes.Unauthenticated:
+		statusCode = http.StatusUnauthorized
+	case codes.PermissionDenied:
+		statusCode = http.StatusForbidden
+	case codes.FailedPrecondition:
+		statusCode = http.StatusPreconditionFailed
+	case codes.Unavailable:
+		statusCode = http.StatusServiceUnavailable
+	case codes.DeadlineExceeded:
+		return &TimeoutError{
+			Operation: "gRPC call",
+			Duration:  "unknown",
+		}
+	case codes.Canceled:
+		return &Error{
+			StatusCode: 499, // Client Closed Request
+			Message:    st.Message(),
+		}
+	default:
+		statusCode = http.StatusInternalServerError
+	}
+
+	return &Error{
+		StatusCode: statusCode,
+		Message:    st.Message(),
+	}
 }

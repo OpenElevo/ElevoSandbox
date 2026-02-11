@@ -10,7 +10,6 @@ import {
   WorkspaceClient,
   WorkspaceError,
   SandboxNotFoundError,
-  TemplateNotFoundError,
   RunCommandOptions,
   CommandResult,
 } from '../src';
@@ -18,32 +17,32 @@ import {
 async function main() {
   console.log('=== Error Handling Example ===\n');
 
-  const client = new WorkspaceClient({
-    apiUrl: 'http://localhost:8080',
-    timeout: 30000,
-  });
+  const client = new WorkspaceClient('localhost:9090');
 
-  // 1. Handle not found error
-  console.log('1. Handling non-existent sandbox error...');
   try {
-    await client.sandbox.get('non-existent-sandbox-id');
-  } catch (error) {
-    if (error instanceof SandboxNotFoundError) {
-      console.log('   SandboxNotFoundError caught');
-      console.log(`   Error code: ${error.code}`);
-    } else if (error instanceof WorkspaceError) {
-      console.log(`   WorkspaceError [${error.code}]: ${error.message}`);
-    } else {
-      console.log(`   Unknown error: ${error}`);
+    // 1. Handle not found error
+    console.log('1. Handling non-existent sandbox error...');
+    try {
+      await client.sandbox.get('non-existent-sandbox-id');
+    } catch (error) {
+      if (error instanceof SandboxNotFoundError) {
+        console.log('   SandboxNotFoundError caught');
+        console.log(`   Error code: ${error.code}`);
+      } else if (error instanceof WorkspaceError) {
+        console.log(`   WorkspaceError [${error.code}]: ${error.message}`);
+      } else {
+        console.log(`   Unknown error: ${error}`);
+      }
     }
-  }
-  console.log();
+    console.log();
 
-  // 2. Create a sandbox for more tests
-  console.log('2. Creating sandbox for error tests...');
-  const sandbox = await client.sandbox.create({
-    template: 'workspace-test:latest',
-  });
+    // 2. Create workspace and sandbox for more tests
+    console.log('2. Creating workspace and sandbox for error tests...');
+    const workspace = await client.workspace.create({ name: 'error-handling-example' });
+    const sandbox = await client.sandbox.create({
+      workspaceId: workspace.id,
+      template: 'workspace-test:latest',
+    });
   console.log(`   Created: ${sandbox.id}\n`);
 
   try {
@@ -135,7 +134,11 @@ async function main() {
     // Cleanup
     console.log('\n9. Cleaning up...');
     await client.sandbox.delete(sandbox.id, true);
+    await client.workspace.delete(workspace.id);
     console.log('   Done!');
+  }
+  } finally {
+    client.close();
   }
 }
 

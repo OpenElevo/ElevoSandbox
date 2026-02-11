@@ -17,19 +17,43 @@ import (
 
 func main() {
 	// Create client with custom timeout
-	client := workspace.NewClient("http://localhost:8080", workspace.ClientOptions{
+	client, err := workspace.NewClient("localhost:9090", workspace.ClientOptions{
 		Timeout: 60 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 
 	ctx := context.Background()
 
 	fmt.Println("=== Workspace SDK Basic Example ===")
 
+	// 0. Create a workspace first
+	fmt.Println("0. Creating workspace...")
+	ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+		Name: "example-workspace",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create workspace: %v", err)
+	}
+	fmt.Printf("   Created workspace: %s\n\n", ws.ID)
+
+	// Ensure workspace cleanup
+	defer func() {
+		fmt.Println("\n7. Cleaning up workspace...")
+		if err := client.Workspace.Delete(ctx, ws.ID); err != nil {
+			log.Printf("Warning: failed to delete workspace: %v", err)
+		}
+		fmt.Println("   Done!")
+	}()
+
 	// 1. Create a sandbox
 	fmt.Println("1. Creating sandbox...")
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: "workspace-test:latest",
-		Name:     "example-sandbox",
+		WorkspaceID: ws.ID,
+		Template:    "workspace-test:latest",
+		Name:        "example-sandbox",
 		Metadata: map[string]string{
 			"purpose": "demo",
 		},
@@ -39,9 +63,9 @@ func main() {
 	}
 	fmt.Printf("   Created: %s (state: %s)\n\n", sandbox.ID, sandbox.State)
 
-	// Ensure cleanup
+	// Ensure sandbox cleanup
 	defer func() {
-		fmt.Println("\n6. Cleaning up...")
+		fmt.Println("\n6. Cleaning up sandbox...")
 		if err := client.Sandbox.Delete(ctx, sandbox.ID, true); err != nil {
 			log.Printf("Warning: failed to delete sandbox: %v", err)
 		}

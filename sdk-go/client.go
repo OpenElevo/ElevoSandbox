@@ -1,13 +1,16 @@
 package workspace
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"crypto/tls"
 	"fmt"
-	"io"
-	"net/http"
 	"time"
+
+	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // ClientOptions contains options for creating a client
@@ -16,142 +19,96 @@ type ClientOptions struct {
 	APIKey string
 	// Timeout is the request timeout (default: 30s)
 	Timeout time.Duration
-	// HTTPClient is an optional custom HTTP client
-	HTTPClient *http.Client
-	// NfsHost is the NFS server host for mounting workspaces
-	NfsHost string
-	// NfsPort is the NFS server port (default: 2049)
-	NfsPort int
+	// TLS enables TLS for the gRPC connection
+	TLS bool
+	// TLSConfig is an optional custom TLS configuration
+	TLSConfig *tls.Config
+	// DialOptions are additional gRPC dial options
+	DialOptions []grpc.DialOption
 }
 
 // Client is the main workspace client
 type Client struct {
-	apiURL     string
-	apiKey     string
-	httpClient *http.Client
+	conn   *grpc.ClientConn
+	apiKey string
 
-	// Services
+	// gRPC clients
+	workspaceClient pb.WorkspaceServiceClient
+	sandboxClient   pb.SandboxServiceClient
+	processClient   pb.ProcessServiceClient
+	ptyClient       pb.PtyServiceClient
+	fsClient        pb.FileSystemServiceClient
+
+	// Services (high-level wrappers)
 	Workspace *WorkspaceService
 	Sandbox   *SandboxService
 	Process   *ProcessService
 	Pty       *PtyService
-	Nfs       *NfsService
+	Fs        *FileSystemService
 }
 
 // NewClient creates a new workspace client
-func NewClient(apiURL string, opts ...ClientOptions) *Client {
+func NewClient(serverAddr string, opts ...ClientOptions) (*Client, error) {
 	var opt ClientOptions
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
 
-	timeout := opt.Timeout
-	if timeout == 0 {
-		timeout = 30 * time.Second
+	// Build dial options
+	dialOpts := []grpc.DialOption{}
+
+	// Add TLS or insecure credentials
+	if opt.TLS {
+		tlsConfig := opt.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{}
+		}
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
-	httpClient := opt.HTTPClient
-	if httpClient == nil {
-		httpClient = &http.Client{
-			Timeout: timeout,
-		}
+	// Add custom dial options
+	dialOpts = append(dialOpts, opt.DialOptions...)
+
+	// Connect to gRPC server
+	conn, err := grpc.NewClient(serverAddr, dialOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to server: %w", err)
 	}
 
 	c := &Client{
-		apiURL:     apiURL,
-		apiKey:     opt.APIKey,
-		httpClient: httpClient,
+		conn:            conn,
+		apiKey:          opt.APIKey,
+		workspaceClient: pb.NewWorkspaceServiceClient(conn),
+		sandboxClient:   pb.NewSandboxServiceClient(conn),
+		processClient:   pb.NewProcessServiceClient(conn),
+		ptyClient:       pb.NewPtyServiceClient(conn),
+		fsClient:        pb.NewFileSystemServiceClient(conn),
 	}
 
-	// Initialize services
+	// Initialize high-level services
 	c.Workspace = &WorkspaceService{client: c}
 	c.Sandbox = &SandboxService{client: c}
 	c.Process = &ProcessService{client: c}
 	c.Pty = &PtyService{client: c}
-	c.Nfs = NewNfsService(opt.NfsHost, opt.NfsPort)
+	c.Fs = &FileSystemService{client: c}
 
-	return c
+	return c, nil
 }
 
-// doRequest performs an HTTP request
-func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
-	url := fmt.Sprintf("%s/api/v1%s", c.apiURL, path)
-
-	var bodyReader io.Reader
-	if body != nil {
-		jsonBody, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("failed to marshal request body: %w", err)
-		}
-		bodyReader = bytes.NewReader(jsonBody)
+// Close closes the gRPC connection
+func (c *Client) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
 	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	req.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return &ConnectionError{URL: url, Message: err.Error()}
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return c.parseErrorResponse(resp.StatusCode, respBody)
-	}
-
-	if result != nil && len(respBody) > 0 {
-		if err := json.Unmarshal(respBody, result); err != nil {
-			return fmt.Errorf("failed to unmarshal response: %w", err)
-		}
-	}
-
 	return nil
 }
 
-// parseErrorResponse parses an error response from the API
-func (c *Client) parseErrorResponse(statusCode int, body []byte) error {
-	var errResp struct {
-		Error   string `json:"error"`
-		Message string `json:"message"`
-		Details string `json:"details"`
+// withAuth adds authentication metadata to the context
+func (c *Client) withAuth(ctx context.Context) context.Context {
+	if c.apiKey != "" {
+		return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+c.apiKey)
 	}
-
-	if err := json.Unmarshal(body, &errResp); err != nil {
-		return &Error{
-			StatusCode: statusCode,
-			Message:    string(body),
-		}
-	}
-
-	msg := errResp.Error
-	if msg == "" {
-		msg = errResp.Message
-	}
-	if msg == "" {
-		msg = http.StatusText(statusCode)
-	}
-
-	return &Error{
-		StatusCode: statusCode,
-		Message:    msg,
-		Details:    errResp.Details,
-	}
-}
-
-// Health checks if the server is healthy
-func (c *Client) Health(ctx context.Context) error {
-	var result map[string]interface{}
-	return c.doRequest(ctx, http.MethodGet, "/health", nil, &result)
+	return ctx
 }

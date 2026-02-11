@@ -1,18 +1,24 @@
 /**
- * Workspace service for managing workspaces and file operations
+ * Workspace service for managing workspaces and file operations via gRPC
  */
 
-import { AxiosInstance } from 'axios';
+import * as grpc from '@grpc/grpc-js';
 import { Workspace, CreateWorkspaceParams, FileInfo } from '../types';
+import { WorkspaceServiceClient, createMetadata, promisifyUnary } from '../grpc';
+import { convertGrpcError } from '../errors';
 
 /**
  * Service for managing workspaces and file operations
  */
 export class WorkspaceService {
   constructor(
-    private readonly httpClient: AxiosInstance,
-    private readonly apiUrl: string
+    private readonly client: WorkspaceServiceClient,
+    private readonly apiKey?: string
   ) {}
+
+  private metadata(): grpc.Metadata {
+    return createMetadata(this.apiKey);
+  }
 
   // ==================== Workspace CRUD ====================
 
@@ -20,31 +26,67 @@ export class WorkspaceService {
    * Create a new workspace
    */
   async create(params: CreateWorkspaceParams = {}): Promise<Workspace> {
-    const response = await this.httpClient.post('/workspaces', params);
-    return this.transformWorkspace(response.data);
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.createWorkspace,
+        { name: params.name, metadata: params.metadata || {} },
+        this.metadata()
+      );
+      return this.transformWorkspace(response.workspace);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Get a workspace by ID
    */
   async get(id: string): Promise<Workspace> {
-    const response = await this.httpClient.get(`/workspaces/${id}`);
-    return this.transformWorkspace(response.data);
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.getWorkspace,
+        { id },
+        this.metadata()
+      );
+      return this.transformWorkspace(response.workspace);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * List all workspaces
    */
   async list(): Promise<Workspace[]> {
-    const response = await this.httpClient.get('/workspaces');
-    return response.data.workspaces.map((w: any) => this.transformWorkspace(w));
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.listWorkspaces,
+        {},
+        this.metadata()
+      );
+      return (response.workspaces || []).map((w: any) => this.transformWorkspace(w));
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Delete a workspace
    */
   async delete(id: string): Promise<void> {
-    await this.httpClient.delete(`/workspaces/${id}`);
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.deleteWorkspace,
+        { id },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   // ==================== File Operations ====================
@@ -53,98 +95,160 @@ export class WorkspaceService {
    * Read a file from workspace
    */
   async readFile(workspaceId: string, path: string): Promise<string> {
-    const response = await this.httpClient.get(
-      `/workspaces/${workspaceId}/files`,
-      { params: { path } }
-    );
-    return response.data.content;
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.readFile,
+        { workspaceId, path },
+        this.metadata()
+      );
+      // Content is returned as bytes, convert to string
+      const content = response.content;
+      if (content instanceof Buffer) {
+        return content.toString('utf-8');
+      }
+      return content?.toString() || '';
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Read a file as bytes from workspace
    */
   async readFileBytes(workspaceId: string, path: string): Promise<Uint8Array> {
-    const response = await this.httpClient.get(
-      `/workspaces/${workspaceId}/files`,
-      {
-        params: { path },
-        responseType: 'arraybuffer',
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.readFile,
+        { workspaceId, path },
+        this.metadata()
+      );
+      const content = response.content;
+      if (content instanceof Buffer) {
+        return new Uint8Array(content);
       }
-    );
-    return new Uint8Array(response.data);
+      return new Uint8Array(content || []);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Write a file to workspace
    */
   async writeFile(workspaceId: string, path: string, content: string | Uint8Array): Promise<void> {
-    const isBuffer = content instanceof Uint8Array;
-    await this.httpClient.put(
-      `/workspaces/${workspaceId}/files`,
-      isBuffer ? Buffer.from(content) : { content },
-      {
-        params: { path },
-        headers: isBuffer ? { 'Content-Type': 'application/octet-stream' } : undefined,
-      }
-    );
+    try {
+      const contentBuffer = typeof content === 'string'
+        ? Buffer.from(content, 'utf-8')
+        : Buffer.from(content);
+      await promisifyUnary(
+        this.client,
+        this.client.writeFile,
+        { workspaceId, path, content: contentBuffer },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Create a directory in workspace
    */
   async mkdir(workspaceId: string, path: string): Promise<void> {
-    await this.httpClient.post(`/workspaces/${workspaceId}/files/mkdir`, { path });
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.mkdir,
+        { workspaceId, path },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * List directory contents in workspace
    */
   async listFiles(workspaceId: string, path: string): Promise<FileInfo[]> {
-    const response = await this.httpClient.get(
-      `/workspaces/${workspaceId}/files/list`,
-      { params: { path } }
-    );
-    return response.data.files.map((f: any) => this.transformFileInfo(f));
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.listFiles,
+        { workspaceId, path },
+        this.metadata()
+      );
+      return (response.files || []).map((f: any) => this.transformFileInfo(f));
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Delete a file or directory in workspace
    */
   async deleteFile(workspaceId: string, path: string, recursive: boolean = false): Promise<void> {
-    await this.httpClient.delete(`/workspaces/${workspaceId}/files`, {
-      params: { path, recursive: recursive ? 'true' : 'false' },
-    });
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.deleteFile,
+        { workspaceId, path, recursive },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Move/rename a file or directory in workspace
    */
   async moveFile(workspaceId: string, source: string, destination: string): Promise<void> {
-    await this.httpClient.post(`/workspaces/${workspaceId}/files/move`, {
-      source,
-      destination,
-    });
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.moveFile,
+        { workspaceId, source, destination },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Copy a file or directory in workspace
    */
   async copyFile(workspaceId: string, source: string, destination: string): Promise<void> {
-    await this.httpClient.post(`/workspaces/${workspaceId}/files/copy`, {
-      source,
-      destination,
-    });
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.copyFile,
+        { workspaceId, source, destination },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Get file information in workspace
    */
   async getFileInfo(workspaceId: string, path: string): Promise<FileInfo> {
-    const response = await this.httpClient.get(
-      `/workspaces/${workspaceId}/files/info`,
-      { params: { path } }
-    );
-    return this.transformFileInfo(response.data);
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.getFileInfo,
+        { workspaceId, path },
+        this.metadata()
+      );
+      return this.transformFileInfo(response.file);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
@@ -162,29 +266,41 @@ export class WorkspaceService {
   // ==================== Transform Helpers ====================
 
   /**
-   * Transform API response to Workspace type
+   * Transform proto Workspace to SDK Workspace type
    */
   private transformWorkspace(data: any): Workspace {
     return {
       id: data.id,
-      name: data.name,
-      nfsUrl: data.nfs_url,
-      metadata: data.metadata,
-      createdAt: data.created_at,
-      updatedAt: data.updated_at,
+      name: data.name || undefined,
+      nfsUrl: data.nfsUrl || undefined,
+      metadata: data.metadata || {},
+      createdAt: this.transformTimestamp(data.createdAt),
+      updatedAt: this.transformTimestamp(data.updatedAt),
     };
   }
 
   /**
-   * Transform API response to FileInfo type
+   * Transform proto FileInfo to SDK FileInfo type
    */
   private transformFileInfo(data: any): FileInfo {
     return {
       name: data.name,
       path: data.path,
-      type: data.type,
-      size: data.size,
-      modifiedAt: data.modified_at,
+      type: data.type as 'file' | 'directory' | 'symlink',
+      size: parseInt(data.size || '0', 10),
+      modifiedAt: data.modifiedAt ? this.transformTimestamp(data.modifiedAt) : undefined,
     };
+  }
+
+  /**
+   * Transform proto Timestamp to ISO string
+   */
+  private transformTimestamp(ts: any): string {
+    if (!ts) return new Date().toISOString();
+    if (ts.seconds) {
+      const ms = parseInt(ts.seconds, 10) * 1000 + Math.floor((ts.nanos || 0) / 1000000);
+      return new Date(ms).toISOString();
+    }
+    return new Date().toISOString();
   }
 }

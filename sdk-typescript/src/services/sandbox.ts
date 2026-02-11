@@ -1,73 +1,165 @@
 /**
- * Sandbox service for managing sandbox lifecycle
+ * Sandbox service for managing sandbox lifecycle via gRPC
  */
 
-import { AxiosInstance } from 'axios';
-import { Sandbox, CreateSandboxParams } from '../types';
+import * as grpc from '@grpc/grpc-js';
+import { Sandbox, CreateSandboxParams, SandboxState } from '../types';
+import { SandboxServiceClient, createMetadata, promisifyUnary } from '../grpc';
+import { convertGrpcError } from '../errors';
+
+// Proto SandboxState enum values
+const SANDBOX_STATE_MAP: Record<string, SandboxState> = {
+  'SANDBOX_STATE_STARTING': 'starting',
+  'SANDBOX_STATE_RUNNING': 'running',
+  'SANDBOX_STATE_STOPPING': 'stopping',
+  'SANDBOX_STATE_STOPPED': 'stopped',
+  'SANDBOX_STATE_ERROR': 'error',
+};
 
 /**
  * Service for managing sandboxes
  */
 export class SandboxService {
   constructor(
-    private readonly httpClient: AxiosInstance,
-    private readonly apiUrl: string
+    private readonly client: SandboxServiceClient,
+    private readonly apiKey?: string
   ) {}
+
+  private metadata(): grpc.Metadata {
+    return createMetadata(this.apiKey);
+  }
 
   /**
    * Create a new sandbox bound to a workspace
    */
   async create(params: CreateSandboxParams): Promise<Sandbox> {
-    const response = await this.httpClient.post('/sandboxes', {
-      workspace_id: params.workspaceId,
-      template: params.template,
-      name: params.name,
-      env: params.env,
-      metadata: params.metadata,
-      timeout: params.timeout,
-    });
-    return this.transformSandbox(response.data);
+    try {
+      const request: any = {
+        workspaceId: params.workspaceId,
+        env: params.env || {},
+        metadata: params.metadata || {},
+      };
+      if (params.template) request.template = params.template;
+      if (params.name) request.name = params.name;
+      if (params.timeout) request.timeout = params.timeout;
+
+      const response = await promisifyUnary(
+        this.client,
+        this.client.createSandbox,
+        request,
+        this.metadata()
+      );
+      return this.transformSandbox(response.sandbox);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Get a sandbox by ID
    */
   async get(id: string): Promise<Sandbox> {
-    const response = await this.httpClient.get(`/sandboxes/${id}`);
-    return this.transformSandbox(response.data);
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.getSandbox,
+        { id },
+        this.metadata()
+      );
+      return this.transformSandbox(response.sandbox);
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * List all sandboxes
    */
   async list(): Promise<Sandbox[]> {
-    const response = await this.httpClient.get('/sandboxes');
-    return response.data.sandboxes.map((s: any) => this.transformSandbox(s));
+    try {
+      const response = await promisifyUnary(
+        this.client,
+        this.client.listSandboxes,
+        {},
+        this.metadata()
+      );
+      return (response.sandboxes || []).map((s: any) => this.transformSandbox(s));
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Delete a sandbox
    */
-  async delete(id: string): Promise<void> {
-    await this.httpClient.delete(`/sandboxes/${id}`);
+  async delete(id: string, force: boolean = false): Promise<void> {
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.deleteSandbox,
+        { id, force },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
-   * Transform API response to Sandbox type
+   * Check if a sandbox exists
+   */
+  async exists(id: string): Promise<boolean> {
+    try {
+      await this.get(id);
+      return true;
+    } catch (error) {
+      if ((error as any).code === 'NOT_FOUND') {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Transform proto Sandbox to SDK Sandbox type
    */
   private transformSandbox(data: any): Sandbox {
     return {
       id: data.id,
-      workspaceId: data.workspace_id,
-      name: data.name,
+      workspaceId: data.workspaceId,
+      name: data.name || undefined,
       template: data.template,
-      state: data.state,
-      env: data.env,
-      metadata: data.metadata,
-      createdAt: data.created_at,
-      updatedAt: data.updated_at,
-      timeout: data.timeout,
-      errorMessage: data.error_message,
+      state: this.transformState(data.state),
+      env: data.env || {},
+      metadata: data.metadata || {},
+      createdAt: this.transformTimestamp(data.createdAt),
+      updatedAt: this.transformTimestamp(data.updatedAt),
+      timeout: data.timeout ? parseInt(data.timeout, 10) : undefined,
+      errorMessage: data.errorMessage || undefined,
     };
+  }
+
+  /**
+   * Transform proto SandboxState to SDK SandboxState
+   */
+  private transformState(state: string | number): SandboxState {
+    if (typeof state === 'string') {
+      return SANDBOX_STATE_MAP[state] || 'starting';
+    }
+    // Handle numeric enum values (proto3 enum: 0=UNSPECIFIED, 1=STARTING, 2=RUNNING, etc.)
+    const stateNames = ['starting', 'starting', 'running', 'stopping', 'stopped', 'error'];
+    return (stateNames[state] as SandboxState) || 'starting';
+  }
+
+  /**
+   * Transform proto Timestamp to ISO string
+   */
+  private transformTimestamp(ts: any): string {
+    if (!ts) return new Date().toISOString();
+    if (ts.seconds) {
+      const ms = parseInt(ts.seconds, 10) * 1000 + Math.floor((ts.nanos || 0) / 1000000);
+      return new Date(ms).toISOString();
+    }
+    return new Date().toISOString();
   }
 }

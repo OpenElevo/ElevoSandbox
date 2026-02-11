@@ -1,86 +1,67 @@
 /**
- * Workspace Client - Main entry point for the SDK
+ * Workspace SDK Client - Main entry point for SDK usage via gRPC
  */
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import * as grpc from '@grpc/grpc-js';
+import { createClients } from './grpc';
 import { WorkspaceService } from './services/workspace';
 import { SandboxService } from './services/sandbox';
 import { ProcessService } from './services/process';
 import { PtyService } from './services/pty';
-import { NfsService } from './services/nfs';
-import { WorkspaceError, parseErrorResponse } from './errors';
 
 /**
- * Options for creating a WorkspaceClient
+ * Client options
  */
-export interface WorkspaceClientOptions {
-  /** Base URL of the workspace server */
-  apiUrl: string;
-  /** API key for authentication (optional) */
+export interface ClientOptions {
+  /** API key for authentication */
   apiKey?: string;
-  /** Request timeout in milliseconds (default: 30000) */
-  timeout?: number;
-  /** NFS server host for mounting workspaces (optional) */
-  nfsHost?: string;
-  /** NFS server port (default: 2049) */
-  nfsPort?: number;
+  /** gRPC credentials (defaults to insecure) */
+  credentials?: grpc.ChannelCredentials;
 }
 
 /**
- * Main client for interacting with the Workspace service
+ * Main client for interacting with the Workspace service via gRPC
  */
 export class WorkspaceClient {
-  private readonly httpClient: AxiosInstance;
-  private readonly options: WorkspaceClientOptions;
-
-  /** Workspace service for managing workspaces and file operations */
+  /** Workspace management service */
   public readonly workspace: WorkspaceService;
-  /** Sandbox service for managing sandboxes */
+  /** Sandbox management service */
   public readonly sandbox: SandboxService;
-  /** Process service for executing commands */
+  /** Process execution service */
   public readonly process: ProcessService;
-  /** PTY service for interactive terminals */
+  /** PTY terminal service */
   public readonly pty: PtyService;
-  /** NFS service for mounting workspaces */
-  public readonly nfs: NfsService;
 
-  constructor(options: WorkspaceClientOptions) {
-    this.options = {
-      timeout: 30000,
-      ...options,
-    };
+  private readonly clients: ReturnType<typeof createClients>;
 
-    // Create HTTP client
-    this.httpClient = axios.create({
-      baseURL: `${this.options.apiUrl}/api/v1`,
-      timeout: this.options.timeout,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.options.apiKey && { 'Authorization': `Bearer ${this.options.apiKey}` }),
-      },
-    });
+  /**
+   * Create a new WorkspaceClient
+   *
+   * @param serverAddr - gRPC server address (e.g., "localhost:9090")
+   * @param options - Client options
+   */
+  constructor(serverAddr: string, options: ClientOptions = {}) {
+    const credentials = options.credentials || grpc.credentials.createInsecure();
+    this.clients = createClients(serverAddr, credentials);
 
-    // Add error interceptor
-    this.httpClient.interceptors.response.use(
-      (response) => response,
-      (error: AxiosError) => {
-        throw parseErrorResponse(error);
-      }
-    );
-
-    // Initialize services
-    this.workspace = new WorkspaceService(this.httpClient, this.options.apiUrl);
-    this.sandbox = new SandboxService(this.httpClient, this.options.apiUrl);
-    this.process = new ProcessService(this.httpClient, this.options.apiUrl);
-    this.pty = new PtyService(this.httpClient, this.options.apiUrl);
-    this.nfs = new NfsService(this.options.nfsHost, this.options.nfsPort ?? 2049);
+    this.workspace = new WorkspaceService(this.clients.workspace, options.apiKey);
+    this.sandbox = new SandboxService(this.clients.sandbox, options.apiKey);
+    this.process = new ProcessService(this.clients.process, options.apiKey);
+    this.pty = new PtyService(this.clients.pty, options.apiKey);
   }
 
   /**
-   * Check if the server is healthy
+   * Close all gRPC connections
    */
-  async health(): Promise<{ status: string; version: string }> {
-    const response = await this.httpClient.get('/health');
-    return response.data;
+  close(): void {
+    this.clients.workspace.close();
+    this.clients.sandbox.close();
+    this.clients.process.close();
+    this.clients.pty.close();
   }
 }
+
+// Re-export types
+export * from './types';
+export * from './errors';
+export { PtySession } from './services/pty';

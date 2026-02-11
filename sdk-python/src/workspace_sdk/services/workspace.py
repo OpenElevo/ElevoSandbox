@@ -1,316 +1,202 @@
 """
-Workspace service for managing workspaces and file operations
+Workspace service for managing workspaces and file operations via gRPC
 """
 
 from typing import Optional, List
-import httpx
+from datetime import datetime
+
+import grpc
 
 from workspace_sdk.types import Workspace, CreateWorkspaceParams, FileInfo
+from workspace_sdk.errors import convert_grpc_error, WorkspaceError
+from workspace_sdk.proto.workspace.v1 import workspace_pb2, workspace_pb2_grpc
 
 
-class AsyncWorkspaceService:
-    """Async service for managing workspaces and file operations"""
-
-    def __init__(self, client: httpx.AsyncClient, api_url: str):
-        self._client = client
-        self._api_url = api_url
-
-    # ==================== Workspace CRUD ====================
-
-    async def create(self, params: Optional[CreateWorkspaceParams] = None) -> Workspace:
-        """Create a new workspace"""
-        data = {}
-        if params:
-            if params.name:
-                data["name"] = params.name
-            if params.metadata:
-                data["metadata"] = params.metadata
-
-        response = await self._client.post("/workspaces", json=data)
-        response.raise_for_status()
-        return self._transform_workspace(response.json())
-
-    async def get(self, workspace_id: str) -> Workspace:
-        """Get a workspace by ID"""
-        response = await self._client.get(f"/workspaces/{workspace_id}")
-        response.raise_for_status()
-        return self._transform_workspace(response.json())
-
-    async def list(self) -> List[Workspace]:
-        """List all workspaces"""
-        response = await self._client.get("/workspaces")
-        response.raise_for_status()
-        data = response.json()
-        return [self._transform_workspace(w) for w in data.get("workspaces", [])]
-
-    async def delete(self, workspace_id: str) -> None:
-        """Delete a workspace"""
-        response = await self._client.delete(f"/workspaces/{workspace_id}")
-        response.raise_for_status()
-
-    # ==================== File Operations ====================
-
-    async def read_file(self, workspace_id: str, path: str) -> str:
-        """Read a file from workspace"""
-        response = await self._client.get(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        return response.json()["content"]
-
-    async def read_file_bytes(self, workspace_id: str, path: str) -> bytes:
-        """Read a file as bytes from workspace"""
-        response = await self._client.get(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path},
-        )
-        response.raise_for_status()
-        return response.content
-
-    async def write_file(self, workspace_id: str, path: str, content: str | bytes) -> None:
-        """Write a file to workspace"""
-        if isinstance(content, bytes):
-            content = content.decode('utf-8')
-        response = await self._client.put(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path},
-            json={"content": content}
-        )
-        response.raise_for_status()
-
-    async def mkdir(self, workspace_id: str, path: str) -> None:
-        """Create a directory in workspace"""
-        response = await self._client.post(
-            f"/workspaces/{workspace_id}/files/mkdir",
-            json={"path": path}
-        )
-        response.raise_for_status()
-
-    async def list_files(self, workspace_id: str, path: str) -> List[FileInfo]:
-        """List directory contents in workspace"""
-        response = await self._client.get(
-            f"/workspaces/{workspace_id}/files/list",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [self._transform_file_info(f) for f in data.get("files", [])]
-
-    async def delete_file(self, workspace_id: str, path: str, recursive: bool = False) -> None:
-        """Delete a file or directory in workspace"""
-        response = await self._client.delete(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path, "recursive": "true" if recursive else "false"}
-        )
-        response.raise_for_status()
-
-    async def move_file(self, workspace_id: str, source: str, destination: str) -> None:
-        """Move/rename a file or directory in workspace"""
-        response = await self._client.post(
-            f"/workspaces/{workspace_id}/files/move",
-            json={"source": source, "destination": destination}
-        )
-        response.raise_for_status()
-
-    async def copy_file(self, workspace_id: str, source: str, destination: str) -> None:
-        """Copy a file or directory in workspace"""
-        response = await self._client.post(
-            f"/workspaces/{workspace_id}/files/copy",
-            json={"source": source, "destination": destination}
-        )
-        response.raise_for_status()
-
-    async def get_file_info(self, workspace_id: str, path: str) -> FileInfo:
-        """Get file information in workspace"""
-        response = await self._client.get(
-            f"/workspaces/{workspace_id}/files/info",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        return self._transform_file_info(response.json())
-
-    async def exists(self, workspace_id: str, path: str) -> bool:
-        """Check if a file or directory exists in workspace"""
-        try:
-            await self.get_file_info(workspace_id, path)
-            return True
-        except Exception:
-            return False
-
-    # ==================== Transform Helpers ====================
-
-    def _transform_workspace(self, data: dict) -> Workspace:
-        """Transform API response to Workspace type"""
-        return Workspace(
-            id=data["id"],
-            name=data.get("name"),
-            nfs_url=data.get("nfs_url"),
-            metadata=data.get("metadata"),
-            created_at=data["created_at"],
-            updated_at=data["updated_at"],
-        )
-
-    def _transform_file_info(self, data: dict) -> FileInfo:
-        """Transform API response to FileInfo type"""
-        return FileInfo(
-            name=data["name"],
-            path=data["path"],
-            type=data["type"],
-            size=data["size"],
-            modified_at=data.get("modified_at"),
-        )
+def _create_metadata(api_key: Optional[str]) -> List[tuple]:
+    """Create gRPC metadata with auth token"""
+    if api_key:
+        return [("authorization", f"Bearer {api_key}")]
+    return []
 
 
 class WorkspaceService:
-    """Sync service for managing workspaces and file operations"""
+    """Sync service for managing workspaces and file operations via gRPC"""
 
-    def __init__(self, client: httpx.Client, api_url: str):
-        self._client = client
-        self._api_url = api_url
+    def __init__(
+        self,
+        stub: workspace_pb2_grpc.WorkspaceServiceStub,
+        api_key: Optional[str],
+        timeout: float,
+    ):
+        self._stub = stub
+        self._api_key = api_key
+        self._timeout = timeout
+
+    def _metadata(self) -> List[tuple]:
+        return _create_metadata(self._api_key)
 
     # ==================== Workspace CRUD ====================
 
     def create(self, params: Optional[CreateWorkspaceParams] = None) -> Workspace:
         """Create a new workspace"""
-        data = {}
+        req = workspace_pb2.CreateWorkspaceRequest()
         if params:
             if params.name:
-                data["name"] = params.name
+                req.name = params.name
             if params.metadata:
-                data["metadata"] = params.metadata
+                req.metadata.update(params.metadata)
 
-        response = self._client.post("/workspaces", json=data)
-        response.raise_for_status()
-        return self._transform_workspace(response.json())
+        try:
+            resp = self._stub.CreateWorkspace(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return self._transform_workspace(resp.workspace)
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def get(self, workspace_id: str) -> Workspace:
         """Get a workspace by ID"""
-        response = self._client.get(f"/workspaces/{workspace_id}")
-        response.raise_for_status()
-        return self._transform_workspace(response.json())
+        req = workspace_pb2.GetWorkspaceRequest(id=workspace_id)
+        try:
+            resp = self._stub.GetWorkspace(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return self._transform_workspace(resp.workspace)
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def list(self) -> List[Workspace]:
         """List all workspaces"""
-        response = self._client.get("/workspaces")
-        response.raise_for_status()
-        data = response.json()
-        return [self._transform_workspace(w) for w in data.get("workspaces", [])]
+        req = workspace_pb2.ListWorkspacesRequest()
+        try:
+            resp = self._stub.ListWorkspaces(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return [self._transform_workspace(w) for w in resp.workspaces]
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def delete(self, workspace_id: str) -> None:
         """Delete a workspace"""
-        response = self._client.delete(f"/workspaces/{workspace_id}")
-        response.raise_for_status()
+        req = workspace_pb2.DeleteWorkspaceRequest(id=workspace_id)
+        try:
+            self._stub.DeleteWorkspace(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     # ==================== File Operations ====================
 
     def read_file(self, workspace_id: str, path: str) -> str:
         """Read a file from workspace"""
-        response = self._client.get(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        return response.json()["content"]
+        req = workspace_pb2.ReadFileRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = self._stub.ReadFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return resp.content.decode("utf-8") if isinstance(resp.content, bytes) else resp.content
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def read_file_bytes(self, workspace_id: str, path: str) -> bytes:
         """Read a file as bytes from workspace"""
-        response = self._client.get(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path},
-        )
-        response.raise_for_status()
-        return response.content
+        req = workspace_pb2.ReadFileRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = self._stub.ReadFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return resp.content if isinstance(resp.content, bytes) else resp.content.encode("utf-8")
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def write_file(self, workspace_id: str, path: str, content: str | bytes) -> None:
         """Write a file to workspace"""
-        if isinstance(content, bytes):
-            content = content.decode('utf-8')
-        response = self._client.put(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path},
-            json={"content": content}
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        req = workspace_pb2.WriteFileRequest(
+            workspace_id=workspace_id, path=path, content=content
         )
-        response.raise_for_status()
+        try:
+            self._stub.WriteFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def mkdir(self, workspace_id: str, path: str) -> None:
         """Create a directory in workspace"""
-        response = self._client.post(
-            f"/workspaces/{workspace_id}/files/mkdir",
-            json={"path": path}
+        req = workspace_pb2.CreateDirectoryRequest(
+            workspace_id=workspace_id, path=path
         )
-        response.raise_for_status()
+        try:
+            self._stub.CreateDirectory(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def list_files(self, workspace_id: str, path: str) -> List[FileInfo]:
         """List directory contents in workspace"""
-        response = self._client.get(
-            f"/workspaces/{workspace_id}/files/list",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        data = response.json()
-        return [self._transform_file_info(f) for f in data.get("files", [])]
+        req = workspace_pb2.ListFilesRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = self._stub.ListFiles(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return [self._transform_file_info(f) for f in resp.files]
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def delete_file(self, workspace_id: str, path: str, recursive: bool = False) -> None:
         """Delete a file or directory in workspace"""
-        response = self._client.delete(
-            f"/workspaces/{workspace_id}/files",
-            params={"path": path, "recursive": "true" if recursive else "false"}
+        req = workspace_pb2.DeleteFileRequest(
+            workspace_id=workspace_id, path=path, recursive=recursive
         )
-        response.raise_for_status()
-
-    def move_file(self, workspace_id: str, source: str, destination: str) -> None:
-        """Move/rename a file or directory in workspace"""
-        response = self._client.post(
-            f"/workspaces/{workspace_id}/files/move",
-            json={"source": source, "destination": destination}
-        )
-        response.raise_for_status()
-
-    def copy_file(self, workspace_id: str, source: str, destination: str) -> None:
-        """Copy a file or directory in workspace"""
-        response = self._client.post(
-            f"/workspaces/{workspace_id}/files/copy",
-            json={"source": source, "destination": destination}
-        )
-        response.raise_for_status()
-
-    def get_file_info(self, workspace_id: str, path: str) -> FileInfo:
-        """Get file information in workspace"""
-        response = self._client.get(
-            f"/workspaces/{workspace_id}/files/info",
-            params={"path": path}
-        )
-        response.raise_for_status()
-        return self._transform_file_info(response.json())
+        try:
+            self._stub.DeleteFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
 
     def exists(self, workspace_id: str, path: str) -> bool:
         """Check if a file or directory exists in workspace"""
         try:
-            self.get_file_info(workspace_id, path)
+            self.list_files(workspace_id, path)
             return True
-        except Exception:
+        except WorkspaceError:
             return False
 
     # ==================== Transform Helpers ====================
 
-    def _transform_workspace(self, data: dict) -> Workspace:
-        """Transform API response to Workspace type"""
+    def _transform_workspace(self, ws) -> Workspace:
+        """Transform proto Workspace to SDK Workspace type"""
+        created_at = None
+        updated_at = None
+        if ws.created_at:
+            created_at = ws.created_at.ToDatetime().isoformat()
+        if ws.updated_at:
+            updated_at = ws.updated_at.ToDatetime().isoformat()
+
         return Workspace(
-            id=data["id"],
-            name=data.get("name"),
-            nfs_url=data.get("nfs_url"),
-            metadata=data.get("metadata"),
-            created_at=data["created_at"],
-            updated_at=data["updated_at"],
+            id=ws.id,
+            name=ws.name if ws.HasField("name") else None,
+            nfs_url=ws.nfs_url if ws.HasField("nfs_url") else None,
+            metadata=dict(ws.metadata) if ws.metadata else None,
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
-    def _transform_file_info(self, data: dict) -> FileInfo:
-        """Transform API response to FileInfo type"""
+    def _transform_file_info(self, f) -> FileInfo:
+        """Transform proto FileInfo to SDK FileInfo type"""
+        modified_at = None
+        if f.modified_at:
+            modified_at = f.modified_at.ToDatetime().isoformat()
+
         return FileInfo(
-            name=data["name"],
-            path=data["path"],
-            type=data["type"],
-            size=data["size"],
-            modified_at=data.get("modified_at"),
+            name=f.name,
+            path=f.path,
+            type=f.type,
+            size=f.size,
+            modified_at=modified_at,
         )

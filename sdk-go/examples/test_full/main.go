@@ -1,7 +1,6 @@
 // Full SDK test for Elevo Workspace Go SDK.
 //
 // This script tests all major SDK functionality including:
-// - Health check
 // - Workspace CRUD
 // - Sandbox management
 // - Command execution
@@ -14,13 +13,12 @@
 //
 // Flags:
 //
-//	-server string  HTTP server URL (default "http://localhost:8080")
-//	-grpc string    gRPC server URL (default: derived from server)
+//	-server string  gRPC server address (default "localhost:9090")
 //	-token string   FUSE API token (default "test-token")
 //
 // Example:
 //
-//	go run examples/test_full/main.go -server http://localhost:8080
+//	go run examples/test_full/main.go -server localhost:9090
 package main
 
 import (
@@ -30,35 +28,29 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
 )
 
 var (
-	serverURL = flag.String("server", "http://localhost:8080", "HTTP server URL")
-	grpcURL   = flag.String("grpc", "", "gRPC server URL (default: derived from server)")
-	fuseToken = flag.String("token", "", "FUSE API token (optional, empty means no auth)")
+	serverAddr = flag.String("server", "localhost:9090", "gRPC server address")
+	fuseToken  = flag.String("token", "", "FUSE API token (optional, empty means no auth)")
 )
 
 func main() {
 	flag.Parse()
 
-	// Derive gRPC URL from HTTP URL if not specified
-	grpc := *grpcURL
-	if grpc == "" {
-		grpc = strings.Replace(*serverURL, ":8080", ":9090", 1)
-		grpc = strings.Replace(grpc, ":8081", ":9090", 1)
-	}
-
 	fmt.Println("=== Go SDK Test ===")
-	fmt.Printf("Server: %s\n", *serverURL)
-	fmt.Printf("gRPC: %s\n\n", grpc)
+	fmt.Printf("Server: %s\n\n", *serverAddr)
 
-	client := workspace.NewClient(*serverURL, workspace.ClientOptions{
+	client, err := workspace.NewClient(*serverAddr, workspace.ClientOptions{
 		Timeout: 60 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 
 	ctx := context.Background()
 
@@ -69,27 +61,18 @@ func main() {
 	}()
 
 	// Run tests
-	testHealth(ctx, client)
 	workspaceID = testWorkspace(ctx, client)
 	sandboxID = testSandbox(ctx, client, workspaceID)
 	testCommand(ctx, client, sandboxID)
 	testShell(ctx, client, sandboxID)
 	testDirectoryListing(ctx, client, sandboxID)
-	testFuse(ctx, grpc, *serverURL, *fuseToken, workspaceID)
+	testFuse(ctx, *serverAddr, *fuseToken, workspaceID)
 
 	fmt.Println("\n=== All tests passed! ===")
 }
 
-func testHealth(ctx context.Context, client *workspace.Client) {
-	fmt.Println("1. Health check...")
-	if err := client.Health(ctx); err != nil {
-		log.Fatalf("Health check failed: %v", err)
-	}
-	fmt.Println("   OK")
-}
-
 func testWorkspace(ctx context.Context, client *workspace.Client) string {
-	fmt.Println("2. Creating workspace...")
+	fmt.Println("1. Creating workspace...")
 	ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
 		Name: "go-sdk-test",
 	})
@@ -101,10 +84,11 @@ func testWorkspace(ctx context.Context, client *workspace.Client) string {
 }
 
 func testSandbox(ctx context.Context, client *workspace.Client, workspaceID string) string {
-	fmt.Println("3. Creating sandbox...")
+	fmt.Println("2. Creating sandbox...")
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
 		WorkspaceID: workspaceID,
 		Name:        "go-sdk-test-sandbox",
+		Template:    "workspace-test:latest",
 	})
 	if err != nil {
 		log.Fatalf("Failed to create sandbox: %v", err)
@@ -114,7 +98,7 @@ func testSandbox(ctx context.Context, client *workspace.Client, workspaceID stri
 }
 
 func testCommand(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("4. Running command...")
+	fmt.Println("3. Running command...")
 	result, err := client.Process.Run(ctx, sandboxID, "echo", &workspace.RunCommandOptions{
 		Args: []string{"Hello", "from", "Go", "SDK!"},
 	})
@@ -126,7 +110,7 @@ func testCommand(ctx context.Context, client *workspace.Client, sandboxID string
 }
 
 func testShell(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("5. File operations via shell...")
+	fmt.Println("4. File operations via shell...")
 	result, err := client.Process.Shell(ctx, sandboxID, `
 		echo "Hello from Go SDK" > /workspace/test.txt
 		cat /workspace/test.txt
@@ -139,7 +123,7 @@ func testShell(ctx context.Context, client *workspace.Client, sandboxID string) 
 }
 
 func testDirectoryListing(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("6. Listing workspace directory...")
+	fmt.Println("5. Listing workspace directory...")
 	result, err := client.Process.Run(ctx, sandboxID, "ls", &workspace.RunCommandOptions{
 		Args: []string{"-la", "/workspace"},
 	})
@@ -150,8 +134,8 @@ func testDirectoryListing(ctx context.Context, client *workspace.Client, sandbox
 	fmt.Println("   OK")
 }
 
-func testFuse(ctx context.Context, grpcURL, httpURL, token, workspaceID string) {
-	fmt.Println("7. Testing FUSE mount...")
+func testFuse(ctx context.Context, grpcAddr, token, workspaceID string) {
+	fmt.Println("6. Testing FUSE mount...")
 
 	if !workspace.FuseIsAvailable() {
 		fmt.Println("   FUSE not available on this system, skipping...")
@@ -159,7 +143,7 @@ func testFuse(ctx context.Context, grpcURL, httpURL, token, workspaceID string) 
 	}
 
 	fmt.Println("   Creating FUSE service...")
-	fuseService := workspace.NewFuseService(grpcURL, token, "", "", httpURL)
+	fuseService := workspace.NewFuseService(grpcAddr, token, "", "", "")
 
 	fmt.Println("   Mounting workspace...")
 	mount, err := fuseService.Mount(workspaceID, workspace.FuseMountServiceOptions{

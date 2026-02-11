@@ -7,8 +7,8 @@ import (
 // Workspace represents a workspace instance
 type Workspace struct {
 	ID        string            `json:"id"`
-	Name      *string           `json:"name,omitempty"`
-	NfsURL    *string           `json:"nfs_url,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	NfsURL    string            `json:"nfs_url,omitempty"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
@@ -30,8 +30,10 @@ type ListWorkspacesResponse struct {
 type SandboxState string
 
 const (
+	SandboxStateUnknown  SandboxState = "unknown"
 	SandboxStateStarting SandboxState = "starting"
 	SandboxStateRunning  SandboxState = "running"
+	SandboxStateStopping SandboxState = "stopping"
 	SandboxStateStopped  SandboxState = "stopped"
 	SandboxStateFailed   SandboxState = "failed"
 )
@@ -40,14 +42,14 @@ const (
 type Sandbox struct {
 	ID           string            `json:"id"`
 	WorkspaceID  string            `json:"workspace_id"`
-	Name         *string           `json:"name,omitempty"`
+	Name         string            `json:"name,omitempty"`
 	Template     string            `json:"template"`
 	State        SandboxState      `json:"state"`
 	Env          map[string]string `json:"env,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
-	Timeout      int               `json:"timeout,omitempty"`
+	Timeout      int64             `json:"timeout,omitempty"`
 	ErrorMessage *string           `json:"error_message,omitempty"`
 }
 
@@ -58,7 +60,7 @@ type CreateSandboxParams struct {
 	Name        string            `json:"name,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
-	Timeout     int               `json:"timeout,omitempty"`
+	Timeout     int64             `json:"timeout,omitempty"`
 }
 
 // CommandResult contains the result of a command execution
@@ -80,10 +82,10 @@ type RunCommandOptions struct {
 type ProcessEventType string
 
 const (
-	ProcessEventStdout ProcessEventType = "stdout"
-	ProcessEventStderr ProcessEventType = "stderr"
-	ProcessEventExit   ProcessEventType = "exit"
-	ProcessEventError  ProcessEventType = "error"
+	ProcessEventTypeStdout ProcessEventType = "stdout"
+	ProcessEventTypeStderr ProcessEventType = "stderr"
+	ProcessEventTypeExit   ProcessEventType = "exit"
+	ProcessEventTypeError  ProcessEventType = "error"
 )
 
 // ProcessEvent represents an event from a streaming process
@@ -104,20 +106,19 @@ type PtyHandle struct {
 
 // PtyOptions contains options for creating a PTY
 type PtyOptions struct {
-	Cols    int               `json:"cols,omitempty"`
-	Rows    int               `json:"rows,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Command string            `json:"command,omitempty"`
+	Cols  int               `json:"cols,omitempty"`
+	Rows  int               `json:"rows,omitempty"`
+	Env   map[string]string `json:"env,omitempty"`
+	Shell string            `json:"shell,omitempty"`
 }
 
 // FileInfo represents information about a file
 type FileInfo struct {
-	Name    string    `json:"name"`
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	Mode    string    `json:"mode"`
-	ModTime time.Time `json:"mod_time"`
-	IsDir   bool      `json:"is_dir"`
+	Name       string     `json:"name"`
+	Path       string     `json:"path"`
+	Type       string     `json:"type"`
+	Size       int64      `json:"size"`
+	ModifiedAt *time.Time `json:"modified_at,omitempty"`
 }
 
 // ListSandboxesResponse represents the response from listing sandboxes

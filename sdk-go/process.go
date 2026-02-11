@@ -1,27 +1,16 @@
 package workspace
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
-	"strings"
+	"io"
+
+	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
 )
 
 // ProcessService provides operations for executing commands in sandboxes
 type ProcessService struct {
 	client *Client
-}
-
-// runRequest is the request body for running a command
-type runRequest struct {
-	Command string            `json:"command"`
-	Args    []string          `json:"args,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	Cwd     string            `json:"cwd,omitempty"`
-	Timeout int               `json:"timeout,omitempty"`
 }
 
 // Run executes a command and waits for it to complete
@@ -30,12 +19,22 @@ func (p *ProcessService) Run(ctx context.Context, sandboxID string, command stri
 		opts = &RunCommandOptions{}
 	}
 
-	req := runRequest{
-		Command: command,
-		Args:    opts.Args,
-		Env:     opts.Env,
-		Cwd:     opts.Cwd,
-		Timeout: opts.Timeout,
+	var timeoutMs *uint64
+	if opts.Timeout > 0 {
+		t := uint64(opts.Timeout)
+		timeoutMs = &t
+	}
+
+	req := &pb.RunCommandRequest{
+		SandboxId: sandboxID,
+		Command:   command,
+		Args:      opts.Args,
+		Env:       opts.Env,
+		TimeoutMs: timeoutMs,
+	}
+
+	if opts.Cwd != "" {
+		req.Cwd = &opts.Cwd
 	}
 
 	if req.Args == nil {
@@ -45,22 +44,19 @@ func (p *ProcessService) Run(ctx context.Context, sandboxID string, command stri
 		req.Env = map[string]string{}
 	}
 
-	var result struct {
-		ExitCode int    `json:"exit_code"`
-		Stdout   string `json:"stdout"`
-		Stderr   string `json:"stderr"`
+	resp, err := p.client.processClient.RunCommand(p.client.withAuth(ctx), req)
+	if err != nil {
+		return nil, convertGrpcError(err)
 	}
 
-	path := fmt.Sprintf("/sandboxes/%s/process/run", sandboxID)
-	err := p.client.doRequest(ctx, http.MethodPost, path, req, &result)
-	if err != nil {
-		return nil, err
+	if resp.Result == nil {
+		return nil, fmt.Errorf("no result in response")
 	}
 
 	return &CommandResult{
-		ExitCode: result.ExitCode,
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
+		ExitCode: int(resp.Result.ExitCode),
+		Stdout:   resp.Result.Stdout,
+		Stderr:   resp.Result.Stderr,
 	}, nil
 }
 
@@ -77,88 +73,48 @@ func (p *ProcessService) RunStream(ctx context.Context, sandboxID string, comman
 			opts = &RunCommandOptions{}
 		}
 
-		// Build URL with query parameters
-		params := url.Values{}
-		params.Set("command", command)
-		if opts.Args != nil {
-			argsJSON, _ := json.Marshal(opts.Args)
-			params.Set("args", string(argsJSON))
-		} else {
-			params.Set("args", "[]")
-		}
-		if opts.Env != nil {
-			envJSON, _ := json.Marshal(opts.Env)
-			params.Set("env", string(envJSON))
-		} else {
-			params.Set("env", "{}")
-		}
-		if opts.Cwd != "" {
-			params.Set("cwd", opts.Cwd)
-		}
+		var timeoutMs *uint64
 		if opts.Timeout > 0 {
-			params.Set("timeout", fmt.Sprintf("%d", opts.Timeout))
+			t := uint64(opts.Timeout)
+			timeoutMs = &t
 		}
 
-		streamURL := fmt.Sprintf("%s/api/v1/sandboxes/%s/process/run/stream?%s",
-			p.client.apiURL, sandboxID, params.Encode())
+		req := &pb.RunCommandRequest{
+			SandboxId: sandboxID,
+			Command:   command,
+			Args:      opts.Args,
+			Env:       opts.Env,
+			TimeoutMs: timeoutMs,
+		}
 
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, streamURL, nil)
+		if opts.Cwd != "" {
+			req.Cwd = &opts.Cwd
+		}
+
+		if req.Args == nil {
+			req.Args = []string{}
+		}
+		if req.Env == nil {
+			req.Env = map[string]string{}
+		}
+
+		stream, err := p.client.processClient.RunCommandStream(p.client.withAuth(ctx), req)
 		if err != nil {
-			errCh <- fmt.Errorf("failed to create request: %w", err)
+			errCh <- convertGrpcError(err)
 			return
 		}
 
-		req.Header.Set("Accept", "text/event-stream")
-		if p.client.apiKey != "" {
-			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", p.client.apiKey))
-		}
-
-		resp, err := p.client.httpClient.Do(req)
-		if err != nil {
-			errCh <- &ConnectionError{URL: streamURL, Message: err.Error()}
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode >= 400 {
-			errCh <- &Error{
-				StatusCode: resp.StatusCode,
-				Message:    fmt.Sprintf("stream request failed: %s", resp.Status),
-			}
-			return
-		}
-
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
+		for {
+			event, err := stream.Recv()
+			if err == io.EOF {
 				return
-			default:
+			}
+			if err != nil {
+				errCh <- convertGrpcError(err)
+				return
 			}
 
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-
-			data := strings.TrimPrefix(line, "data: ")
-			var event struct {
-				Type    string `json:"type"`
-				Data    string `json:"data,omitempty"`
-				Code    *int   `json:"code,omitempty"`
-				Message string `json:"message,omitempty"`
-			}
-
-			if err := json.Unmarshal([]byte(data), &event); err != nil {
-				continue
-			}
-
-			processEvent := ProcessEvent{
-				Type:    ProcessEventType(event.Type),
-				Data:    event.Data,
-				Code:    event.Code,
-				Message: event.Message,
-			}
+			processEvent := protoToProcessEvent(event)
 
 			select {
 			case eventCh <- processEvent:
@@ -166,14 +122,10 @@ func (p *ProcessService) RunStream(ctx context.Context, sandboxID string, comman
 				return
 			}
 
-			// Exit event signals end of stream
-			if event.Type == "exit" || event.Type == "error" {
+			// Exit or error event signals end of stream
+			if processEvent.Type == ProcessEventTypeExit || processEvent.Type == ProcessEventTypeError {
 				return
 			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			errCh <- fmt.Errorf("scanner error: %w", err)
 		}
 	}()
 
@@ -186,10 +138,19 @@ func (p *ProcessService) Kill(ctx context.Context, sandboxID string, pid int, si
 		signal = 15 // SIGTERM
 	}
 
-	req := map[string]int{"signal": signal}
-	path := fmt.Sprintf("/sandboxes/%s/process/%d/kill", sandboxID, pid)
+	sig := int32(signal)
+	req := &pb.KillProcessRequest{
+		SandboxId: sandboxID,
+		Pid:       uint32(pid),
+		Signal:    &sig,
+	}
 
-	return p.client.doRequest(ctx, http.MethodPost, path, req, nil)
+	_, err := p.client.processClient.KillProcess(p.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // Exec is a convenience method that runs a command and returns stdout
@@ -217,4 +178,38 @@ func (p *ProcessService) Shell(ctx context.Context, sandboxID string, script str
 		Args: []string{"-c", script},
 		Env:  env,
 	})
+}
+
+// ==================== Helper functions ====================
+
+func protoToProcessEvent(event *pb.ProcessEvent) ProcessEvent {
+	if event == nil || event.Event == nil {
+		return ProcessEvent{}
+	}
+
+	switch e := event.Event.(type) {
+	case *pb.ProcessEvent_Stdout:
+		return ProcessEvent{
+			Type: ProcessEventTypeStdout,
+			Data: e.Stdout.Data,
+		}
+	case *pb.ProcessEvent_Stderr:
+		return ProcessEvent{
+			Type: ProcessEventTypeStderr,
+			Data: e.Stderr.Data,
+		}
+	case *pb.ProcessEvent_Exit:
+		code := int(e.Exit.Code)
+		return ProcessEvent{
+			Type: ProcessEventTypeExit,
+			Code: &code,
+		}
+	case *pb.ProcessEvent_Error:
+		return ProcessEvent{
+			Type:    ProcessEventTypeError,
+			Message: e.Error.Message,
+		}
+	default:
+		return ProcessEvent{}
+	}
 }

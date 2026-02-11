@@ -2,9 +2,9 @@ package workspace
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/url"
+	"time"
+
+	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
 )
 
 // WorkspaceService provides operations for managing workspaces and file operations
@@ -20,45 +20,58 @@ func (w *WorkspaceService) Create(ctx context.Context, params *CreateWorkspacePa
 		params = &CreateWorkspaceParams{}
 	}
 
-	var workspace Workspace
-	err := w.client.doRequest(ctx, http.MethodPost, "/workspaces", params, &workspace)
-	if err != nil {
-		return nil, err
+	req := &pb.CreateWorkspaceRequest{
+		Metadata: params.Metadata,
 	}
 
-	return &workspace, nil
+	if params.Name != "" {
+		req.Name = &params.Name
+	}
+
+	resp, err := w.client.workspaceClient.CreateWorkspace(w.client.withAuth(ctx), req)
+	if err != nil {
+		return nil, convertGrpcError(err)
+	}
+
+	return protoToWorkspace(resp.Workspace), nil
 }
 
 // Get retrieves a workspace by ID
 func (w *WorkspaceService) Get(ctx context.Context, id string) (*Workspace, error) {
-	var workspace Workspace
-	err := w.client.doRequest(ctx, http.MethodGet, fmt.Sprintf("/workspaces/%s", id), nil, &workspace)
+	req := &pb.GetWorkspaceRequest{Id: id}
+
+	resp, err := w.client.workspaceClient.GetWorkspace(w.client.withAuth(ctx), req)
 	if err != nil {
-		return nil, err
+		return nil, convertGrpcError(err)
 	}
 
-	return &workspace, nil
+	return protoToWorkspace(resp.Workspace), nil
 }
 
 // List returns all workspaces
 func (w *WorkspaceService) List(ctx context.Context) ([]Workspace, error) {
-	var response ListWorkspacesResponse
-	err := w.client.doRequest(ctx, http.MethodGet, "/workspaces", nil, &response)
+	req := &pb.ListWorkspacesRequest{}
+
+	resp, err := w.client.workspaceClient.ListWorkspaces(w.client.withAuth(ctx), req)
 	if err != nil {
-		return nil, err
+		return nil, convertGrpcError(err)
 	}
 
-	return response.Workspaces, nil
+	workspaces := make([]Workspace, 0, len(resp.Workspaces))
+	for _, ws := range resp.Workspaces {
+		workspaces = append(workspaces, *protoToWorkspace(ws))
+	}
+
+	return workspaces, nil
 }
 
 // Delete deletes a workspace
 func (w *WorkspaceService) Delete(ctx context.Context, id string) error {
-	apiPath := fmt.Sprintf("/workspaces/%s", id)
+	req := &pb.DeleteWorkspaceRequest{Id: id}
 
-	var response DeleteResponse
-	err := w.client.doRequest(ctx, http.MethodDelete, apiPath, nil, &response)
+	_, err := w.client.workspaceClient.DeleteWorkspace(w.client.withAuth(ctx), req)
 	if err != nil {
-		return err
+		return convertGrpcError(err)
 	}
 
 	return nil
@@ -80,20 +93,17 @@ func (w *WorkspaceService) Exists(ctx context.Context, id string) (bool, error) 
 
 // ReadFile reads the content of a file from a workspace
 func (w *WorkspaceService) ReadFile(ctx context.Context, workspaceID, filePath string) ([]byte, error) {
-	params := url.Values{}
-	params.Set("path", filePath)
-
-	var result struct {
-		Content string `json:"content"`
+	req := &pb.ReadFileRequest{
+		WorkspaceId: workspaceID,
+		Path:        filePath,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files?%s", workspaceID, params.Encode())
-	err := w.client.doRequest(ctx, http.MethodGet, apiPath, nil, &result)
+	resp, err := w.client.workspaceClient.ReadFile(w.client.withAuth(ctx), req)
 	if err != nil {
-		return nil, err
+		return nil, convertGrpcError(err)
 	}
 
-	return []byte(result.Content), nil
+	return resp.Content, nil
 }
 
 // ReadFileString reads the content of a file as a string from a workspace
@@ -107,15 +117,18 @@ func (w *WorkspaceService) ReadFileString(ctx context.Context, workspaceID, file
 
 // WriteFile writes content to a file in a workspace
 func (w *WorkspaceService) WriteFile(ctx context.Context, workspaceID, filePath string, content []byte) error {
-	params := url.Values{}
-	params.Set("path", filePath)
-
-	req := map[string]string{
-		"content": string(content),
+	req := &pb.WriteFileRequest{
+		WorkspaceId: workspaceID,
+		Path:        filePath,
+		Content:     content,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files?%s", workspaceID, params.Encode())
-	return w.client.doRequest(ctx, http.MethodPut, apiPath, req, nil)
+	_, err := w.client.workspaceClient.WriteFile(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // WriteFileString writes a string to a file in a workspace
@@ -125,78 +138,100 @@ func (w *WorkspaceService) WriteFileString(ctx context.Context, workspaceID, fil
 
 // Mkdir creates a directory in a workspace
 func (w *WorkspaceService) Mkdir(ctx context.Context, workspaceID, dirPath string) error {
-	req := map[string]string{
-		"path": dirPath,
+	req := &pb.MkdirRequest{
+		WorkspaceId: workspaceID,
+		Path:        dirPath,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files/mkdir", workspaceID)
-	return w.client.doRequest(ctx, http.MethodPost, apiPath, req, nil)
+	_, err := w.client.workspaceClient.Mkdir(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // ListFiles lists files in a directory in a workspace
 func (w *WorkspaceService) ListFiles(ctx context.Context, workspaceID, dirPath string) ([]FileInfo, error) {
-	params := url.Values{}
-	params.Set("path", dirPath)
-
-	var result struct {
-		Files []FileInfo `json:"files"`
+	req := &pb.ListFilesRequest{
+		WorkspaceId: workspaceID,
+		Path:        dirPath,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files/list?%s", workspaceID, params.Encode())
-	err := w.client.doRequest(ctx, http.MethodGet, apiPath, nil, &result)
+	resp, err := w.client.workspaceClient.ListFiles(w.client.withAuth(ctx), req)
 	if err != nil {
-		return nil, err
+		return nil, convertGrpcError(err)
 	}
 
-	return result.Files, nil
+	files := make([]FileInfo, 0, len(resp.Files))
+	for _, f := range resp.Files {
+		files = append(files, protoToFileInfo(f))
+	}
+
+	return files, nil
 }
 
 // DeleteFile removes a file or directory from a workspace
 func (w *WorkspaceService) DeleteFile(ctx context.Context, workspaceID, targetPath string, recursive bool) error {
-	params := url.Values{}
-	params.Set("path", targetPath)
-	if recursive {
-		params.Set("recursive", "true")
+	req := &pb.DeleteFileRequest{
+		WorkspaceId: workspaceID,
+		Path:        targetPath,
+		Recursive:   recursive,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files?%s", workspaceID, params.Encode())
-	return w.client.doRequest(ctx, http.MethodDelete, apiPath, nil, nil)
+	_, err := w.client.workspaceClient.DeleteFile(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // MoveFile moves/renames a file or directory in a workspace
 func (w *WorkspaceService) MoveFile(ctx context.Context, workspaceID, srcPath, dstPath string) error {
-	req := map[string]string{
-		"source":      srcPath,
-		"destination": dstPath,
+	req := &pb.MoveFileRequest{
+		WorkspaceId: workspaceID,
+		Source:      srcPath,
+		Destination: dstPath,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files/move", workspaceID)
-	return w.client.doRequest(ctx, http.MethodPost, apiPath, req, nil)
+	_, err := w.client.workspaceClient.MoveFile(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // CopyFile copies a file or directory in a workspace
 func (w *WorkspaceService) CopyFile(ctx context.Context, workspaceID, srcPath, dstPath string) error {
-	req := map[string]string{
-		"source":      srcPath,
-		"destination": dstPath,
+	req := &pb.CopyFileRequest{
+		WorkspaceId: workspaceID,
+		Source:      srcPath,
+		Destination: dstPath,
 	}
 
-	apiPath := fmt.Sprintf("/workspaces/%s/files/copy", workspaceID)
-	return w.client.doRequest(ctx, http.MethodPost, apiPath, req, nil)
+	_, err := w.client.workspaceClient.CopyFile(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // GetFileInfo returns information about a file in a workspace
 func (w *WorkspaceService) GetFileInfo(ctx context.Context, workspaceID, filePath string) (*FileInfo, error) {
-	params := url.Values{}
-	params.Set("path", filePath)
-
-	var info FileInfo
-	apiPath := fmt.Sprintf("/workspaces/%s/files/info?%s", workspaceID, params.Encode())
-	err := w.client.doRequest(ctx, http.MethodGet, apiPath, nil, &info)
-	if err != nil {
-		return nil, err
+	req := &pb.GetFileInfoRequest{
+		WorkspaceId: workspaceID,
+		Path:        filePath,
 	}
 
+	resp, err := w.client.workspaceClient.GetFileInfo(w.client.withAuth(ctx), req)
+	if err != nil {
+		return nil, convertGrpcError(err)
+	}
+
+	info := protoToFileInfo(resp.File)
 	return &info, nil
 }
 
@@ -210,4 +245,57 @@ func (w *WorkspaceService) FileExists(ctx context.Context, workspaceID, targetPa
 		return false, err
 	}
 	return true, nil
+}
+
+// ==================== Helper functions ====================
+
+func protoToWorkspace(ws *pb.Workspace) *Workspace {
+	if ws == nil {
+		return nil
+	}
+
+	var createdAt, updatedAt time.Time
+	if ws.CreatedAt != nil {
+		createdAt = ws.CreatedAt.AsTime()
+	}
+	if ws.UpdatedAt != nil {
+		updatedAt = ws.UpdatedAt.AsTime()
+	}
+
+	var name, nfsURL string
+	if ws.Name != nil {
+		name = *ws.Name
+	}
+	if ws.NfsUrl != nil {
+		nfsURL = *ws.NfsUrl
+	}
+
+	return &Workspace{
+		ID:        ws.Id,
+		Name:      name,
+		NfsURL:    nfsURL,
+		Metadata:  ws.Metadata,
+		CreatedAt: createdAt,
+		UpdatedAt: updatedAt,
+	}
+}
+
+func protoToFileInfo(f *pb.FileInfo) FileInfo {
+	if f == nil {
+		return FileInfo{}
+	}
+
+	var modifiedAt *time.Time
+	if f.ModifiedAt != nil {
+		t := f.ModifiedAt.AsTime()
+		modifiedAt = &t
+	}
+
+	return FileInfo{
+		Name:       f.Name,
+		Path:       f.Path,
+		Type:       f.Type,
+		Size:       int64(f.Size),
+		ModifiedAt: modifiedAt,
+	}
 }

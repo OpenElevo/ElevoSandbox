@@ -22,7 +22,10 @@ mod service;
 pub use config::Config;
 pub use error::{Error, Result};
 
-use api::grpc::{AuthInterceptor, FileSystemServiceImpl};
+use api::grpc::{
+    AuthInterceptor, FileSystemServiceImpl, GrpcProcessService, GrpcPtyService,
+    GrpcSandboxService, GrpcWorkspaceService,
+};
 use config::StorageConfig;
 use infra::agent_pool::AgentConnPool;
 use infra::docker::DockerManager;
@@ -35,6 +38,10 @@ use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonit
 use infra::storage::StorageBackend;
 use infra::workspace_repository::WorkspaceRepository;
 use proto::file_system_service_server::FileSystemServiceServer;
+use proto::process_service_server::ProcessServiceServer;
+use proto::pty_service_server::PtyServiceServer;
+use proto::sandbox_service_server::SandboxServiceServer;
+use proto::workspace_service_server::WorkspaceServiceServer;
 use service::process::ProcessService;
 use service::pty::PtyService;
 use service::sandbox::SandboxService;
@@ -272,6 +279,11 @@ async fn main() -> anyhow::Result<()> {
     let agent_grpc_server = api::grpc::create_server(agent_pool.clone());
 
     // Build gRPC router with all services
+    let workspace_grpc = GrpcWorkspaceService::new(state.workspace_service.clone());
+    let sandbox_grpc = GrpcSandboxService::new(state.sandbox_service.clone());
+    let process_grpc = GrpcProcessService::new(state.process_service.clone());
+    let pty_grpc = GrpcPtyService::new(state.pty_service.clone(), agent_pool.clone());
+
     let grpc_router = if config.fs_api_enabled {
         let fs_service = FileSystemServiceImpl::new(storage.clone());
         if let Some(ref token) = config.fs_api_token {
@@ -282,16 +294,29 @@ async fn main() -> anyhow::Result<()> {
             Server::builder()
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
+                .add_service(WorkspaceServiceServer::new(workspace_grpc))
+                .add_service(SandboxServiceServer::new(sandbox_grpc))
+                .add_service(ProcessServiceServer::new(process_grpc))
+                .add_service(PtyServiceServer::new(pty_grpc))
         } else {
             info!("FileSystemService enabled without authentication");
             let fs_grpc_server = FileSystemServiceServer::new(fs_service);
             Server::builder()
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
+                .add_service(WorkspaceServiceServer::new(workspace_grpc))
+                .add_service(SandboxServiceServer::new(sandbox_grpc))
+                .add_service(ProcessServiceServer::new(process_grpc))
+                .add_service(PtyServiceServer::new(pty_grpc))
         }
     } else {
         info!("FileSystemService disabled");
-        Server::builder().add_service(agent_grpc_server)
+        Server::builder()
+            .add_service(agent_grpc_server)
+            .add_service(WorkspaceServiceServer::new(workspace_grpc))
+            .add_service(SandboxServiceServer::new(sandbox_grpc))
+            .add_service(ProcessServiceServer::new(process_grpc))
+            .add_service(PtyServiceServer::new(pty_grpc))
     };
 
     // Run both servers concurrently

@@ -1,37 +1,54 @@
 /**
- * Process service for executing commands
+ * Process service for executing commands via gRPC
  */
 
-import { AxiosInstance } from 'axios';
-import EventSource from 'eventsource';
+import * as grpc from '@grpc/grpc-js';
 import { CommandResult, RunCommandOptions, ProcessEvent } from '../types';
+import { ProcessServiceClient, createMetadata, promisifyUnary } from '../grpc';
+import { convertGrpcError } from '../errors';
 
 /**
  * Service for executing commands in sandboxes
  */
 export class ProcessService {
   constructor(
-    private readonly httpClient: AxiosInstance,
-    private readonly apiUrl: string
+    private readonly client: ProcessServiceClient,
+    private readonly apiKey?: string
   ) {}
+
+  private metadata(): grpc.Metadata {
+    return createMetadata(this.apiKey);
+  }
 
   /**
    * Run a command and wait for completion
    */
   async run(sandboxId: string, command: string, options: RunCommandOptions = {}): Promise<CommandResult> {
-    const response = await this.httpClient.post(`/sandboxes/${sandboxId}/process/run`, {
-      command,
-      args: options.args || [],
-      env: options.env || {},
-      cwd: options.cwd,
-      timeout: options.timeout,
-    });
+    try {
+      const request: any = {
+        sandboxId,
+        command,
+        args: options.args || [],
+        env: options.env || {},
+      };
+      if (options.cwd) request.cwd = options.cwd;
+      if (options.timeout) request.timeoutMs = options.timeout;
 
-    return {
-      exitCode: response.data.exit_code,
-      stdout: response.data.stdout,
-      stderr: response.data.stderr,
-    };
+      const response = await promisifyUnary(
+        this.client,
+        this.client.runCommand,
+        request,
+        this.metadata()
+      );
+
+      return {
+        exitCode: response.result.exitCode,
+        stdout: response.result.stdout,
+        stderr: response.result.stderr,
+      };
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
@@ -42,59 +59,78 @@ export class ProcessService {
     command: string,
     options: RunCommandOptions = {}
   ): AsyncIterable<ProcessEvent> {
-    const url = `${this.apiUrl}/api/v1/sandboxes/${sandboxId}/process/run/stream`;
-    const params = new URLSearchParams({
+    const client = this.client;
+    const metadata = this.metadata();
+
+    const request: any = {
+      sandboxId,
       command,
-      args: JSON.stringify(options.args || []),
-      env: JSON.stringify(options.env || {}),
-      ...(options.cwd && { cwd: options.cwd }),
-      ...(options.timeout && { timeout: options.timeout.toString() }),
-    });
+      args: options.args || [],
+      env: options.env || {},
+    };
+    if (options.cwd) request.cwd = options.cwd;
+    if (options.timeout) request.timeoutMs = options.timeout;
 
     return {
       [Symbol.asyncIterator]: () => {
-        const eventSource = new EventSource(`${url}?${params}`);
+        const stream = client.runCommandStream(request, metadata);
         let done = false;
-        const events: ProcessEvent[] = [];
-        let resolveNext: ((value: IteratorResult<ProcessEvent>) => void) | null = null;
+        let error: Error | null = null;
 
-        eventSource.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-          const processEvent = this.parseEvent(data);
-          if (processEvent) {
-            if (resolveNext) {
-              resolveNext({ value: processEvent, done: false });
-              resolveNext = null;
-            } else {
-              events.push(processEvent);
-            }
-          }
-        };
-
-        eventSource.onerror = () => {
+        stream.on('error', (err: grpc.ServiceError) => {
+          error = convertGrpcError(err);
           done = true;
-          eventSource.close();
-          if (resolveNext) {
-            resolveNext({ value: undefined as any, done: true });
-            resolveNext = null;
-          }
-        };
+        });
 
-        eventSource.addEventListener('exit', (event: any) => {
+        stream.on('end', () => {
           done = true;
-          eventSource.close();
         });
 
         return {
-          next: () => {
-            return new Promise<IteratorResult<ProcessEvent>>((resolve) => {
-              if (events.length > 0) {
-                resolve({ value: events.shift()!, done: false });
-              } else if (done) {
-                resolve({ value: undefined as any, done: true });
-              } else {
-                resolveNext = resolve;
+          next: (): Promise<IteratorResult<ProcessEvent>> => {
+            return new Promise((resolve, reject) => {
+              if (error) {
+                reject(error);
+                return;
               }
+
+              if (done) {
+                resolve({ value: undefined as any, done: true });
+                return;
+              }
+
+              const onData = (data: any) => {
+                stream.removeListener('data', onData);
+                stream.removeListener('end', onEnd);
+                stream.removeListener('error', onError);
+
+                const event = this.parseEvent(data);
+                if (event) {
+                  resolve({ value: event, done: false });
+                } else {
+                  // Skip unknown events, get next
+                  this.getNextEvent(stream, resolve, reject);
+                }
+              };
+
+              const onEnd = () => {
+                stream.removeListener('data', onData);
+                stream.removeListener('end', onEnd);
+                stream.removeListener('error', onError);
+                done = true;
+                resolve({ value: undefined as any, done: true });
+              };
+
+              const onError = (err: grpc.ServiceError) => {
+                stream.removeListener('data', onData);
+                stream.removeListener('end', onEnd);
+                stream.removeListener('error', onError);
+                reject(convertGrpcError(err));
+              };
+
+              stream.once('data', onData);
+              stream.once('end', onEnd);
+              stream.once('error', onError);
             });
           },
         };
@@ -102,24 +138,75 @@ export class ProcessService {
     };
   }
 
+  private getNextEvent(
+    stream: grpc.ClientReadableStream<any>,
+    resolve: (value: IteratorResult<ProcessEvent>) => void,
+    reject: (error: Error) => void
+  ): void {
+    const onData = (data: any) => {
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+
+      const event = this.parseEvent(data);
+      if (event) {
+        resolve({ value: event, done: false });
+      } else {
+        this.getNextEvent(stream, resolve, reject);
+      }
+    };
+
+    const onEnd = () => {
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      resolve({ value: undefined as any, done: true });
+    };
+
+    const onError = (err: grpc.ServiceError) => {
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      reject(convertGrpcError(err));
+    };
+
+    stream.once('data', onData);
+    stream.once('end', onEnd);
+    stream.once('error', onError);
+  }
+
   /**
    * Kill a running process
    */
   async kill(sandboxId: string, pid: number, signal?: number): Promise<void> {
-    await this.httpClient.post(`/sandboxes/${sandboxId}/process/${pid}/kill`, {
-      signal: signal || 15,
-    });
+    try {
+      const request: any = {
+        sandboxId,
+        pid,
+      };
+      if (signal !== undefined) request.signal = signal;
+
+      await promisifyUnary(
+        this.client,
+        this.client.killProcess,
+        request,
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   private parseEvent(data: any): ProcessEvent | null {
-    if (data.type === 'stdout') {
-      return { type: 'stdout', data: data.data };
-    } else if (data.type === 'stderr') {
-      return { type: 'stderr', data: data.data };
-    } else if (data.type === 'exit') {
-      return { type: 'exit', code: data.code };
-    } else if (data.type === 'error') {
-      return { type: 'error', message: data.message };
+    // Handle oneof field - proto-loader uses the field name directly
+    if (data.stdout) {
+      return { type: 'stdout', data: data.stdout.data };
+    } else if (data.stderr) {
+      return { type: 'stderr', data: data.stderr.data };
+    } else if (data.exit) {
+      return { type: 'exit', code: data.exit.code };
+    } else if (data.error) {
+      return { type: 'error', message: data.error.message };
     }
     return null;
   }

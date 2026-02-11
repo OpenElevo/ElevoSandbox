@@ -17,14 +17,15 @@ use tracing::debug;
 
 use crate::infra::storage::{FileStat, FileType, StorageBackend, StorageError};
 use crate::proto::{
-    file_system_service_server::FileSystemService, fs_write_file_request::Payload, FsCreateRequest,
-    FsCreateResponse, FsDirEntry, FsFileAttr, FsFileType, FsListDirRequest, FsListDirResponse,
-    FsMkdirRequest, FsMkdirResponse, FsReadAtRequest, FsReadAtResponse, FsReadFileRequest,
-    FsReadFileResponse, FsReadLinkRequest, FsReadLinkResponse, FsRemoveDirRequest,
-    FsRemoveDirResponse, FsRemoveFileRequest, FsRemoveFileResponse, FsRenameFlags, FsRenameRequest,
-    FsRenameResponse, FsSetAttrRequest, FsSetAttrResponse, FsStatFsRequest, FsStatFsResponse,
-    FsStatRequest, FsStatResponse, FsSymlinkRequest, FsSymlinkResponse, FsWriteAtRequest,
-    FsWriteAtResponse, FsWriteFileRequest, FsWriteFileResponse,
+    file_system_service_server::FileSystemService, fs_write_file_request::Payload,
+    DownloadBinaryRequest, DownloadBinaryResponse, FsCreateRequest, FsCreateResponse, FsDirEntry,
+    FsFileAttr, FsFileType, FsListDirRequest, FsListDirResponse, FsMkdirRequest, FsMkdirResponse,
+    FsReadAtRequest, FsReadAtResponse, FsReadFileRequest, FsReadFileResponse, FsReadLinkRequest,
+    FsReadLinkResponse, FsRemoveDirRequest, FsRemoveDirResponse, FsRemoveFileRequest,
+    FsRemoveFileResponse, FsRenameFlags, FsRenameRequest, FsRenameResponse, FsSetAttrRequest,
+    FsSetAttrResponse, FsStatFsRequest, FsStatFsResponse, FsStatRequest, FsStatResponse,
+    FsSymlinkRequest, FsSymlinkResponse, FsWriteAtRequest, FsWriteAtResponse, FsWriteFileRequest,
+    FsWriteFileResponse,
 };
 
 /// Default chunk size for streaming file reads (64KB)
@@ -295,10 +296,9 @@ impl FileSystemService for FileSystemServiceImpl {
             "write_file"
         );
 
-        // If truncate is requested, first truncate the file
-        if truncate {
-            // Write file will overwrite the content anyway
-        }
+        // Note: truncate flag is handled implicitly - write_file always overwrites the entire file.
+        // The flag exists for API compatibility but doesn't change behavior since we always
+        // write the complete content provided in the stream.
 
         self.storage
             .write_file(&workspace_id, &path, &data)
@@ -705,6 +705,85 @@ impl FileSystemService for FileSystemServiceImpl {
             namelen: stats.namelen,
             frsize: stats.frsize,
         }))
+    }
+
+    type DownloadBinaryStream =
+        Pin<Box<dyn Stream<Item = Result<DownloadBinaryResponse, Status>> + Send>>;
+
+    /// Download binary file (e.g., workspace-fuse)
+    async fn download_binary(
+        &self,
+        request: Request<DownloadBinaryRequest>,
+    ) -> Result<Response<Self::DownloadBinaryStream>, Status> {
+        let req = request.into_inner();
+        debug!(
+            name = %req.name,
+            platform = %req.platform,
+            arch = %req.arch,
+            "download_binary"
+        );
+
+        // Validate platform
+        if !["linux", "darwin"].contains(&req.platform.as_str()) {
+            return Err(Status::invalid_argument(format!(
+                "Unsupported platform: {}. Supported: linux, darwin",
+                req.platform
+            )));
+        }
+
+        // Validate architecture
+        if !["amd64", "arm64"].contains(&req.arch.as_str()) {
+            return Err(Status::invalid_argument(format!(
+                "Unsupported architecture: {}. Supported: amd64, arm64",
+                req.arch
+            )));
+        }
+
+        // Build file path
+        let downloads_dir = std::env::var("WORKSPACE_DOWNLOADS_DIR")
+            .unwrap_or_else(|_| "/var/lib/workspace/downloads".to_string());
+
+        let filename = format!("{}-{}-{}", req.name, req.platform, req.arch);
+        let file_path = std::path::Path::new(&downloads_dir).join(&filename);
+
+        // Check if file exists
+        if !file_path.exists() {
+            return Err(Status::not_found(format!(
+                "Binary not found: {}. Place it at {}",
+                filename,
+                file_path.display()
+            )));
+        }
+
+        // Read file
+        let data = tokio::fs::read(&file_path).await.map_err(|e| {
+            Status::internal(format!("Failed to read binary: {}", e))
+        })?;
+
+        debug!(
+            path = %file_path.display(),
+            size = data.len(),
+            "Serving binary"
+        );
+
+        let (tx, rx) = mpsc::channel(4);
+
+        // Stream chunks (64KB each)
+        tokio::spawn(async move {
+            for chunk in data.chunks(DEFAULT_CHUNK_SIZE) {
+                if tx
+                    .send(Ok(DownloadBinaryResponse {
+                        chunk: chunk.to_vec(),
+                    }))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 }
 

@@ -2,12 +2,11 @@ package workspace
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
+	"io"
 	"sync"
 
-	"github.com/gorilla/websocket"
+	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
 )
 
 // PtyService provides operations for PTY terminals
@@ -15,10 +14,10 @@ type PtyService struct {
 	client *Client
 }
 
-// PtySession represents an active PTY session with WebSocket connection
+// PtySession represents an active PTY session with gRPC bidirectional stream
 type PtySession struct {
 	Handle    *PtyHandle
-	conn      *websocket.Conn
+	stream    pb.PtyService_PtyStreamClient
 	client    *Client
 	sandboxID string
 
@@ -28,8 +27,9 @@ type PtySession struct {
 	errors   chan error
 	done     chan struct{}
 
-	mu     sync.Mutex
-	closed bool
+	mu       sync.Mutex
+	closed   bool
+	closeOnce sync.Once
 }
 
 // Create creates a new PTY session
@@ -48,45 +48,76 @@ func (p *PtyService) Create(ctx context.Context, sandboxID string, opts *PtyOpti
 		opts.Rows = 24
 	}
 
-	var handle PtyHandle
-	path := fmt.Sprintf("/sandboxes/%s/pty", sandboxID)
-	err := p.client.doRequest(ctx, http.MethodPost, path, opts, &handle)
-	if err != nil {
-		return nil, err
+	var colsPtr, rowsPtr *uint32
+	if opts.Cols > 0 {
+		c := uint32(opts.Cols)
+		colsPtr = &c
+	}
+	if opts.Rows > 0 {
+		r := uint32(opts.Rows)
+		rowsPtr = &r
 	}
 
-	handle.SandboxID = sandboxID
-	return &handle, nil
+	req := &pb.CreatePtyRequest{
+		SandboxId: sandboxID,
+		Cols:      colsPtr,
+		Rows:      rowsPtr,
+		Env:       opts.Env,
+	}
+
+	if opts.Shell != "" {
+		req.Shell = &opts.Shell
+	}
+
+	resp, err := p.client.ptyClient.CreatePty(p.client.withAuth(ctx), req)
+	if err != nil {
+		return nil, convertGrpcError(err)
+	}
+
+	if resp.Pty == nil {
+		return nil, fmt.Errorf("no pty in response")
+	}
+
+	return &PtyHandle{
+		ID:        resp.Pty.Id,
+		SandboxID: resp.Pty.SandboxId,
+		Cols:      int(resp.Pty.Cols),
+		Rows:      int(resp.Pty.Rows),
+	}, nil
 }
 
-// Connect creates a PTY and establishes a WebSocket connection
+// Connect creates a PTY and establishes a gRPC bidirectional stream
 func (p *PtyService) Connect(ctx context.Context, sandboxID string, opts *PtyOptions) (*PtySession, error) {
 	handle, err := p.Create(ctx, sandboxID, opts)
 	if err != nil {
 		return nil, err
 	}
 
-	// Build WebSocket URL
-	wsURL := fmt.Sprintf("ws%s/api/v1/sandboxes/%s/pty/%s",
-		p.client.apiURL[4:], // Convert http(s) to ws(s)
-		sandboxID,
-		handle.ID,
-	)
-
-	// Connect WebSocket
-	header := http.Header{}
-	if p.client.apiKey != "" {
-		header.Set("Authorization", fmt.Sprintf("Bearer %s", p.client.apiKey))
+	// Establish bidirectional stream
+	stream, err := p.client.ptyClient.PtyStream(p.client.withAuth(ctx))
+	if err != nil {
+		return nil, convertGrpcError(err)
 	}
 
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, wsURL, header)
-	if err != nil {
-		return nil, &ConnectionError{URL: wsURL, Message: err.Error()}
+	// Send init message
+	initReq := &pb.PtyStreamRequest{
+		Request: &pb.PtyStreamRequest_Init{
+			Init: &pb.PtyStreamInit{
+				SandboxId: sandboxID,
+				PtyId:     handle.ID,
+			},
+		},
+	}
+
+	if err := stream.Send(initReq); err != nil {
+		// Clean up stream on error
+		stream.CloseSend()
+		return nil, convertGrpcError(err)
 	}
 
 	session := &PtySession{
 		Handle:    handle,
-		conn:      conn,
+		stream:    stream,
 		client:    p.client,
 		sandboxID: sandboxID,
 		incoming:  make(chan []byte, 100),
@@ -104,19 +135,34 @@ func (p *PtyService) Connect(ctx context.Context, sandboxID string, opts *PtyOpt
 
 // Resize resizes a PTY
 func (p *PtyService) Resize(ctx context.Context, sandboxID, ptyID string, cols, rows int) error {
-	req := map[string]int{
-		"cols": cols,
-		"rows": rows,
+	req := &pb.ResizePtyRequest{
+		SandboxId: sandboxID,
+		PtyId:     ptyID,
+		Cols:      uint32(cols),
+		Rows:      uint32(rows),
 	}
 
-	path := fmt.Sprintf("/sandboxes/%s/pty/%s/resize", sandboxID, ptyID)
-	return p.client.doRequest(ctx, http.MethodPost, path, req, nil)
+	_, err := p.client.ptyClient.ResizePty(p.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // Kill terminates a PTY
 func (p *PtyService) Kill(ctx context.Context, sandboxID, ptyID string) error {
-	path := fmt.Sprintf("/sandboxes/%s/pty/%s", sandboxID, ptyID)
-	return p.client.doRequest(ctx, http.MethodDelete, path, nil, nil)
+	req := &pb.KillPtyRequest{
+		SandboxId: sandboxID,
+		PtyId:     ptyID,
+	}
+
+	_, err := p.client.ptyClient.KillPty(p.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
 }
 
 // Read returns the channel for reading data from the PTY
@@ -146,7 +192,7 @@ func (s *PtySession) WriteString(data string) error {
 	return s.Write([]byte(data))
 }
 
-// Resize resizes the PTY
+// Resize resizes the PTY via the stream
 func (s *PtySession) Resize(cols, rows int) error {
 	s.mu.Lock()
 	if s.closed {
@@ -155,19 +201,16 @@ func (s *PtySession) Resize(cols, rows int) error {
 	}
 	s.mu.Unlock()
 
-	// Send resize message via WebSocket
-	msg := map[string]interface{}{
-		"type": "resize",
-		"cols": cols,
-		"rows": rows,
+	req := &pb.PtyStreamRequest{
+		Request: &pb.PtyStreamRequest_Resize{
+			Resize: &pb.PtyResizeEvent{
+				Cols: uint32(cols),
+				Rows: uint32(rows),
+			},
+		},
 	}
 
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	return s.conn.WriteMessage(websocket.TextMessage, data)
+	return s.stream.Send(req)
 }
 
 // Errors returns the channel for errors
@@ -182,37 +225,37 @@ func (s *PtySession) Done() <-chan struct{} {
 
 // Close closes the PTY session
 func (s *PtySession) Close() error {
-	s.mu.Lock()
-	if s.closed {
+	var err error
+	s.closeOnce.Do(func() {
+		s.mu.Lock()
+		s.closed = true
 		s.mu.Unlock()
-		return nil
-	}
-	s.closed = true
-	s.mu.Unlock()
 
-	close(s.done)
+		close(s.done)
 
-	// Close WebSocket connection
-	if err := s.conn.WriteMessage(websocket.CloseMessage,
-		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
-		// Ignore error, connection might already be closed
-	}
-
-	return s.conn.Close()
+		// Close the gRPC stream
+		err = s.stream.CloseSend()
+	})
+	return err
 }
 
-// readLoop reads messages from WebSocket
+// readLoop reads messages from gRPC stream
 func (s *PtySession) readLoop() {
 	defer func() {
-		s.mu.Lock()
-		if !s.closed {
+		// Use closeOnce to safely close done channel
+		s.closeOnce.Do(func() {
+			s.mu.Lock()
+			s.closed = true
+			s.mu.Unlock()
 			close(s.done)
-		}
-		s.mu.Unlock()
+		})
 	}()
 
 	for {
-		_, message, err := s.conn.ReadMessage()
+		resp, err := s.stream.Recv()
+		if err == io.EOF {
+			return
+		}
 		if err != nil {
 			s.mu.Lock()
 			closed := s.closed
@@ -220,40 +263,68 @@ func (s *PtySession) readLoop() {
 
 			if !closed {
 				select {
-				case s.errors <- err:
+				case s.errors <- convertGrpcError(err):
 				default:
 				}
 			}
 			return
 		}
 
-		select {
-		case s.incoming <- message:
-		case <-s.done:
+		switch r := resp.Response.(type) {
+		case *pb.PtyStreamResponse_Output:
+			select {
+			case s.incoming <- r.Output:
+			case <-s.done:
+				return
+			}
+		case *pb.PtyStreamResponse_ExitCode:
+			// PTY exited
+			s.mu.Lock()
+			closed := s.closed
+			s.mu.Unlock()
+
+			if !closed {
+				select {
+				case s.errors <- fmt.Errorf("PTY exited with code %d", r.ExitCode):
+				default:
+				}
+			}
+			return
+		case *pb.PtyStreamResponse_Error:
+			s.mu.Lock()
+			closed := s.closed
+			s.mu.Unlock()
+
+			if !closed {
+				select {
+				case s.errors <- fmt.Errorf("PTY error: %s", r.Error):
+				default:
+				}
+			}
 			return
 		}
 	}
 }
 
-// writeLoop writes messages to WebSocket
+// writeLoop writes messages to gRPC stream
 func (s *PtySession) writeLoop() {
 	for {
 		select {
 		case data := <-s.outgoing:
-			msg := map[string]interface{}{
-				"type": "input",
-				"data": string(data),
+			req := &pb.PtyStreamRequest{
+				Request: &pb.PtyStreamRequest_Input{
+					Input: data,
+				},
 			}
-			msgData, _ := json.Marshal(msg)
 
-			if err := s.conn.WriteMessage(websocket.TextMessage, msgData); err != nil {
+			if err := s.stream.Send(req); err != nil {
 				s.mu.Lock()
 				closed := s.closed
 				s.mu.Unlock()
 
 				if !closed {
 					select {
-					case s.errors <- err:
+					case s.errors <- convertGrpcError(err):
 					default:
 					}
 				}

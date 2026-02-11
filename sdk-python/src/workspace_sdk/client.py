@@ -1,24 +1,31 @@
 """
-Sync Workspace Client - Main entry point for synchronous SDK usage
+Sync Workspace Client - Main entry point for synchronous SDK usage with gRPC
 """
 
 from typing import Optional
-import httpx
+
+import grpc
 
 from workspace_sdk.services.workspace import WorkspaceService
 from workspace_sdk.services.sandbox import SandboxService
 from workspace_sdk.services.process import ProcessService
 from workspace_sdk.services.pty import PtyService
 from workspace_sdk.services.nfs import NfsService
-from workspace_sdk.errors import parse_error_response
+from workspace_sdk.proto.workspace.v1 import (
+    workspace_pb2_grpc,
+    sandbox_pb2_grpc,
+    process_pb2_grpc,
+    pty_pb2_grpc,
+    filesystem_pb2_grpc,
+)
 
 
 class WorkspaceClient:
-    """Synchronous client for interacting with the Workspace service"""
+    """Synchronous client for interacting with the Workspace service via gRPC"""
 
     def __init__(
         self,
-        api_url: str,
+        server_addr: str,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
         nfs_host: Optional[str] = None,
@@ -28,18 +35,18 @@ class WorkspaceClient:
         Initialize the workspace client.
 
         Args:
-            api_url: Base URL of the workspace server
+            server_addr: gRPC server address (e.g., "localhost:9090")
             api_key: Optional API key for authentication
             timeout: Request timeout in seconds (default: 30)
             nfs_host: NFS server host for mounting workspaces (optional)
             nfs_port: NFS server port (default: 2049)
         """
-        self._api_url = api_url
+        self._server_addr = server_addr
         self._api_key = api_key
         self._timeout = timeout
         self._nfs_host = nfs_host
         self._nfs_port = nfs_port
-        self._client: Optional[httpx.Client] = None
+        self._channel: Optional[grpc.Channel] = None
 
         # Services will be initialized when context manager is entered
         self.workspace: WorkspaceService
@@ -50,42 +57,36 @@ class WorkspaceClient:
 
     def __enter__(self) -> "WorkspaceClient":
         """Enter context manager"""
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        # Create gRPC channel
+        self._channel = grpc.insecure_channel(self._server_addr)
 
-        self._client = httpx.Client(
-            base_url=f"{self._api_url}/api/v1",
-            headers=headers,
-            timeout=self._timeout,
-        )
+        # Create stubs
+        workspace_stub = workspace_pb2_grpc.WorkspaceServiceStub(self._channel)
+        sandbox_stub = sandbox_pb2_grpc.SandboxServiceStub(self._channel)
+        process_stub = process_pb2_grpc.ProcessServiceStub(self._channel)
+        pty_stub = pty_pb2_grpc.PtyServiceStub(self._channel)
+        filesystem_stub = filesystem_pb2_grpc.FileSystemServiceStub(self._channel)
 
         # Initialize services
-        self.workspace = WorkspaceService(self._client, self._api_url)
-        self.sandbox = SandboxService(self._client, self._api_url)
-        self.process = ProcessService(self._client, self._api_url)
-        self.pty = PtyService(self._client, self._api_url)
+        self.workspace = WorkspaceService(
+            workspace_stub, self._api_key, self._timeout
+        )
+        self.sandbox = SandboxService(sandbox_stub, self._api_key, self._timeout)
+        self.process = ProcessService(process_stub, self._api_key, self._timeout)
+        self.pty = PtyService(pty_stub, self._api_key, self._timeout)
         self.nfs = NfsService(self._nfs_host, self._nfs_port)
 
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Exit context manager"""
-        if self._client:
-            self._client.close()
-            self._client = None
-
-    def health(self) -> dict:
-        """Check if the server is healthy"""
-        if not self._client:
-            raise RuntimeError("Client not initialized. Use 'with' context manager.")
-        response = self._client.get("/health")
-        response.raise_for_status()
-        return response.json()
+        if self._channel:
+            self._channel.close()
+            self._channel = None
 
     @staticmethod
     def create(
-        api_url: str,
+        server_addr: str,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
         nfs_host: Optional[str] = None,
@@ -95,8 +96,8 @@ class WorkspaceClient:
         Factory method to create a WorkspaceClient.
 
         Usage:
-            with WorkspaceClient.create("http://localhost:8080") as client:
+            with WorkspaceClient.create("localhost:9090") as client:
                 workspace = client.workspace.create()
                 sandbox = client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id))
         """
-        return WorkspaceClient(api_url, api_key, timeout, nfs_host, nfs_port)
+        return WorkspaceClient(server_addr, api_key, timeout, nfs_host, nfs_port)

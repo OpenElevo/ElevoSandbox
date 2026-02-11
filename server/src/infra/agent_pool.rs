@@ -79,8 +79,21 @@ pub struct AgentConnPool {
     connections: DashMap<String, AgentConnection>,
     /// Pending requests waiting for responses
     pending_requests: DashMap<String, oneshot::Sender<AgentCommandResponse>>,
+    /// PTY output subscribers: (sandbox_id, pty_id) -> sender
+    pty_subscribers: DashMap<(String, String), mpsc::Sender<PtyOutputEvent>>,
     /// Default response timeout
     response_timeout: Duration,
+}
+
+/// PTY output event
+#[derive(Debug, Clone)]
+pub enum PtyOutputEvent {
+    /// Output data from PTY
+    Output(Vec<u8>),
+    /// PTY process exited
+    Exit(i32),
+    /// Error occurred
+    Error(String),
 }
 
 /// Represents a connection to an agent
@@ -95,6 +108,7 @@ impl AgentConnPool {
         Self {
             connections: DashMap::new(),
             pending_requests: DashMap::new(),
+            pty_subscribers: DashMap::new(),
             response_timeout: DEFAULT_RESPONSE_TIMEOUT,
         }
     }
@@ -104,6 +118,7 @@ impl AgentConnPool {
         Self {
             connections: DashMap::new(),
             pending_requests: DashMap::new(),
+            pty_subscribers: DashMap::new(),
             response_timeout,
         }
     }
@@ -432,13 +447,43 @@ impl AgentConnPool {
 
     /// Handle PTY output from an agent
     pub fn handle_pty_output(&self, sandbox_id: &str, pty_id: &str, data: Vec<u8>) {
-        // TODO: Forward PTY output to WebSocket connections
+        let key = (sandbox_id.to_string(), pty_id.to_string());
+        if let Some(sender) = self.pty_subscribers.get(&key) {
+            let _ = sender.try_send(PtyOutputEvent::Output(data.clone()));
+        }
         debug!(
             "PTY output for {}:{}: {} bytes",
             sandbox_id,
             pty_id,
             data.len()
         );
+    }
+
+    /// Handle PTY exit from an agent
+    pub fn handle_pty_exit(&self, sandbox_id: &str, pty_id: &str, exit_code: i32) {
+        let key = (sandbox_id.to_string(), pty_id.to_string());
+        if let Some(sender) = self.pty_subscribers.get(&key) {
+            let _ = sender.try_send(PtyOutputEvent::Exit(exit_code));
+        }
+        debug!("PTY exit for {}:{}: code {}", sandbox_id, pty_id, exit_code);
+    }
+
+    /// Subscribe to PTY output
+    pub fn subscribe_pty(
+        &self,
+        sandbox_id: &str,
+        pty_id: &str,
+    ) -> mpsc::Receiver<PtyOutputEvent> {
+        let (tx, rx) = mpsc::channel(256);
+        let key = (sandbox_id.to_string(), pty_id.to_string());
+        self.pty_subscribers.insert(key, tx);
+        rx
+    }
+
+    /// Unsubscribe from PTY output
+    pub fn unsubscribe_pty(&self, sandbox_id: &str, pty_id: &str) {
+        let key = (sandbox_id.to_string(), pty_id.to_string());
+        self.pty_subscribers.remove(&key);
     }
 
     /// Handle a response from an agent (internal version)

@@ -206,7 +206,10 @@ func EnsureBinary(version string, forceDownload bool, proxy string, serverURL st
 }
 
 func mustParseURL(rawURL string) *url.URL {
-	u, _ := url.Parse(rawURL)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		panic(fmt.Sprintf("invalid URL %q: %v", rawURL, err))
+	}
 	return u
 }
 
@@ -419,8 +422,11 @@ func (m *FuseMount) cleanup() {
 
 		select {
 		case <-done:
+			// Process exited cleanly
 		case <-time.After(5 * time.Second):
 			m.cmd.Process.Kill()
+			// Wait for process to be reaped to avoid zombie
+			<-done
 		}
 		m.cmd = nil
 	}

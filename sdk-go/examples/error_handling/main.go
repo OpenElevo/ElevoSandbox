@@ -16,9 +16,13 @@ import (
 )
 
 func main() {
-	client := workspace.NewClient("http://localhost:8080", workspace.ClientOptions{
+	client, err := workspace.NewClient("localhost:9090", workspace.ClientOptions{
 		Timeout: 30 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 
 	ctx := context.Background()
 
@@ -26,7 +30,7 @@ func main() {
 
 	// 1. Handle not found error
 	fmt.Println("1. Handling non-existent sandbox error...")
-	_, err := client.Sandbox.Get(ctx, "non-existent-sandbox-id")
+	_, err = client.Sandbox.Get(ctx, "non-existent-sandbox-id")
 	if err != nil {
 		if workspace.IsNotFound(err) {
 			fmt.Println("   ✓ Correctly identified as NotFound error")
@@ -38,18 +42,33 @@ func main() {
 	}
 	fmt.Println()
 
-	// 2. Create a sandbox for more tests
-	fmt.Println("2. Creating sandbox for error tests...")
+	// 2. Create a workspace and sandbox for more tests
+	fmt.Println("2. Creating workspace and sandbox for error tests...")
+	ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+		Name: "error-handling-workspace",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create workspace: %v", err)
+	}
+	fmt.Printf("   Created workspace: %s\n", ws.ID)
+
+	defer func() {
+		fmt.Println("\n7. Cleaning up workspace...")
+		client.Workspace.Delete(ctx, ws.ID)
+		fmt.Println("   Done!")
+	}()
+
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: "workspace-test:latest",
+		WorkspaceID: ws.ID,
+		Template:    "workspace-test:latest",
 	})
 	if err != nil {
 		log.Fatalf("Failed to create sandbox: %v", err)
 	}
-	fmt.Printf("   Created: %s\n\n", sandbox.ID)
+	fmt.Printf("   Created sandbox: %s\n\n", sandbox.ID)
 
 	defer func() {
-		fmt.Println("\n6. Cleaning up...")
+		fmt.Println("\n6. Cleaning up sandbox...")
 		client.Sandbox.Delete(ctx, sandbox.ID, true)
 		fmt.Println("   Done!")
 	}()

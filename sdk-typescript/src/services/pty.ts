@@ -1,102 +1,256 @@
 /**
- * PTY service for interactive terminals
+ * PTY service for interactive terminals via gRPC
  */
 
-import { AxiosInstance } from 'axios';
-import WebSocket from 'ws';
+import * as grpc from '@grpc/grpc-js';
+import { EventEmitter } from 'events';
 import { PtyOptions, PtyHandle } from '../types';
+import { PtyServiceClient, createMetadata, promisifyUnary } from '../grpc';
+import { convertGrpcError } from '../errors';
 
 /**
- * Service for managing interactive terminals
+ * PTY session with bidirectional gRPC stream
+ */
+export class PtySession extends EventEmitter implements PtyHandle {
+  public readonly id: string;
+  public cols: number;
+  public rows: number;
+
+  private stream: grpc.ClientDuplexStream<any, any>;
+  private closed = false;
+
+  constructor(
+    id: string,
+    cols: number,
+    rows: number,
+    stream: grpc.ClientDuplexStream<any, any>
+  ) {
+    super();
+    this.id = id;
+    this.cols = cols;
+    this.rows = rows;
+    this.stream = stream;
+
+    this.setupStreamHandlers();
+  }
+
+  private setupStreamHandlers(): void {
+    this.stream.on('data', (data: any) => {
+      if (data.output) {
+        const output = data.output instanceof Buffer
+          ? new Uint8Array(data.output)
+          : new Uint8Array(data.output || []);
+        this.emit('data', output);
+      } else if (data.exitCode !== undefined) {
+        this.emit('exit', data.exitCode);
+        this.close();
+      } else if (data.error) {
+        this.emit('error', new Error(data.error));
+        this.close();
+      }
+    });
+
+    this.stream.on('error', (err: grpc.ServiceError) => {
+      if (!this.closed) {
+        this.emit('error', convertGrpcError(err));
+        this.close();
+      }
+    });
+
+    this.stream.on('end', () => {
+      if (!this.closed) {
+        this.close();
+      }
+    });
+  }
+
+  /**
+   * Write data to PTY
+   */
+  async write(data: string | Uint8Array): Promise<void> {
+    if (this.closed) {
+      throw new Error('PTY session is closed');
+    }
+
+    const input = typeof data === 'string'
+      ? Buffer.from(data, 'utf-8')
+      : Buffer.from(data);
+
+    return new Promise((resolve, reject) => {
+      this.stream.write({ input }, (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Resize PTY
+   */
+  async resize(cols: number, rows: number): Promise<void> {
+    if (this.closed) {
+      throw new Error('PTY session is closed');
+    }
+
+    this.cols = cols;
+    this.rows = rows;
+
+    return new Promise((resolve, reject) => {
+      this.stream.write({ resize: { cols, rows } }, (err: Error | null) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Kill PTY
+   */
+  async kill(): Promise<void> {
+    this.close();
+  }
+
+  /**
+   * Set data callback
+   */
+  onData(callback: (data: Uint8Array) => void): void {
+    this.on('data', callback);
+  }
+
+  /**
+   * Set close callback
+   */
+  onClose(callback: () => void): void {
+    this.on('close', callback);
+  }
+
+  /**
+   * Close the PTY session
+   */
+  private close(): void {
+    if (this.closed) return;
+    this.closed = true;
+
+    try {
+      this.stream.end();
+    } catch {
+      // Ignore errors when closing
+    }
+
+    this.emit('close');
+  }
+}
+
+/**
+ * Service for managing PTY sessions
  */
 export class PtyService {
   constructor(
-    private readonly httpClient: AxiosInstance,
-    private readonly apiUrl: string
+    private readonly client: PtyServiceClient,
+    private readonly apiKey?: string
   ) {}
 
+  private metadata(): grpc.Metadata {
+    return createMetadata(this.apiKey);
+  }
+
   /**
-   * Create a new PTY
+   * Create a new PTY and establish bidirectional stream
    */
-  async create(sandboxId: string, options: PtyOptions = {}): Promise<PtyHandle> {
-    const response = await this.httpClient.post(`/sandboxes/${sandboxId}/pty`, {
-      cols: options.cols || 80,
-      rows: options.rows || 24,
-      shell: options.shell,
-      env: options.env,
+  async connect(sandboxId: string, options: PtyOptions = {}): Promise<PtySession> {
+    // First create the PTY
+    const handle = await this.create(sandboxId, options);
+
+    // Then establish bidirectional stream
+    const stream = this.client.ptyStream(this.metadata());
+
+    // Send init message
+    await new Promise<void>((resolve, reject) => {
+      stream.write(
+        {
+          init: {
+            sandboxId,
+            ptyId: handle.id,
+          },
+        },
+        (err: Error | null) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve();
+          }
+        }
+      );
     });
 
-    const ptyId = response.data.id;
-    const cols = response.data.cols;
-    const rows = response.data.rows;
+    return new PtySession(handle.id, handle.cols, handle.rows, stream);
+  }
 
-    // Create WebSocket connection
-    const wsUrl = this.apiUrl.replace(/^http/, 'ws');
-    const ws = new WebSocket(`${wsUrl}/api/v1/sandboxes/${sandboxId}/pty/${ptyId}`);
+  /**
+   * Create a new PTY (without stream)
+   */
+  async create(sandboxId: string, options: PtyOptions = {}): Promise<{ id: string; cols: number; rows: number }> {
+    try {
+      const request: any = {
+        sandboxId,
+        cols: options.cols || 80,
+        rows: options.rows || 24,
+        env: options.env || {},
+      };
+      if (options.shell) request.shell = options.shell;
 
-    let dataCallback: ((data: Uint8Array) => void) | null = null;
-    let closeCallback: (() => void) | null = null;
+      const response = await promisifyUnary(
+        this.client,
+        this.client.createPty,
+        request,
+        this.metadata()
+      );
 
-    ws.on('message', (data: Buffer) => {
-      if (dataCallback) {
-        dataCallback(new Uint8Array(data));
-      }
-    });
-
-    ws.on('close', () => {
-      if (closeCallback) {
-        closeCallback();
-      }
-    });
-
-    const handle: PtyHandle = {
-      id: ptyId,
-      cols,
-      rows,
-
-      write: async (data: string | Uint8Array) => {
-        const buffer = typeof data === 'string' ? Buffer.from(data) : Buffer.from(data);
-        ws.send(buffer);
-      },
-
-      resize: async (newCols: number, newRows: number) => {
-        await this.httpClient.post(`/sandboxes/${sandboxId}/pty/${ptyId}/resize`, {
-          cols: newCols,
-          rows: newRows,
-        });
-      },
-
-      kill: async () => {
-        ws.close();
-        await this.httpClient.delete(`/sandboxes/${sandboxId}/pty/${ptyId}`);
-      },
-
-      onData: (callback: (data: Uint8Array) => void) => {
-        dataCallback = callback;
-      },
-
-      onClose: (callback: () => void) => {
-        closeCallback = callback;
-      },
-    };
-
-    return handle;
+      return {
+        id: response.pty.id,
+        cols: response.pty.cols,
+        rows: response.pty.rows,
+      };
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Resize a PTY
    */
   async resize(sandboxId: string, ptyId: string, cols: number, rows: number): Promise<void> {
-    await this.httpClient.post(`/sandboxes/${sandboxId}/pty/${ptyId}/resize`, {
-      cols,
-      rows,
-    });
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.resizePty,
+        { sandboxId, ptyId, cols, rows },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 
   /**
    * Kill a PTY
    */
   async kill(sandboxId: string, ptyId: string): Promise<void> {
-    await this.httpClient.delete(`/sandboxes/${sandboxId}/pty/${ptyId}`);
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.killPty,
+        { sandboxId, ptyId },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
   }
 }

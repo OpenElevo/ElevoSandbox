@@ -2,7 +2,6 @@
  * Full SDK test for Elevo Workspace TypeScript SDK.
  *
  * This script tests all major SDK functionality including:
- * - Health check
  * - Workspace CRUD
  * - Sandbox management
  * - Command execution
@@ -13,12 +12,11 @@
  *   npx ts-node examples/test_full.ts [options]
  *
  * Options:
- *   --server <url>  HTTP server URL (default: http://localhost:8080)
- *   --grpc <url>    gRPC server URL (default: derived from server)
- *   --token <token> FUSE API token (default: test-token)
+ *   --server <addr>  gRPC server address (default: localhost:9090)
+ *   --token <token>  FUSE API token (default: test-token)
  *
  * Example:
- *   npx ts-node examples/test_full.ts --server http://localhost:8080
+ *   npx ts-node examples/test_full.ts --server localhost:9090
  */
 
 import * as fs from 'fs';
@@ -27,46 +25,31 @@ import { WorkspaceClient } from '../src/client';
 import { FuseService } from '../src/services/fuse';
 
 // Parse command line arguments
-function parseArgs(): { server: string; grpc: string; token: string } {
+function parseArgs(): { server: string; token: string } {
   const args = process.argv.slice(2);
-  let server = 'http://localhost:8080';
-  let grpc = '';
+  let server = 'localhost:9090';
   let token = '';
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--server' && args[i + 1]) {
       server = args[++i];
-    } else if (args[i] === '--grpc' && args[i + 1]) {
-      grpc = args[++i];
     } else if (args[i] === '--token' && args[i + 1]) {
       token = args[++i];
     }
   }
 
-  // Derive gRPC URL from HTTP URL if not specified
-  if (!grpc) {
-    grpc = server.replace(':8080', ':9090').replace(':8081', ':9090');
-  }
-
-  return { server, grpc, token };
-}
-
-async function testHealth(client: WorkspaceClient): Promise<void> {
-  console.log('1. Health check...');
-  const health = await client.health();
-  console.log(`   Status: ${health.status}, Version: ${health.version}`);
-  console.log('   OK\n');
+  return { server, token };
 }
 
 async function testWorkspace(client: WorkspaceClient): Promise<string> {
-  console.log('2. Creating workspace...');
+  console.log('1. Creating workspace...');
   const workspace = await client.workspace.create({ name: 'ts-sdk-test' });
   console.log(`   Created workspace: ${workspace.id}\n`);
   return workspace.id;
 }
 
 async function testSandbox(client: WorkspaceClient, workspaceId: string): Promise<string> {
-  console.log('3. Creating sandbox...');
+  console.log('2. Creating sandbox...');
   const sandbox = await client.sandbox.create({
     workspaceId: workspaceId,
     name: 'ts-sdk-test-sandbox',
@@ -76,7 +59,7 @@ async function testSandbox(client: WorkspaceClient, workspaceId: string): Promis
 }
 
 async function testCommand(client: WorkspaceClient, sandboxId: string): Promise<void> {
-  console.log('4. Running command...');
+  console.log('3. Running command...');
   const result = await client.process.run(sandboxId, 'echo', {
     args: ['Hello', 'from', 'TypeScript', 'SDK!'],
   });
@@ -85,7 +68,7 @@ async function testCommand(client: WorkspaceClient, sandboxId: string): Promise<
 }
 
 async function testFileOperations(client: WorkspaceClient, sandboxId: string): Promise<void> {
-  console.log('5. File operations via run...');
+  console.log('4. File operations via run...');
   await client.process.run(sandboxId, 'sh', {
     args: ['-c', 'echo "Hello from TypeScript SDK" > /workspace/test.txt'],
   });
@@ -97,7 +80,7 @@ async function testFileOperations(client: WorkspaceClient, sandboxId: string): P
 }
 
 async function testDirectoryListing(client: WorkspaceClient, sandboxId: string): Promise<void> {
-  console.log('6. Listing workspace directory...');
+  console.log('5. Listing workspace directory...');
   const lsResult = await client.process.run(sandboxId, 'ls', {
     args: ['-la', '/workspace'],
   });
@@ -105,7 +88,26 @@ async function testDirectoryListing(client: WorkspaceClient, sandboxId: string):
   console.log('   OK\n');
 }
 
-async function testFuse(grpcUrl: string, httpUrl: string, token: string, workspaceId: string): Promise<void> {
+async function testStreaming(client: WorkspaceClient, sandboxId: string): Promise<void> {
+  console.log('6. Testing streaming output...');
+  process.stdout.write('   Output: ');
+
+  for await (const event of client.process.runStream(sandboxId, 'bash', {
+    args: ['-c', 'for i in 1 2 3; do echo -n "$i "; sleep 0.2; done; echo "done"'],
+  })) {
+    switch (event.type) {
+      case 'stdout':
+        process.stdout.write(event.data);
+        break;
+      case 'exit':
+        console.log(`\n   Exit code: ${event.code}`);
+        break;
+    }
+  }
+  console.log('   OK\n');
+}
+
+async function testFuse(serverAddr: string, token: string, workspaceId: string): Promise<void> {
   console.log('7. Testing FUSE mount...');
 
   if (!FuseService.isAvailable()) {
@@ -114,7 +116,7 @@ async function testFuse(grpcUrl: string, httpUrl: string, token: string, workspa
   }
 
   console.log('   Creating FUSE service...');
-  const fuseService = new FuseService(grpcUrl, token || undefined, 'latest', undefined, httpUrl);
+  const fuseService = new FuseService(serverAddr, token || undefined);
 
   console.log('   Mounting workspace...');
   const mountOptions: { token?: string } = {};
@@ -182,32 +184,29 @@ async function cleanup(client: WorkspaceClient, sandboxId: string | null, worksp
 }
 
 async function main() {
-  const { server, grpc, token } = parseArgs();
+  const { server, token } = parseArgs();
 
   console.log('=== TypeScript SDK Test ===');
-  console.log(`Server: ${server}`);
-  console.log(`gRPC: ${grpc}\n`);
+  console.log(`Server: ${server}\n`);
 
-  const client = new WorkspaceClient({
-    apiUrl: server,
-    timeout: 60000,
-  });
+  const client = new WorkspaceClient(server);
 
   let workspaceId: string | null = null;
   let sandboxId: string | null = null;
 
   try {
-    await testHealth(client);
     workspaceId = await testWorkspace(client);
     sandboxId = await testSandbox(client, workspaceId);
     await testCommand(client, sandboxId);
     await testFileOperations(client, sandboxId);
     await testDirectoryListing(client, sandboxId);
-    await testFuse(grpc, server, token, workspaceId);
+    await testStreaming(client, sandboxId);
+    await testFuse(server, token, workspaceId);
 
     console.log('=== All tests passed! ===');
   } finally {
     await cleanup(client, sandboxId, workspaceId);
+    client.close();
   }
 }
 

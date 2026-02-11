@@ -3,6 +3,7 @@
  */
 
 import { AxiosError } from 'axios';
+import * as grpc from '@grpc/grpc-js';
 
 /**
  * Base error class for Workspace SDK errors
@@ -18,6 +19,16 @@ export class WorkspaceError extends Error {
     this.name = 'WorkspaceError';
     this.code = code;
     this.details = details;
+  }
+}
+
+/**
+ * Workspace not found error
+ */
+export class WorkspaceNotFoundError extends WorkspaceError {
+  constructor(workspaceId: string) {
+    super(`Workspace not found: ${workspaceId}`, 1001);
+    this.name = 'WorkspaceNotFoundError';
   }
 }
 
@@ -92,7 +103,52 @@ export class AgentNotConnectedError extends WorkspaceError {
 }
 
 /**
- * Parse error response from API
+ * Convert gRPC error to SDK error
+ */
+export function convertGrpcError(error: grpc.ServiceError): WorkspaceError {
+  const message = error.details || error.message || 'Unknown error';
+
+  switch (error.code) {
+    case grpc.status.NOT_FOUND:
+      // Try to determine specific not found type from message
+      if (message.toLowerCase().includes('workspace')) {
+        return new WorkspaceNotFoundError(message);
+      } else if (message.toLowerCase().includes('sandbox')) {
+        return new SandboxNotFoundError(message);
+      } else if (message.toLowerCase().includes('template')) {
+        return new TemplateNotFoundError(message);
+      } else if (message.toLowerCase().includes('pty')) {
+        return new PtyNotFoundError(message);
+      } else if (message.toLowerCase().includes('file')) {
+        return new FileNotFoundError(message);
+      }
+      return new WorkspaceError(message, 1000);
+
+    case grpc.status.PERMISSION_DENIED:
+      return new PermissionDeniedError(message);
+
+    case grpc.status.DEADLINE_EXCEEDED:
+      return new ProcessTimeoutError();
+
+    case grpc.status.UNAVAILABLE:
+      if (message.toLowerCase().includes('agent')) {
+        return new AgentNotConnectedError(message);
+      }
+      return new WorkspaceError(message, 5000);
+
+    case grpc.status.INVALID_ARGUMENT:
+      return new WorkspaceError(message, 1001);
+
+    case grpc.status.FAILED_PRECONDITION:
+      return new WorkspaceError(message, 1002);
+
+    default:
+      return new WorkspaceError(message, 1000);
+  }
+}
+
+/**
+ * Parse error response from HTTP API (legacy)
  */
 export function parseErrorResponse(error: AxiosError): WorkspaceError {
   if (error.response?.data) {
@@ -102,6 +158,8 @@ export function parseErrorResponse(error: AxiosError): WorkspaceError {
 
     // Map error codes to specific error types
     switch (code) {
+      case 1001:
+        return new WorkspaceNotFoundError(message.replace('Workspace not found: ', ''));
       case 2001:
         return new SandboxNotFoundError(message.replace('Sandbox not found: ', ''));
       case 2003:

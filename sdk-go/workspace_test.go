@@ -12,24 +12,43 @@ import (
 )
 
 const (
-	testAPIURL = "http://localhost:8080"
-	testImage  = "workspace-test:latest"
+	testServerAddr = "localhost:9090"
+	testImage      = "workspace-test:latest"
 )
 
-func newTestClient() *workspace.Client {
-	return workspace.NewClient(testAPIURL, workspace.ClientOptions{
+func newTestClient(t *testing.T) *workspace.Client {
+	client, err := workspace.NewClient(testServerAddr, workspace.ClientOptions{
 		Timeout: 60 * time.Second,
 	})
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+	return client
+}
+
+func createTestWorkspace(t *testing.T, client *workspace.Client, ctx context.Context) *workspace.Workspace {
+	ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+		Name: fmt.Sprintf("test-workspace-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		t.Fatalf("failed to create workspace: %v", err)
+	}
+	return ws
 }
 
 // Test 1: Sandbox Lifecycle
 func TestSandboxLifecycle(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
+
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
 
 	// Create
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: ws.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
@@ -77,11 +96,16 @@ func TestSandboxLifecycle(t *testing.T) {
 
 // Test 2: Process Execution
 func TestProcessExecution(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
+
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: ws.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
@@ -166,11 +190,19 @@ func TestProcessExecution(t *testing.T) {
 
 // Test 3: Sandbox Isolation
 func TestSandboxIsolation(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
+	wsA := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, wsA.ID)
+
+	wsB := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, wsB.ID)
+
 	sandboxA, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: wsA.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox A: %v", err)
@@ -178,7 +210,8 @@ func TestSandboxIsolation(t *testing.T) {
 	defer client.Sandbox.Delete(ctx, sandboxA.ID, true)
 
 	sandboxB, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: wsB.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox B: %v", err)
@@ -211,11 +244,16 @@ func TestSandboxIsolation(t *testing.T) {
 
 // Test 4: Long Running Command
 func TestLongRunningCommand(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
+
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: ws.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
@@ -246,11 +284,16 @@ func TestLongRunningCommand(t *testing.T) {
 
 // Test 5: Script Execution
 func TestScriptExecution(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
+
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: ws.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
@@ -292,8 +335,12 @@ func TestScriptExecution(t *testing.T) {
 
 // Test 6: Concurrent Operations
 func TestConcurrentOperations(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
+
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
 
 	// Create sandboxes concurrently
 	var sandboxes [3]*workspace.Sandbox
@@ -307,7 +354,8 @@ func TestConcurrentOperations(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			s, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-				Template: testImage,
+				WorkspaceID: ws.ID,
+				Template:    testImage,
 			})
 			mu.Lock()
 			defer mu.Unlock()
@@ -369,7 +417,8 @@ func TestConcurrentOperations(t *testing.T) {
 
 // Test 7: Error Handling
 func TestErrorHandling(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
 	t.Run("NonExistentSandbox", func(t *testing.T) {
@@ -385,8 +434,12 @@ func TestErrorHandling(t *testing.T) {
 	})
 
 	t.Run("MissingFile", func(t *testing.T) {
+		ws := createTestWorkspace(t, client, ctx)
+		defer client.Workspace.Delete(ctx, ws.ID)
+
 		sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-			Template: testImage,
+			WorkspaceID: ws.ID,
+			Template:    testImage,
 		})
 		if err != nil {
 			t.Fatalf("failed to create sandbox: %v", err)
@@ -410,24 +463,29 @@ func TestErrorHandling(t *testing.T) {
 
 // Test 8: Sandbox Metadata
 func TestSandboxMetadata(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
+
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
 
 	name := "test-sandbox-go"
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
-		Name:     name,
-		Metadata: map[string]string{"purpose": "testing"},
+		WorkspaceID: ws.ID,
+		Template:    testImage,
+		Name:        name,
+		Metadata:    map[string]string{"purpose": "testing"},
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)
 	}
 	defer client.Sandbox.Delete(ctx, sandbox.ID, true)
 
-	if sandbox.Name == nil || *sandbox.Name != name {
-		t.Errorf("expected name %s, got %v", name, sandbox.Name)
+	if sandbox.Name != name {
+		t.Errorf("expected name %s, got %s", name, sandbox.Name)
 	} else {
-		t.Logf("Sandbox created with custom name: %s", *sandbox.Name)
+		t.Logf("Sandbox created with custom name: %s", sandbox.Name)
 	}
 
 	// Test command-level env
@@ -448,13 +506,18 @@ func TestSandboxMetadata(t *testing.T) {
 
 // Test 9: Rapid Operations
 func TestRapidOperations(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
+
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
 
 	success := 0
 	for i := 0; i < 5; i++ {
 		sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-			Template: testImage,
+			WorkspaceID: ws.ID,
+			Template:    testImage,
 		})
 		if err != nil {
 			t.Errorf("failed to create sandbox %d: %v", i, err)
@@ -480,11 +543,16 @@ func TestRapidOperations(t *testing.T) {
 
 // Test helper functions
 func TestHelperFunctions(t *testing.T) {
-	client := newTestClient()
+	client := newTestClient(t)
+	defer client.Close()
 	ctx := context.Background()
 
+	ws := createTestWorkspace(t, client, ctx)
+	defer client.Workspace.Delete(ctx, ws.ID)
+
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-		Template: testImage,
+		WorkspaceID: ws.ID,
+		Template:    testImage,
 	})
 	if err != nil {
 		t.Fatalf("failed to create sandbox: %v", err)

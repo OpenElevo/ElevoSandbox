@@ -1358,6 +1358,68 @@ pub struct KillPtyResponse {
     #[prost(bool, tag = "1")]
     pub success: bool,
 }
+/// PTY stream request (bidirectional streaming)
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PtyStreamRequest {
+    #[prost(oneof = "pty_stream_request::Request", tags = "1, 2, 3")]
+    pub request: ::core::option::Option<pty_stream_request::Request>,
+}
+/// Nested message and enum types in `PtyStreamRequest`.
+pub mod pty_stream_request {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Request {
+        /// Initialize PTY stream connection
+        #[prost(message, tag = "1")]
+        Init(super::PtyStreamInit),
+        /// Input data to send to PTY
+        #[prost(bytes, tag = "2")]
+        Input(::prost::alloc::vec::Vec<u8>),
+        /// Resize event
+        #[prost(message, tag = "3")]
+        Resize(super::PtyResizeEvent),
+    }
+}
+/// PTY stream initialization
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PtyStreamInit {
+    /// Sandbox ID
+    #[prost(string, tag = "1")]
+    pub sandbox_id: ::prost::alloc::string::String,
+    /// PTY ID
+    #[prost(string, tag = "2")]
+    pub pty_id: ::prost::alloc::string::String,
+}
+/// PTY resize event
+#[derive(Clone, Copy, PartialEq, ::prost::Message)]
+pub struct PtyResizeEvent {
+    /// New columns
+    #[prost(uint32, tag = "1")]
+    pub cols: u32,
+    /// New rows
+    #[prost(uint32, tag = "2")]
+    pub rows: u32,
+}
+/// PTY stream response (bidirectional streaming)
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PtyStreamResponse {
+    #[prost(oneof = "pty_stream_response::Response", tags = "1, 2, 3")]
+    pub response: ::core::option::Option<pty_stream_response::Response>,
+}
+/// Nested message and enum types in `PtyStreamResponse`.
+pub mod pty_stream_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Response {
+        /// Output data from PTY
+        #[prost(bytes, tag = "1")]
+        Output(::prost::alloc::vec::Vec<u8>),
+        /// PTY process exit code
+        #[prost(int32, tag = "2")]
+        ExitCode(i32),
+        /// Error message
+        #[prost(string, tag = "3")]
+        Error(::prost::alloc::string::String),
+    }
+}
 /// Generated client implementations.
 pub mod pty_service_client {
     #![allow(
@@ -1525,6 +1587,31 @@ pub mod pty_service_client {
                 .insert(GrpcMethod::new("workspace.v1.PtyService", "KillPty"));
             self.inner.unary(req, path, codec).await
         }
+        /// Bidirectional stream for PTY I/O
+        pub async fn pty_stream(
+            &mut self,
+            request: impl tonic::IntoStreamingRequest<Message = super::PtyStreamRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::PtyStreamResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/workspace.v1.PtyService/PtyStream",
+            );
+            let mut req = request.into_streaming_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("workspace.v1.PtyService", "PtyStream"));
+            self.inner.streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1561,6 +1648,17 @@ pub mod pty_service_server {
             &self,
             request: tonic::Request<super::KillPtyRequest>,
         ) -> std::result::Result<tonic::Response<super::KillPtyResponse>, tonic::Status>;
+        /// Server streaming response type for the PtyStream method.
+        type PtyStreamStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::PtyStreamResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Bidirectional stream for PTY I/O
+        async fn pty_stream(
+            &self,
+            request: tonic::Request<tonic::Streaming<super::PtyStreamRequest>>,
+        ) -> std::result::Result<tonic::Response<Self::PtyStreamStream>, tonic::Status>;
     }
     /// PTY service for interactive terminal sessions
     #[derive(Debug)]
@@ -1770,6 +1868,54 @@ pub mod pty_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/workspace.v1.PtyService/PtyStream" => {
+                    #[allow(non_camel_case_types)]
+                    struct PtyStreamSvc<T: PtyService>(pub Arc<T>);
+                    impl<
+                        T: PtyService,
+                    > tonic::server::StreamingService<super::PtyStreamRequest>
+                    for PtyStreamSvc<T> {
+                        type Response = super::PtyStreamResponse;
+                        type ResponseStream = T::PtyStreamStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<
+                                tonic::Streaming<super::PtyStreamRequest>,
+                            >,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PtyService>::pty_stream(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = PtyStreamSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)
@@ -3534,6 +3680,26 @@ pub struct FsStatFsResponse {
     #[prost(uint32, tag = "8")]
     pub frsize: u32,
 }
+/// Download binary request
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DownloadBinaryRequest {
+    /// Binary name (e.g., "workspace-fuse")
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    /// Target platform (e.g., "linux", "darwin")
+    #[prost(string, tag = "2")]
+    pub platform: ::prost::alloc::string::String,
+    /// Target architecture (e.g., "amd64", "arm64")
+    #[prost(string, tag = "3")]
+    pub arch: ::prost::alloc::string::String,
+}
+/// Download binary response (streaming)
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DownloadBinaryResponse {
+    /// Binary data chunk
+    #[prost(bytes = "vec", tag = "1")]
+    pub chunk: ::prost::alloc::vec::Vec<u8>,
+}
 /// File type enumeration
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -4066,6 +4232,33 @@ pub mod file_system_service_client {
                 .insert(GrpcMethod::new("workspace.v1.FileSystemService", "StatFs"));
             self.inner.unary(req, path, codec).await
         }
+        /// Download binary file (e.g., workspace-fuse)
+        pub async fn download_binary(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DownloadBinaryRequest>,
+        ) -> std::result::Result<
+            tonic::Response<tonic::codec::Streaming<super::DownloadBinaryResponse>>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/workspace.v1.FileSystemService/DownloadBinary",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("workspace.v1.FileSystemService", "DownloadBinary"),
+                );
+            self.inner.server_streaming(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -4199,6 +4392,20 @@ pub mod file_system_service_server {
             request: tonic::Request<super::FsStatFsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::FsStatFsResponse>,
+            tonic::Status,
+        >;
+        /// Server streaming response type for the DownloadBinary method.
+        type DownloadBinaryStream: tonic::codegen::tokio_stream::Stream<
+                Item = std::result::Result<super::DownloadBinaryResponse, tonic::Status>,
+            >
+            + std::marker::Send
+            + 'static;
+        /// Download binary file (e.g., workspace-fuse)
+        async fn download_binary(
+            &self,
+            request: tonic::Request<super::DownloadBinaryRequest>,
+        ) -> std::result::Result<
+            tonic::Response<Self::DownloadBinaryStream>,
             tonic::Status,
         >;
     }
@@ -4954,6 +5161,53 @@ pub mod file_system_service_server {
                                 max_encoding_message_size,
                             );
                         let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/workspace.v1.FileSystemService/DownloadBinary" => {
+                    #[allow(non_camel_case_types)]
+                    struct DownloadBinarySvc<T: FileSystemService>(pub Arc<T>);
+                    impl<
+                        T: FileSystemService,
+                    > tonic::server::ServerStreamingService<super::DownloadBinaryRequest>
+                    for DownloadBinarySvc<T> {
+                        type Response = super::DownloadBinaryResponse;
+                        type ResponseStream = T::DownloadBinaryStream;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::ResponseStream>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DownloadBinaryRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as FileSystemService>::download_binary(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = DownloadBinarySvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.server_streaming(method, req).await;
                         Ok(res)
                     };
                     Box::pin(fut)

@@ -3,11 +3,20 @@ Type definitions for the Workspace SDK
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Literal, Callable, Awaitable
-from datetime import datetime
+from typing import Optional, Dict, List, Literal, Callable, Awaitable, Union
+from enum import Enum
 
 
-SandboxState = Literal["starting", "running", "stopping", "stopped", "error"]
+class SandboxState(str, Enum):
+    """Sandbox state enum"""
+    UNKNOWN = "unknown"
+    STARTING = "starting"
+    RUNNING = "running"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
 FileType = Literal["file", "directory", "symlink"]
 
 
@@ -15,8 +24,8 @@ FileType = Literal["file", "directory", "symlink"]
 class Workspace:
     """Workspace resource"""
     id: str
-    created_at: str
-    updated_at: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     name: Optional[str] = None
     nfs_url: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
@@ -36,8 +45,8 @@ class Sandbox:
     workspace_id: str
     template: str
     state: SandboxState
-    created_at: str
-    updated_at: str
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     name: Optional[str] = None
     env: Optional[Dict[str, str]] = None
     metadata: Optional[Dict[str, str]] = None
@@ -101,7 +110,7 @@ class ErrorEvent:
     message: str
 
 
-ProcessEvent = StdoutEvent | StderrEvent | ExitEvent | ErrorEvent
+ProcessEvent = Union[StdoutEvent, StderrEvent, ExitEvent, ErrorEvent]
 
 
 @dataclass
@@ -117,35 +126,9 @@ class PtyOptions:
 class PtyHandle:
     """PTY handle for interacting with a terminal"""
     id: str
+    sandbox_id: str
     cols: int
     rows: int
-    _write: Callable[[bytes], Awaitable[None]] = field(repr=False)
-    _resize: Callable[[int, int], Awaitable[None]] = field(repr=False)
-    _kill: Callable[[], Awaitable[None]] = field(repr=False)
-    _on_data: Callable[[Callable[[bytes], None]], None] = field(repr=False)
-    _on_close: Callable[[Callable[[], None]], None] = field(repr=False)
-
-    async def write(self, data: bytes | str) -> None:
-        """Write data to the PTY"""
-        if isinstance(data, str):
-            data = data.encode()
-        await self._write(data)
-
-    async def resize(self, cols: int, rows: int) -> None:
-        """Resize the PTY"""
-        await self._resize(cols, rows)
-
-    async def kill(self) -> None:
-        """Kill the PTY"""
-        await self._kill()
-
-    def on_data(self, callback: Callable[[bytes], None]) -> None:
-        """Register a callback for data events"""
-        self._on_data(callback)
-
-    def on_close(self, callback: Callable[[], None]) -> None:
-        """Register a callback for close events"""
-        self._on_close(callback)
 
 
 @dataclass

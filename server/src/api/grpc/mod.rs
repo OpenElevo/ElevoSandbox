@@ -2,6 +2,10 @@
 
 pub mod auth;
 pub mod filesystem;
+pub mod process;
+pub mod pty;
+pub mod sandbox;
+pub mod workspace;
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -21,6 +25,10 @@ use crate::proto::{
 
 pub use auth::AuthInterceptor;
 pub use filesystem::FileSystemServiceImpl;
+pub use process::GrpcProcessService;
+pub use pty::GrpcPtyService;
+pub use sandbox::GrpcSandboxService;
+pub use workspace::GrpcWorkspaceService;
 
 /// gRPC service implementation for Agent connections
 pub struct AgentServiceImpl {

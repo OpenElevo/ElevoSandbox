@@ -17,13 +17,35 @@ import (
 )
 
 func main() {
-	client := workspace.NewClient("http://localhost:8080", workspace.ClientOptions{
+	client, err := workspace.NewClient("localhost:9090", workspace.ClientOptions{
 		Timeout: 120 * time.Second,
 	})
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Close()
 
 	ctx := context.Background()
 
 	fmt.Println("=== Concurrent Operations Example ===")
+
+	// Create a workspace first
+	fmt.Println("0. Creating workspace...")
+	ws, err := client.Workspace.Create(ctx, &workspace.CreateWorkspaceParams{
+		Name: "concurrent-workspace",
+	})
+	if err != nil {
+		log.Fatalf("Failed to create workspace: %v", err)
+	}
+	fmt.Printf("   Created workspace: %s\n\n", ws.ID)
+
+	defer func() {
+		fmt.Println("\n5. Cleaning up workspace...")
+		if err := client.Workspace.Delete(ctx, ws.ID); err != nil {
+			log.Printf("Warning: failed to delete workspace: %v", err)
+		}
+		fmt.Println("   Done!")
+	}()
 
 	// Create multiple sandboxes concurrently
 	numSandboxes := 3
@@ -40,8 +62,9 @@ func main() {
 			defer wg.Done()
 
 			sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
-				Template: "workspace-test:latest",
-				Name:     fmt.Sprintf("concurrent-sandbox-%d", idx),
+				WorkspaceID: ws.ID,
+				Template:    "workspace-test:latest",
+				Name:        fmt.Sprintf("concurrent-sandbox-%d", idx),
 			})
 			if err != nil {
 				log.Printf("Failed to create sandbox %d: %v", idx, err)
