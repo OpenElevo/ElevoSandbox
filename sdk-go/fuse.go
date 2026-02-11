@@ -18,8 +18,8 @@ import (
 // Default version and download URL template
 const (
 	DefaultVersion    = "latest"
-	GitHubReleaseURL  = "https://github.com/elevo-ai/elevo-workspace/releases/download/%s/workspace-fuse-%s-%s"
-	GitHubLatestURL   = "https://github.com/elevo-ai/elevo-workspace/releases/latest/download/workspace-fuse-%s-%s"
+	GitHubReleaseURL  = "https://github.com/OpenElevo/ElevoSandbox/releases/download/%s/workspace-fuse-%s-%s"
+	GitHubLatestURL   = "https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-%s-%s"
 )
 
 // getPlatformInfo returns the current platform and architecture
@@ -107,20 +107,14 @@ func downloadFromURL(downloadURL string, destPath string, proxy string) bool {
 }
 
 // tryDownloadFromServer tries to download workspace-fuse binary from workspace server
+// serverURL should be the HTTP API URL (e.g., http://localhost:8081), not the gRPC URL
 func tryDownloadFromServer(serverURL string, destPath string, proxy string) bool {
 	plat, arch, err := getPlatformInfo()
 	if err != nil {
 		return false
 	}
 
-	// Convert gRPC URL to HTTP URL if needed
-	httpURL := serverURL
-	if strings.Contains(httpURL, ":9090") || strings.Contains(httpURL, ":19090") {
-		httpURL = strings.Replace(httpURL, ":9090", ":8080", 1)
-		httpURL = strings.Replace(httpURL, ":19090", ":18080", 1)
-	}
-
-	downloadURL := fmt.Sprintf("%s/api/v1/downloads/workspace-fuse/%s/%s", httpURL, plat, arch)
+	downloadURL := fmt.Sprintf("%s/api/v1/downloads/workspace-fuse/%s/%s", serverURL, plat, arch)
 	return downloadFromURL(downloadURL, destPath, proxy)
 }
 
@@ -492,13 +486,10 @@ type FuseService struct {
 }
 
 // NewFuseService creates a new FUSE service
-// httpServer is optional - if empty, it will be derived from server URL
+// httpServer is optional - if empty, binary will be downloaded from GitHub
 func NewFuseService(server string, defaultToken string, binaryVersion string, proxy string, httpServer string) *FuseService {
 	if binaryVersion == "" {
 		binaryVersion = DefaultVersion
-	}
-	if httpServer == "" {
-		httpServer = server
 	}
 	return &FuseService{
 		server:        server,

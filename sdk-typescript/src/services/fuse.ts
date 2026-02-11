@@ -16,9 +16,9 @@ import { URL } from 'url';
 // Default version and download URL template
 const DEFAULT_VERSION = 'latest';
 const GITHUB_RELEASE_URL =
-  'https://github.com/elevo-ai/elevo-workspace/releases/download/{version}/workspace-fuse-{platform}-{arch}';
+  'https://github.com/OpenElevo/ElevoSandbox/releases/download/{version}/workspace-fuse-{platform}-{arch}';
 const GITHUB_LATEST_URL =
-  'https://github.com/elevo-ai/elevo-workspace/releases/latest/download/workspace-fuse-{platform}-{arch}';
+  'https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-{platform}-{arch}';
 
 /**
  * Get current platform and architecture
@@ -153,6 +153,7 @@ async function tryDownloadFile(url: string, destPath: string, proxy?: string): P
 
 /**
  * Try to download workspace-fuse binary from workspace server
+ * @param serverUrl HTTP server URL (e.g., http://localhost:8080)
  */
 async function tryDownloadFromServer(
   serverUrl: string,
@@ -161,13 +162,7 @@ async function tryDownloadFromServer(
 ): Promise<boolean> {
   const { platform, arch } = getPlatformInfo();
 
-  // Convert gRPC URL to HTTP URL if needed
-  let httpUrl = serverUrl;
-  if (httpUrl.includes(':9090') || httpUrl.includes(':19090')) {
-    httpUrl = httpUrl.replace(':9090', ':8080').replace(':19090', ':18080');
-  }
-
-  const downloadUrl = `${httpUrl}/api/v1/downloads/workspace-fuse/${platform}/${arch}`;
+  const downloadUrl = `${serverUrl}/api/v1/downloads/workspace-fuse/${platform}/${arch}`;
   return tryDownloadFile(downloadUrl, destPath, proxy);
 }
 
@@ -487,7 +482,7 @@ export class FuseService {
   private readonly defaultToken?: string;
   private readonly binaryVersion: string;
   private readonly proxy?: string;
-  private readonly httpServer: string;
+  private readonly httpServer?: string;
   private _binaryPath: string | null = null;
   private _mounts: Map<string, FuseMount> = new Map();
 
@@ -510,7 +505,7 @@ export class FuseService {
     this.defaultToken = defaultToken;
     this.binaryVersion = binaryVersion;
     this.proxy = proxy;
-    this.httpServer = httpServer || server;
+    this.httpServer = httpServer;
   }
 
   private async _ensureBinary(): Promise<string> {

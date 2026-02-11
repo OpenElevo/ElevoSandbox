@@ -22,8 +22,8 @@ from urllib.error import URLError, HTTPError
 
 # Default version and download URL template
 DEFAULT_VERSION = "latest"
-GITHUB_RELEASE_URL = "https://github.com/elevo-ai/elevo-workspace/releases/download/{version}/workspace-fuse-{platform}-{arch}"
-GITHUB_LATEST_URL = "https://github.com/elevo-ai/elevo-workspace/releases/latest/download/workspace-fuse-{platform}-{arch}"
+GITHUB_RELEASE_URL = "https://github.com/OpenElevo/ElevoSandbox/releases/download/{version}/workspace-fuse-{platform}-{arch}"
+GITHUB_LATEST_URL = "https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-{platform}-{arch}"
 
 
 def get_platform_info() -> tuple[str, str]:
@@ -104,7 +104,7 @@ def _try_download_from_server(
     Try to download workspace-fuse binary from workspace server.
 
     Args:
-        server_url: Base server URL (e.g., http://localhost:8080)
+        server_url: HTTP server URL (e.g., http://localhost:8080)
         dest_path: Destination path for the binary
         proxy: HTTP proxy URL (optional)
 
@@ -113,14 +113,8 @@ def _try_download_from_server(
     """
     plat, arch = get_platform_info()
 
-    # Convert gRPC URL to HTTP URL if needed
-    # gRPC is typically on port 9090, HTTP on 8080
-    http_url = server_url
-    if ":9090" in http_url or ":19090" in http_url:
-        http_url = http_url.replace(":9090", ":8080").replace(":19090", ":18080")
-
     # Build download URL
-    download_url = f"{http_url}/api/v1/downloads/workspace-fuse/{plat}/{arch}"
+    download_url = f"{server_url}/api/v1/downloads/workspace-fuse/{plat}/{arch}"
 
     return _download_from_url(download_url, dest_path, proxy)
 
@@ -474,7 +468,7 @@ class FuseService:
         self.default_token = default_token
         self.binary_version = binary_version
         self.proxy = proxy
-        self.http_server = http_server or server
+        self.http_server = http_server
         self._binary_path: Optional[Path] = None
         self._mounts: Dict[str, FuseMount] = {}
 
