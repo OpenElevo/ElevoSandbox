@@ -326,8 +326,8 @@ impl<B: FuseBackend> Filesystem for FuseFilesystemWrapper<B> {
             }
         };
 
-        let atime_ts = atime.map(|t| time_or_now_to_timestamp(t));
-        let mtime_ts = mtime.map(|t| time_or_now_to_timestamp(t));
+        let atime_ts = atime.map(time_or_now_to_timestamp);
+        let mtime_ts = mtime.map(time_or_now_to_timestamp);
 
         let backend = self.inner.backend.clone();
         let path_owned = path.clone();
@@ -590,12 +590,10 @@ impl<B: FuseBackend> Filesystem for FuseFilesystemWrapper<B> {
         if offset <= 1 {
             let parent_ino = if ino == ROOT_INODE {
                 ROOT_INODE
+            } else if let Some(parent_path) = path.rsplit_once('/').map(|(p, _)| p.to_string()) {
+                self.inner.inodes.get_or_create(&parent_path)
             } else {
-                if let Some(parent_path) = path.rsplit_once('/').map(|(p, _)| p.to_string()) {
-                    self.inner.inodes.get_or_create(&parent_path)
-                } else {
-                    ROOT_INODE
-                }
+                ROOT_INODE
             };
             if reply.add(parent_ino, 2, FileType::Directory, "..") {
                 reply.ok();

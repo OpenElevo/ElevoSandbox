@@ -716,7 +716,7 @@ fn proto_error_to_storage(err: &StorageOperationError) -> StorageError {
         StorageErrorCode::NotSupported => StorageError::NotSupported(err.message.clone()),
         StorageErrorCode::IoError => StorageError::Io {
             path: err.message.clone(),
-            source: std::io::Error::new(std::io::ErrorKind::Other, err.message.clone()),
+            source: std::io::Error::other(err.message.clone()),
         },
         StorageErrorCode::Unspecified => StorageError::Internal(err.message.clone()),
     }

@@ -32,6 +32,7 @@ pub struct RecoveryService {
 }
 
 impl RecoveryService {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         workspace_repository: Arc<WorkspaceRepository>,
         storage_router: Arc<StorageRouter>,

@@ -5,10 +5,11 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Storage type: how a workspace's files are stored
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StorageType {
     /// Server-managed storage (local disk or S3)
+    #[default]
     Managed,
     /// Client-provided remote storage (gRPC reverse stream or NFS)
     Remote,
@@ -31,11 +32,6 @@ impl StorageType {
     }
 }
 
-impl Default for StorageType {
-    fn default() -> Self {
-        StorageType::Managed
-    }
-}
 
 /// Transport channel for remote storage
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

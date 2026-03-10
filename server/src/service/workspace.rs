@@ -47,6 +47,7 @@ pub struct WorkspaceService {
 
 impl WorkspaceService {
     /// Create a new workspace service
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         repository: Arc<WorkspaceRepository>,
         nfs_manager: Arc<NfsManager>,
@@ -136,7 +137,7 @@ impl WorkspaceService {
         let is_remote = params
             .storage_type
             .as_ref()
-            .map_or(false, |t| *t == StorageType::Remote);
+            .is_some_and(|t| *t == StorageType::Remote);
 
         info!(
             "Creating workspace with name: {:?}, storage_type: {}",
