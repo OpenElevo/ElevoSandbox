@@ -32,7 +32,6 @@ impl StorageType {
     }
 }
 
-
 /// Transport channel for remote storage
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
