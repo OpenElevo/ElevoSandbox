@@ -154,6 +154,14 @@ impl StorageBackend for LocalStorageBackend {
             fs::create_dir_all(parent)
                 .await
                 .map_err(|e| StorageError::from_io(e, path))?;
+
+            // Allow sandbox containers (which may run as a different UID) to read/write
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o777);
+                let _ = fs::set_permissions(parent, perms).await;
+            }
         }
 
         fs::write(&full_path, content)
@@ -287,12 +295,24 @@ impl StorageBackend for LocalStorageBackend {
         if recursive {
             fs::create_dir_all(&full_path)
                 .await
-                .map_err(|e| StorageError::from_io(e, path))
+                .map_err(|e| StorageError::from_io(e, path))?;
         } else {
             fs::create_dir(&full_path)
                 .await
-                .map_err(|e| StorageError::from_io(e, path))
+                .map_err(|e| StorageError::from_io(e, path))?;
         }
+
+        // Allow sandbox containers (which may run as a different UID) to read/write
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o777);
+            fs::set_permissions(&full_path, perms)
+                .await
+                .map_err(|e| StorageError::from_io(e, path))?;
+        }
+
+        Ok(())
     }
 
     // ── Remove Operations ──
@@ -380,7 +400,19 @@ impl StorageBackend for LocalStorageBackend {
         let workspace_dir = self.workspace_dir(workspace_id);
         fs::create_dir_all(&workspace_dir)
             .await
-            .map_err(|e| StorageError::from_io(e, workspace_id))
+            .map_err(|e| StorageError::from_io(e, workspace_id))?;
+
+        // Allow sandbox containers (which may run as a different UID) to read/write
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o777);
+            fs::set_permissions(&workspace_dir, perms)
+                .await
+                .map_err(|e| StorageError::from_io(e, workspace_id))?;
+        }
+
+        Ok(())
     }
 
     async fn delete_workspace_root(&self, workspace_id: &str) -> StorageResult<()> {

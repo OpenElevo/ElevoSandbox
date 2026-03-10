@@ -67,7 +67,6 @@ func (p *ProcessService) RunStream(ctx context.Context, sandboxID string, comman
 
 	go func() {
 		defer close(eventCh)
-		defer close(errCh)
 
 		if opts == nil {
 			opts = &RunCommandOptions{}

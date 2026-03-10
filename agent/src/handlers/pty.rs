@@ -6,12 +6,13 @@ use std::sync::Arc;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use tokio::sync::{Mutex, RwLock};
 
-/// PTY instance
+/// PTY instance holding the master (for resize) and a pre-extracted writer (for input)
 pub struct PtyInstance {
-    pub master: Mutex<Box<dyn MasterPty + Send>>,
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    writer: Mutex<Box<dyn std::io::Write + Send>>,
 }
 
-// Safety: We use Mutex to ensure exclusive access to the MasterPty
+// Safety: We use Mutex to ensure exclusive access to the MasterPty and writer
 unsafe impl Sync for PtyInstance {}
 
 /// PTY manager
@@ -29,7 +30,10 @@ impl PtyManager {
         }
     }
 
-    /// Create a new PTY
+    /// Create a new PTY, returning a reader for the caller to consume output from.
+    ///
+    /// The caller should spawn a blocking task to read from the returned reader
+    /// and forward the data as `AgentPtyOutput` messages.
     pub async fn create(
         &self,
         id: String,
@@ -37,7 +41,7 @@ impl PtyManager {
         rows: u16,
         shell: Option<&str>,
         env: &HashMap<String, String>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Box<dyn std::io::Read + Send>> {
         let mut ptys = self.ptys.write().await;
 
         if ptys.len() >= self.max_ptys {
@@ -61,13 +65,18 @@ impl PtyManager {
 
         let _child = pair.slave.spawn_command(cmd)?;
 
+        // Extract reader and writer from the master before storing it
+        let reader = pair.master.try_clone_reader()?;
+        let writer = pair.master.take_writer()?;
+
         let instance = Arc::new(PtyInstance {
             master: Mutex::new(pair.master),
+            writer: Mutex::new(writer),
         });
 
         ptys.insert(id, instance);
 
-        Ok(())
+        Ok(reader)
     }
 
     /// Resize a PTY
@@ -100,7 +109,7 @@ impl PtyManager {
         }
     }
 
-    /// Write data to a PTY
+    /// Write data to a PTY (input from user)
     pub async fn write(&self, id: &str, data: &[u8]) -> anyhow::Result<()> {
         let ptys = self.ptys.read().await;
 
@@ -108,9 +117,8 @@ impl PtyManager {
             .get(id)
             .ok_or_else(|| anyhow::anyhow!("PTY not found"))?;
 
-        let master = pty.master.lock().await;
+        let mut writer = pty.writer.lock().await;
         use std::io::Write;
-        let mut writer = master.take_writer()?;
         writer.write_all(data)?;
 
         Ok(())

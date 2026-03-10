@@ -10,6 +10,8 @@ use tokio::time::{interval, sleep, timeout};
 use tonic::transport::Channel;
 use tracing::{debug, error, info, warn};
 
+use std::io::Read;
+
 use crate::handlers::{process, pty::PtyManager};
 
 #[allow(clippy::all)]
@@ -21,7 +23,7 @@ mod proto {
 use proto::agent_service_client::AgentServiceClient;
 use proto::{
     agent_command_response, agent_message, server_message, AgentCommandError, AgentCommandResponse,
-    AgentCommandSuccess, AgentHandshake, AgentHeartbeat, AgentMessage,
+    AgentCommandSuccess, AgentHandshake, AgentHeartbeat, AgentMessage, AgentPtyOutput,
 };
 
 const AGENT_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -259,7 +261,7 @@ impl ConnectionManager {
 
                     let result = pty_manager
                         .create(
-                            req.pty_id,
+                            req.pty_id.clone(),
                             req.cols as u16,
                             req.rows as u16,
                             req.shell.as_deref(),
@@ -267,7 +269,7 @@ impl ConnectionManager {
                         )
                         .await;
 
-                    let response = match result {
+                    let response = match &result {
                         Ok(_) => AgentCommandResponse {
                             correlation_id,
                             result: Some(agent_command_response::Result::Success(
@@ -294,6 +296,15 @@ impl ConnectionManager {
                             message: Some(agent_message::Message::CommandResponse(response)),
                         })
                         .await;
+
+                    // Spawn PTY output reader if creation succeeded
+                    if let Ok(reader) = result {
+                        let tx_output = tx_response.clone();
+                        let pty_id = req.pty_id;
+                        tokio::task::spawn_blocking(move || {
+                            Self::pty_read_loop(reader, pty_id, tx_output);
+                        });
+                    }
                 }
 
                 Some(server_message::Message::ResizePty(req)) => {
@@ -398,6 +409,40 @@ impl ConnectionManager {
         *self.connected.write().await = false;
 
         Ok(())
+    }
+
+    /// Read loop for PTY output — runs in a blocking thread
+    fn pty_read_loop(
+        mut reader: Box<dyn Read + Send>,
+        pty_id: String,
+        tx: mpsc::Sender<AgentMessage>,
+    ) {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    debug!(pty_id = %pty_id, "PTY reader EOF");
+                    break;
+                }
+                Ok(n) => {
+                    let data = buf[..n].to_vec();
+                    let msg = AgentMessage {
+                        message: Some(agent_message::Message::PtyOutput(AgentPtyOutput {
+                            pty_id: pty_id.clone(),
+                            data,
+                        })),
+                    };
+                    if tx.blocking_send(msg).is_err() {
+                        debug!(pty_id = %pty_id, "PTY output channel closed");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    debug!(pty_id = %pty_id, error = %e, "PTY read error");
+                    break;
+                }
+            }
+        }
     }
 
     /// Handle run command request
