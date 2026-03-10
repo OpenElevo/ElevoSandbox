@@ -12,7 +12,7 @@ NC='\033[0m'
 
 # Configuration
 API_BASE="${WORKSPACE_API_URL:-http://localhost:8080}/api/v1"
-TEST_IMAGE="${TEST_IMAGE:-workspace-test:latest}"
+TEST_IMAGE="${TEST_IMAGE:-workspace-base:latest}"
 
 # Counters
 PASSED=0
@@ -54,12 +54,27 @@ except:
 }
 
 # API helpers (matching Go SDK methods)
-sandbox_create() {
-    local template="${1:-$TEST_IMAGE}"
-    local name="$2"
-    local metadata="$3"
+workspace_create() {
+    local name="${1:-}"
+    local data="{}"
+    [ -n "$name" ] && data="{\"name\": \"$name\"}"
 
-    local data="{\"template\": \"$template\""
+    curl -s -X POST "$API_BASE/workspaces" \
+        -H "Content-Type: application/json" \
+        -d "$data"
+}
+
+workspace_delete() {
+    curl -s -X DELETE "$API_BASE/workspaces/$1"
+}
+
+sandbox_create() {
+    local workspace_id="$1"
+    local template="${2:-$TEST_IMAGE}"
+    local name="$3"
+    local metadata="$4"
+
+    local data="{\"workspace_id\": \"$workspace_id\", \"template\": \"$template\""
     [ -n "$name" ] && data="$data, \"name\": \"$name\""
     [ -n "$metadata" ] && data="$data, \"metadata\": $metadata"
     data="$data}"
@@ -104,8 +119,17 @@ process_run() {
 test_sandbox_lifecycle() {
     log_section "Test: Sandbox Lifecycle"
 
+    # Create workspace first
+    local ws=$(workspace_create "go-lifecycle-ws")
+    local ws_id=$(json_get "$ws" "id")
+
+    if [ -z "$ws_id" ]; then
+        log_fail "workspace.Create() failed"
+        return 1
+    fi
+
     # Create
-    local result=$(sandbox_create "$TEST_IMAGE")
+    local result=$(sandbox_create "$ws_id" "$TEST_IMAGE")
     local id=$(json_get "$result" "id")
     local state=$(json_get "$result" "state")
 
@@ -113,6 +137,7 @@ test_sandbox_lifecycle() {
         log_pass "sandbox.Create(): ID=$id, state=$state"
     else
         log_fail "sandbox.Create() failed"
+        workspace_delete "$ws_id" > /dev/null
         return 1
     fi
 
@@ -136,12 +161,16 @@ test_sandbox_lifecycle() {
     # Delete
     sandbox_delete "$id" "true" > /dev/null
     log_pass "sandbox.Delete(): $id"
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_process_execution() {
     log_section "Test: Process Execution"
 
-    local sandbox=$(sandbox_create)
+    local ws=$(workspace_create "go-process-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(sandbox_create "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     # Echo
@@ -194,26 +223,30 @@ test_process_execution() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_sandbox_isolation() {
     log_section "Test: Sandbox Isolation"
 
-    local sandbox_a=$(sandbox_create)
+    local ws=$(workspace_create "go-isolation-ws")
+    local ws_id=$(json_get "$ws" "id")
+
+    local sandbox_a=$(sandbox_create "$ws_id")
     local id_a=$(json_get "$sandbox_a" "id")
 
-    local sandbox_b=$(sandbox_create)
+    local sandbox_b=$(sandbox_create "$ws_id")
     local id_b=$(json_get "$sandbox_b" "id")
 
     # Write in A
-    process_run "$id_a" "bash" '["-c", "echo secret_go > /workspace/secret.txt"]' "{}" > /dev/null
+    process_run "$id_a" "bash" '["-c", "echo secret_go > /tmp/secret.txt"]' "{}" > /dev/null
     log_pass "Created file in sandbox A"
 
     # Try read from B
-    local result=$(process_run "$id_b" "cat" '["/workspace/secret.txt"]' "{}")
-    local exit_code=$(json_get "$result" "exit_code")
+    local result=$(process_run "$id_b" "bash" '["-c", "cat /tmp/secret.txt 2>/dev/null || echo NOT_FOUND"]' "{}")
+    local stdout=$(json_get "$result" "stdout")
 
-    if [ "$exit_code" != "0" ]; then
+    if echo "$stdout" | grep -q "NOT_FOUND"; then
         log_pass "Isolation verified: B cannot read A's files"
     else
         log_fail "Isolation broken!"
@@ -221,12 +254,15 @@ test_sandbox_isolation() {
 
     sandbox_delete "$id_a" "true" > /dev/null
     sandbox_delete "$id_b" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_long_running() {
     log_section "Test: Long Running Command"
 
-    local sandbox=$(sandbox_create)
+    local ws=$(workspace_create "go-longrun-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(sandbox_create "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     local start=$(date +%s)
@@ -244,12 +280,15 @@ test_long_running() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_script_execution() {
     log_section "Test: Script Execution"
 
-    local sandbox=$(sandbox_create)
+    local ws=$(workspace_create "go-script-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(sandbox_create "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     # Bash loop
@@ -273,15 +312,19 @@ test_script_execution() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_concurrent_operations() {
     log_section "Test: Concurrent Operations"
 
+    local ws=$(workspace_create "go-concurrent-ws")
+    local ws_id=$(json_get "$ws" "id")
+
     # Create 3 sandboxes
-    local s1=$(sandbox_create)
-    local s2=$(sandbox_create)
-    local s3=$(sandbox_create)
+    local s1=$(sandbox_create "$ws_id")
+    local s2=$(sandbox_create "$ws_id")
+    local s3=$(sandbox_create "$ws_id")
 
     local id1=$(json_get "$s1" "id")
     local id2=$(json_get "$s2" "id")
@@ -291,6 +334,7 @@ test_concurrent_operations() {
         log_pass "Created 3 sandboxes"
     else
         log_fail "Failed to create sandboxes"
+        workspace_delete "$ws_id" > /dev/null
         return 1
     fi
 
@@ -311,6 +355,8 @@ test_concurrent_operations() {
     sandbox_delete "$id2" "true" > /dev/null
     sandbox_delete "$id3" "true" > /dev/null
     log_pass "Deleted 3 sandboxes"
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_error_handling() {
@@ -325,7 +371,9 @@ test_error_handling() {
     fi
 
     # Missing file
-    local sandbox=$(sandbox_create)
+    local ws=$(workspace_create "go-error-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(sandbox_create "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     result=$(process_run "$sandbox_id" "cat" '["/nonexistent/file.txt"]' "{}")
@@ -338,12 +386,16 @@ test_error_handling() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_sandbox_metadata() {
     log_section "Test: Sandbox Metadata"
 
-    local result=$(sandbox_create "$TEST_IMAGE" "test-go-sandbox" '{"purpose": "testing"}')
+    local ws=$(workspace_create "go-metadata-ws")
+    local ws_id=$(json_get "$ws" "id")
+
+    local result=$(sandbox_create "$ws_id" "$TEST_IMAGE" "test-go-sandbox" '{"purpose": "testing"}')
     local sandbox_id=$(json_get "$result" "id")
     local name=$(json_get "$result" "name")
 
@@ -364,14 +416,18 @@ test_sandbox_metadata() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_rapid_operations() {
     log_section "Test: Rapid Operations"
 
+    local ws=$(workspace_create "go-rapid-ws")
+    local ws_id=$(json_get "$ws" "id")
+
     local success=0
     for i in 1 2 3 4 5; do
-        local sandbox=$(sandbox_create)
+        local sandbox=$(sandbox_create "$ws_id")
         local sandbox_id=$(json_get "$sandbox" "id")
         local state=$(json_get "$sandbox" "state")
         if [ "$state" = "running" ]; then
@@ -385,12 +441,16 @@ test_rapid_operations() {
     else
         log_fail "Rapid create/delete: $success/5"
     fi
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_helper_methods() {
     log_section "Test: Helper Methods (Exec, Shell)"
 
-    local sandbox=$(sandbox_create)
+    local ws=$(workspace_create "go-helper-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(sandbox_create "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     # Exec helper (simple command)
@@ -416,6 +476,7 @@ test_helper_methods() {
     fi
 
     sandbox_delete "$sandbox_id" "true" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 # ========================================

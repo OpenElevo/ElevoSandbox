@@ -30,10 +30,17 @@ impl LocalStorageBackend {
     /// Resolve a workspace-relative path to an absolute filesystem path.
     ///
     /// Two-layer security:
-    /// 1. **Component inspection**: reject `..`, absolute prefixes, root dirs
+    /// 1. **Component inspection**: reject `..` and Windows prefix components
     /// 2. **Canonicalize verification**: resolved path must remain under workspace dir
+    ///
+    /// Leading `/` is stripped so that `/foo.txt` and `foo.txt` both resolve to
+    /// `<workspace_dir>/foo.txt` — a leading slash means "workspace root", not
+    /// filesystem root.
     fn resolve_path(&self, workspace_id: &str, path: &str) -> StorageResult<PathBuf> {
-        // Layer 1: reject dangerous path components immediately
+        // Normalize: strip leading slashes so "/foo.txt" is treated as "foo.txt"
+        let path = path.trim_start_matches('/');
+
+        // Layer 1: reject dangerous path components
         for component in Path::new(path).components() {
             match component {
                 Component::ParentDir => {
@@ -42,7 +49,7 @@ impl LocalStorageBackend {
                         path
                     )));
                 }
-                Component::RootDir | Component::Prefix(_) => {
+                Component::Prefix(_) => {
                     return Err(StorageError::PathTraversalDenied(format!(
                         "path contains absolute component: {}",
                         path
@@ -936,10 +943,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_path_traversal_absolute() {
+    async fn test_absolute_path_treated_as_relative() {
         let (_tmp, backend) = setup().await;
+        // Leading "/" is stripped: "/etc/passwd" becomes "etc/passwd" relative to workspace
         let err = backend.read_file("ws1", "/etc/passwd").await.unwrap_err();
-        assert!(matches!(err, StorageError::PathTraversalDenied(_)));
+        assert!(
+            matches!(err, StorageError::NotFound(_)),
+            "expected NotFound for /etc/passwd (resolved as etc/passwd in workspace), got: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn test_absolute_path_write_and_read() {
+        let (_tmp, backend) = setup().await;
+        // "/test.txt" and "test.txt" should resolve to the same file
+        backend
+            .write_file("ws1", "/hello.txt", b"hello")
+            .await
+            .unwrap();
+        let content = backend.read_file("ws1", "hello.txt").await.unwrap();
+        assert_eq!(content, b"hello");
+
+        let content2 = backend.read_file("ws1", "/hello.txt").await.unwrap();
+        assert_eq!(content2, b"hello");
     }
 
     #[tokio::test]

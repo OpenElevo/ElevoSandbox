@@ -62,10 +62,11 @@ async fn test_health_check_response_time() {
 #[tokio::test]
 async fn test_create_sandbox() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-create-sandbox-ws").await;
 
     let request = CreateSandboxRequest {
         name: Some("test-sandbox-create".to_string()),
-        ..Default::default()
+        ..CreateSandboxRequest::new(workspace.id.clone())
     };
 
     let response = config
@@ -93,16 +94,18 @@ async fn test_create_sandbox() {
 
     // Cleanup
     cleanup_sandbox(&config, &sandbox.id).await;
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 #[tokio::test]
 async fn test_get_sandbox() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-get-sandbox-ws").await;
 
     // Create a sandbox first
     let create_request = CreateSandboxRequest {
         name: Some("test-sandbox-get".to_string()),
-        ..Default::default()
+        ..CreateSandboxRequest::new(workspace.id.clone())
     };
 
     let create_response = config
@@ -131,11 +134,13 @@ async fn test_get_sandbox() {
 
     // Cleanup
     cleanup_sandbox(&config, &sandbox.id).await;
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 #[tokio::test]
 async fn test_list_sandboxes() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-list-sandboxes-ws").await;
 
     // Create two sandboxes
     let sandbox1: SandboxResponse = config
@@ -143,7 +148,7 @@ async fn test_list_sandboxes() {
         .post(config.api_url("/sandboxes"))
         .json(&CreateSandboxRequest {
             name: Some("test-list-1".to_string()),
-            ..Default::default()
+            ..CreateSandboxRequest::new(workspace.id.clone())
         })
         .send()
         .await
@@ -157,7 +162,7 @@ async fn test_list_sandboxes() {
         .post(config.api_url("/sandboxes"))
         .json(&CreateSandboxRequest {
             name: Some("test-list-2".to_string()),
-            ..Default::default()
+            ..CreateSandboxRequest::new(workspace.id.clone())
         })
         .send()
         .await
@@ -182,11 +187,13 @@ async fn test_list_sandboxes() {
     // Cleanup
     cleanup_sandbox(&config, &sandbox1.id).await;
     cleanup_sandbox(&config, &sandbox2.id).await;
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 #[tokio::test]
 async fn test_delete_sandbox() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-delete-sandbox-ws").await;
 
     // Create a sandbox
     let create_response = config
@@ -194,7 +201,7 @@ async fn test_delete_sandbox() {
         .post(config.api_url("/sandboxes"))
         .json(&CreateSandboxRequest {
             name: Some("test-sandbox-delete".to_string()),
-            ..Default::default()
+            ..CreateSandboxRequest::new(workspace.id.clone())
         })
         .send()
         .await
@@ -221,6 +228,9 @@ async fn test_delete_sandbox() {
         .expect("Failed to get sandbox");
 
     assert_eq!(get_response.status().as_u16(), 404);
+
+    // Cleanup
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 #[tokio::test]
@@ -243,6 +253,7 @@ async fn test_sandbox_not_found() {
 #[tokio::test]
 async fn test_sandbox_with_env_vars() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-sandbox-env-ws").await;
 
     let mut env = HashMap::new();
     env.insert("MY_VAR".to_string(), "my_value".to_string());
@@ -251,7 +262,7 @@ async fn test_sandbox_with_env_vars() {
     let request = CreateSandboxRequest {
         name: Some("test-sandbox-env".to_string()),
         env: Some(env.clone()),
-        ..Default::default()
+        ..CreateSandboxRequest::new(workspace.id.clone())
     };
 
     let response = config
@@ -272,11 +283,13 @@ async fn test_sandbox_with_env_vars() {
 
     // Cleanup
     cleanup_sandbox(&config, &sandbox.id).await;
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 #[tokio::test]
 async fn test_sandbox_with_metadata() {
     let config = TestConfig::new();
+    let workspace = create_test_workspace(&config, "test-sandbox-metadata-ws").await;
 
     let mut metadata = HashMap::new();
     metadata.insert("project".to_string(), "test-project".to_string());
@@ -285,7 +298,7 @@ async fn test_sandbox_with_metadata() {
     let request = CreateSandboxRequest {
         name: Some("test-sandbox-metadata".to_string()),
         metadata: Some(metadata.clone()),
-        ..Default::default()
+        ..CreateSandboxRequest::new(workspace.id.clone())
     };
 
     let response = config
@@ -309,6 +322,7 @@ async fn test_sandbox_with_metadata() {
 
     // Cleanup
     cleanup_sandbox(&config, &sandbox.id).await;
+    cleanup_workspace(&config, &workspace.id).await;
 }
 
 // ============================================================================

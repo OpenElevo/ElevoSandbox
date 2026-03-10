@@ -21,7 +21,7 @@ docker build -f docker/Dockerfile.server -t workspace-server:latest .
 
 # Build base image for sandboxes
 echo "  -> workspace-base"
-docker build -f images/workspace-base/Dockerfile -t workspace-base:latest images/workspace-base/
+docker build -f images/workspace-base/Dockerfile -t workspace-base:latest .
 
 echo "Build complete!"
 echo ""

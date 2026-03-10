@@ -12,7 +12,7 @@ NC='\033[0m'
 
 # Configuration
 API_BASE="${WORKSPACE_API_URL:-http://localhost:8080}/api/v1"
-TEST_IMAGE="${TEST_IMAGE:-workspace-test:latest}"
+TEST_IMAGE="${TEST_IMAGE:-workspace-base:latest}"
 
 # Counters
 PASSED=0
@@ -54,12 +54,27 @@ except:
 }
 
 # API helpers
-create_sandbox() {
-    local template="${1:-$TEST_IMAGE}"
-    local name="$2"
-    local metadata="$3"
+workspace_create() {
+    local name="${1:-}"
+    local data="{}"
+    [ -n "$name" ] && data="{\"name\": \"$name\"}"
 
-    local data="{\"template\": \"$template\""
+    curl -s -X POST "$API_BASE/workspaces" \
+        -H "Content-Type: application/json" \
+        -d "$data"
+}
+
+workspace_delete() {
+    curl -s -X DELETE "$API_BASE/workspaces/$1"
+}
+
+create_sandbox() {
+    local workspace_id="$1"
+    local template="${2:-$TEST_IMAGE}"
+    local name="$3"
+    local metadata="$4"
+
+    local data="{\"workspace_id\": \"$workspace_id\", \"template\": \"$template\""
     [ -n "$name" ] && data="$data, \"name\": \"$name\""
     [ -n "$metadata" ] && data="$data, \"metadata\": $metadata"
     data="$data}"
@@ -121,8 +136,11 @@ run_command_with_env() {
 test_1_sandbox_lifecycle() {
     log_section "Test 1: Sandbox Lifecycle"
 
+    local ws=$(workspace_create "ts-lifecycle-ws")
+    local ws_id=$(json_get "$ws" "id")
+
     # Create
-    local result=$(create_sandbox "$TEST_IMAGE")
+    local result=$(create_sandbox "$ws_id" "$TEST_IMAGE")
     local id=$(json_get "$result" "id")
     local state=$(json_get "$result" "state")
 
@@ -130,6 +148,7 @@ test_1_sandbox_lifecycle() {
         log_pass "Created sandbox: $id"
     else
         log_fail "Failed to create sandbox: $result"
+        workspace_delete "$ws_id" > /dev/null
         return 1
     fi
 
@@ -153,12 +172,16 @@ test_1_sandbox_lifecycle() {
     # Delete
     delete_sandbox "$id" > /dev/null
     log_pass "Deleted sandbox: $id"
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_2_process_execution() {
     log_section "Test 2: Process Execution"
 
-    local sandbox=$(create_sandbox)
+    local ws=$(workspace_create "ts-process-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(create_sandbox "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     # Echo
@@ -211,26 +234,30 @@ test_2_process_execution() {
     fi
 
     delete_sandbox "$sandbox_id" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_3_sandbox_isolation() {
     log_section "Test 3: Multiple Sandboxes Isolation"
 
-    local sandbox_a=$(create_sandbox)
+    local ws=$(workspace_create "ts-isolation-ws")
+    local ws_id=$(json_get "$ws" "id")
+
+    local sandbox_a=$(create_sandbox "$ws_id")
     local id_a=$(json_get "$sandbox_a" "id")
 
-    local sandbox_b=$(create_sandbox)
+    local sandbox_b=$(create_sandbox "$ws_id")
     local id_b=$(json_get "$sandbox_b" "id")
 
     # Write file in A
-    run_command_with_env "$id_a" "bash" '["-c", "echo secret_ts > /workspace/secret.txt"]' "{}" > /dev/null
+    run_command_with_env "$id_a" "bash" '["-c", "echo secret_ts > /tmp/secret.txt"]' "{}" > /dev/null
     log_pass "Created file in sandbox A: $id_a"
 
     # Try read from B
-    local result=$(run_command "$id_b" "cat" "/workspace/secret.txt")
-    local exit_code=$(json_get "$result" "exit_code")
+    local result=$(run_command_with_env "$id_b" "bash" '["-c", "cat /tmp/secret.txt 2>/dev/null || echo NOT_FOUND"]' "{}")
+    local stdout=$(json_get "$result" "stdout")
 
-    if [ "$exit_code" != "0" ]; then
+    if echo "$stdout" | grep -q "NOT_FOUND"; then
         log_pass "Sandbox isolation verified: B cannot read A's files"
     else
         log_fail "Isolation broken: B can read A's files!"
@@ -238,12 +265,15 @@ test_3_sandbox_isolation() {
 
     delete_sandbox "$id_a" > /dev/null
     delete_sandbox "$id_b" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_4_long_running() {
     log_section "Test 4: Long Running Command"
 
-    local sandbox=$(create_sandbox)
+    local ws=$(workspace_create "ts-longrun-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(create_sandbox "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     local start=$(date +%s)
@@ -261,12 +291,15 @@ test_4_long_running() {
     fi
 
     delete_sandbox "$sandbox_id" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_5_script_execution() {
     log_section "Test 5: Script Execution"
 
-    local sandbox=$(create_sandbox)
+    local ws=$(workspace_create "ts-script-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(create_sandbox "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     # Bash loop
@@ -292,21 +325,19 @@ test_5_script_execution() {
     fi
 
     delete_sandbox "$sandbox_id" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_6_concurrent_operations() {
     log_section "Test 6: Concurrent Operations"
 
+    local ws=$(workspace_create "ts-concurrent-ws")
+    local ws_id=$(json_get "$ws" "id")
+
     # Create 3 sandboxes
-    local start=$(date +%s.%N)
-    local s1=$(create_sandbox) &
-    local s2=$(create_sandbox) &
-    local s3=$(create_sandbox) &
-    wait
-    s1=$(create_sandbox)
-    s2=$(create_sandbox)
-    s3=$(create_sandbox)
-    local end=$(date +%s.%N)
+    local s1=$(create_sandbox "$ws_id")
+    local s2=$(create_sandbox "$ws_id")
+    local s3=$(create_sandbox "$ws_id")
 
     local id1=$(json_get "$s1" "id")
     local id2=$(json_get "$s2" "id")
@@ -316,18 +347,14 @@ test_6_concurrent_operations() {
         log_pass "Created 3 sandboxes"
     else
         log_fail "Failed to create sandboxes"
+        workspace_delete "$ws_id" > /dev/null
         return 1
     fi
 
     # Run commands
-    local r1=$(run_command "$id1" "echo" "s1") &
-    local r2=$(run_command "$id2" "echo" "s2") &
-    local r3=$(run_command "$id3" "echo" "s3") &
-    wait
-
-    r1=$(run_command "$id1" "echo" "s1")
-    r2=$(run_command "$id2" "echo" "s2")
-    r3=$(run_command "$id3" "echo" "s3")
+    local r1=$(run_command "$id1" "echo" "s1")
+    local r2=$(run_command "$id2" "echo" "s2")
+    local r3=$(run_command "$id3" "echo" "s3")
 
     local e1=$(json_get "$r1" "exit_code")
     local e2=$(json_get "$r2" "exit_code")
@@ -343,6 +370,8 @@ test_6_concurrent_operations() {
     delete_sandbox "$id2" > /dev/null
     delete_sandbox "$id3" > /dev/null
     log_pass "Deleted 3 sandboxes"
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_7_error_handling() {
@@ -357,7 +386,9 @@ test_7_error_handling() {
     fi
 
     # Command with missing file
-    local sandbox=$(create_sandbox)
+    local ws=$(workspace_create "ts-error-ws")
+    local ws_id=$(json_get "$ws" "id")
+    local sandbox=$(create_sandbox "$ws_id")
     local sandbox_id=$(json_get "$sandbox" "id")
 
     result=$(run_command "$sandbox_id" "cat" "/nonexistent/file.txt")
@@ -370,12 +401,16 @@ test_7_error_handling() {
     fi
 
     delete_sandbox "$sandbox_id" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_8_sandbox_metadata() {
     log_section "Test 8: Sandbox Metadata"
 
-    local result=$(create_sandbox "$TEST_IMAGE" "test-sandbox-ts" '{"purpose": "testing"}')
+    local ws=$(workspace_create "ts-metadata-ws")
+    local ws_id=$(json_get "$ws" "id")
+
+    local result=$(create_sandbox "$ws_id" "$TEST_IMAGE" "test-sandbox-ts" '{"purpose": "testing"}')
     local sandbox_id=$(json_get "$result" "id")
     local name=$(json_get "$result" "name")
 
@@ -396,14 +431,18 @@ test_8_sandbox_metadata() {
     fi
 
     delete_sandbox "$sandbox_id" > /dev/null
+    workspace_delete "$ws_id" > /dev/null
 }
 
 test_9_rapid_operations() {
     log_section "Test 9: Rapid Sandbox Operations"
 
+    local ws=$(workspace_create "ts-rapid-ws")
+    local ws_id=$(json_get "$ws" "id")
+
     local success=0
     for i in 1 2 3 4 5; do
-        local sandbox=$(create_sandbox)
+        local sandbox=$(create_sandbox "$ws_id")
         local sandbox_id=$(json_get "$sandbox" "id")
         local state=$(json_get "$sandbox" "state")
         if [ "$state" = "running" ]; then
@@ -417,6 +456,8 @@ test_9_rapid_operations() {
     else
         log_fail "Rapid create/delete test failed ($success/5)"
     fi
+
+    workspace_delete "$ws_id" > /dev/null
 }
 
 # ========================================

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from contextlib import contextmanager
 
 BASE_URL = os.environ.get("WORKSPACE_TEST_URL", "http://127.0.0.1:8080")
-BASE_IMAGE = os.environ.get("WORKSPACE_BASE_IMAGE", "rust:1.85")
+BASE_IMAGE = os.environ.get("WORKSPACE_BASE_IMAGE", "workspace-base:latest")
 API_URL = f"{BASE_URL}/api/v1"
 
 @dataclass
@@ -57,7 +57,7 @@ class WorkspaceClient:
         url = f"{self.api_url}{path}"
         headers = {"Content-Type": "application/json"}
 
-        if data:
+        if data is not None:
             body = json.dumps(data).encode("utf-8")
         else:
             body = None
@@ -74,15 +74,28 @@ class WorkspaceClient:
     def health(self) -> Dict[str, Any]:
         return self._request("GET", "/health")
 
+    def create_workspace(self, name: Optional[str] = None) -> Dict[str, Any]:
+        data = {}
+        if name:
+            data["name"] = name
+        return self._request("POST", "/workspaces", data)
+
+    def get_workspace(self, workspace_id: str) -> Dict[str, Any]:
+        return self._request("GET", f"/workspaces/{workspace_id}")
+
+    def delete_workspace(self, workspace_id: str) -> Dict[str, Any]:
+        return self._request("DELETE", f"/workspaces/{workspace_id}")
+
     def create_sandbox(
         self,
+        workspace_id: str,
         template: Optional[str] = None,
         name: Optional[str] = None,
         env: Optional[Dict[str, str]] = None,
         metadata: Optional[Dict[str, str]] = None,
         timeout: Optional[int] = None,
     ) -> Dict[str, Any]:
-        data = {}
+        data: Dict[str, Any] = {"workspace_id": workspace_id}
         if template:
             data["template"] = template
         if name:
@@ -125,6 +138,7 @@ def main():
 
     client = WorkspaceClient(BASE_URL)
     test_sandbox_id: Optional[str] = None
+    test_workspace_id: Optional[str] = None
 
     try:
         # Health tests
@@ -135,11 +149,18 @@ def main():
             assert health.get("status") == "healthy", f"Expected 'healthy', got '{health.get('status')}'"
             assert "version" in health, "Version missing from health response"
 
-        # Sandbox tests
-        print("\nSandbox Tests:")
+        # Workspace + Sandbox tests
+        print("\nWorkspace & Sandbox Tests:")
+
+        with test_case("create workspace"):
+            ws = client.create_workspace(name="e2e-python-test-ws")
+            assert ws.get("id"), "Workspace ID is missing"
+            test_workspace_id = ws["id"]
 
         with test_case("create sandbox with name"):
+            assert test_workspace_id, "No workspace ID available"
             sandbox = client.create_sandbox(
+                workspace_id=test_workspace_id,
                 template=BASE_IMAGE,
                 name="e2e-python-test-sandbox",
             )
@@ -159,7 +180,9 @@ def main():
             assert found, "Created sandbox not found in list"
 
         with test_case("create sandbox with environment variables"):
+            assert test_workspace_id, "No workspace ID available"
             sandbox = client.create_sandbox(
+                workspace_id=test_workspace_id,
                 template=BASE_IMAGE,
                 name="e2e-python-env-test",
                 env={"MY_VAR": "test_value", "ANOTHER_VAR": "another_value"},
@@ -170,7 +193,9 @@ def main():
             client.delete_sandbox(sandbox["id"], force=True)
 
         with test_case("create sandbox with metadata"):
+            assert test_workspace_id, "No workspace ID available"
             sandbox = client.create_sandbox(
+                workspace_id=test_workspace_id,
                 template=BASE_IMAGE,
                 name="e2e-python-metadata-test",
                 metadata={"project": "test-project", "owner": "test-user"},
@@ -207,6 +232,12 @@ def main():
         if test_sandbox_id:
             try:
                 client.delete_sandbox(test_sandbox_id, force=True)
+            except Exception:
+                pass
+        # Cleanup workspace
+        if test_workspace_id:
+            try:
+                client.delete_workspace(test_workspace_id)
             except Exception:
                 pass
 

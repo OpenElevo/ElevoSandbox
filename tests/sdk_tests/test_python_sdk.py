@@ -13,11 +13,11 @@ import asyncio
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../sdk-python/src'))
 
 from workspace_sdk import WorkspaceClient, AsyncWorkspaceClient
-from workspace_sdk.types import CreateSandboxParams, RunCommandOptions
+from workspace_sdk.types import CreateSandboxParams, CreateWorkspaceParams, RunCommandOptions
 
 # Configuration
-API_URL = os.environ.get("WORKSPACE_API_URL", "http://localhost:8080")
-TEST_IMAGE = os.environ.get("TEST_IMAGE", "workspace-test:latest")
+GRPC_URL = os.environ.get("WORKSPACE_GRPC_URL", "localhost:9090")
+TEST_IMAGE = os.environ.get("TEST_IMAGE", "workspace-base:latest")
 
 # Test results
 PASSED = 0
@@ -47,193 +47,220 @@ def test_sync_sandbox_lifecycle():
     """Test 1: Sandbox create, get, list, delete (sync)"""
     log_section("Test 1: Sync Sandbox Lifecycle")
 
-    with WorkspaceClient.create(API_URL) as client:
-        # Create sandbox
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = client.sandbox.create(params)
+    with WorkspaceClient.create(GRPC_URL) as client:
+        # Create workspace first
+        workspace = client.workspace.create(CreateWorkspaceParams(name="py-lifecycle-ws"))
 
-        if sandbox.id and sandbox.state == "running":
-            log_pass(f"Created sandbox: {sandbox.id}")
-        else:
-            log_fail(f"Failed to create sandbox: {sandbox}")
-            return None
+        try:
+            # Create sandbox
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = client.sandbox.create(params)
 
-        # Get sandbox
-        fetched = client.sandbox.get(sandbox.id)
-        if fetched.id == sandbox.id:
-            log_pass(f"Got sandbox info: state={fetched.state}")
-        else:
-            log_fail("Failed to get sandbox")
+            if sandbox.id and sandbox.state == "running":
+                log_pass(f"Created sandbox: {sandbox.id}")
+            else:
+                log_fail(f"Failed to create sandbox: {sandbox}")
+                return None
 
-        # List sandboxes
-        sandboxes = client.sandbox.list()
-        if any(s.id == sandbox.id for s in sandboxes):
-            log_pass(f"Listed sandboxes: found {len(sandboxes)} total")
-        else:
-            log_fail("Sandbox not in list")
+            # Get sandbox
+            fetched = client.sandbox.get(sandbox.id)
+            if fetched.id == sandbox.id:
+                log_pass(f"Got sandbox info: state={fetched.state}")
+            else:
+                log_fail("Failed to get sandbox")
 
-        # Delete sandbox
-        client.sandbox.delete(sandbox.id, force=True)
-        log_pass(f"Deleted sandbox: {sandbox.id}")
+            # List sandboxes
+            sandboxes = client.sandbox.list()
+            if any(s.id == sandbox.id for s in sandboxes):
+                log_pass(f"Listed sandboxes: found {len(sandboxes)} total")
+            else:
+                log_fail("Sandbox not in list")
 
-        return sandbox.id
+            # Delete sandbox
+            client.sandbox.delete(sandbox.id, force=True)
+            log_pass(f"Deleted sandbox: {sandbox.id}")
+
+            return sandbox.id
+        finally:
+            client.workspace.delete(workspace.id)
 
 
 def test_sync_process_execution():
     """Test 2: Process execution (sync)"""
     log_section("Test 2: Sync Process Execution")
 
-    with WorkspaceClient.create(API_URL) as client:
-        # Create sandbox
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = client.sandbox.create(params)
+    with WorkspaceClient.create(GRPC_URL) as client:
+        workspace = client.workspace.create(CreateWorkspaceParams(name="py-process-ws"))
 
         try:
-            # Simple echo command
-            result = client.process.run(sandbox.id, "echo", RunCommandOptions(args=["Hello", "World"]))
-            if result.exit_code == 0 and "Hello World" in result.stdout:
-                log_pass(f"Echo command: stdout='{result.stdout.strip()}'")
-            else:
-                log_fail(f"Echo failed: {result}")
+            # Create sandbox
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = client.sandbox.create(params)
 
-            # Command with arguments
-            result = client.process.run(sandbox.id, "ls", RunCommandOptions(args=["-la", "/workspace"]))
-            if result.exit_code == 0:
-                log_pass("ls -la command executed successfully")
-            else:
-                log_fail(f"ls failed: exit_code={result.exit_code}")
+            try:
+                # Simple echo command
+                result = client.process.run(sandbox.id, "echo", RunCommandOptions(args=["Hello", "World"]))
+                if result.exit_code == 0 and "Hello World" in result.stdout:
+                    log_pass(f"Echo command: stdout='{result.stdout.strip()}'")
+                else:
+                    log_fail(f"Echo failed: {result}")
 
-            # Failing command
-            result = client.process.run(sandbox.id, "bash", RunCommandOptions(args=["-c", "exit 42"]))
-            if result.exit_code == 42:
-                log_pass(f"Failing command returned correct exit code: {result.exit_code}")
-            else:
-                log_fail(f"Expected exit code 42, got {result.exit_code}")
+                # Command with arguments
+                result = client.process.run(sandbox.id, "ls", RunCommandOptions(args=["-la", "/workspace"]))
+                if result.exit_code == 0:
+                    log_pass("ls -la command executed successfully")
+                else:
+                    log_fail(f"ls failed: exit_code={result.exit_code}")
 
-            # Command with environment variable
-            result = client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", "echo $MY_VAR"], env={"MY_VAR": "test_value"})
-            )
-            if result.exit_code == 0 and "test_value" in result.stdout:
-                log_pass(f"Env var command: stdout='{result.stdout.strip()}'")
-            else:
-                log_fail(f"Env var failed: {result}")
+                # Failing command
+                result = client.process.run(sandbox.id, "bash", RunCommandOptions(args=["-c", "exit 42"]))
+                if result.exit_code == 42:
+                    log_pass(f"Failing command returned correct exit code: {result.exit_code}")
+                else:
+                    log_fail(f"Expected exit code 42, got {result.exit_code}")
 
-            # Write and read file
-            result = client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", "echo 'test content' > /workspace/test.txt && cat /workspace/test.txt"])
-            )
-            if result.exit_code == 0 and "test content" in result.stdout:
-                log_pass("File write/read successful")
-            else:
-                log_fail(f"File write/read failed: {result}")
+                # Command with environment variable
+                result = client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "echo $MY_VAR"], env={"MY_VAR": "test_value"})
+                )
+                if result.exit_code == 0 and "test_value" in result.stdout:
+                    log_pass(f"Env var command: stdout='{result.stdout.strip()}'")
+                else:
+                    log_fail(f"Env var failed: {result}")
 
+                # Write and read file
+                result = client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "echo 'test content' > /workspace/test.txt && cat /workspace/test.txt"])
+                )
+                if result.exit_code == 0 and "test content" in result.stdout:
+                    log_pass("File write/read successful")
+                else:
+                    log_fail(f"File write/read failed: {result}")
+
+            finally:
+                client.sandbox.delete(sandbox.id, force=True)
         finally:
-            client.sandbox.delete(sandbox.id, force=True)
+            client.workspace.delete(workspace.id)
 
 
 def test_sync_multiple_sandboxes():
     """Test 3: Multiple sandboxes isolation (sync)"""
     log_section("Test 3: Sync Multiple Sandboxes Isolation")
 
-    with WorkspaceClient.create(API_URL) as client:
-        # Create two sandboxes
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox_a = client.sandbox.create(params)
-        sandbox_b = client.sandbox.create(params)
+    with WorkspaceClient.create(GRPC_URL) as client:
+        workspace = client.workspace.create(CreateWorkspaceParams(name="py-isolation-ws"))
 
         try:
-            # Write file in sandbox A
-            client.process.run(
-                sandbox_a.id,
-                "bash",
-                RunCommandOptions(args=["-c", "echo 'secret_data' > /workspace/secret.txt"])
-            )
-            log_pass(f"Created file in sandbox A: {sandbox_a.id}")
+            # Create two sandboxes
+            params_a = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            params_b = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox_a = client.sandbox.create(params_a)
+            sandbox_b = client.sandbox.create(params_b)
 
-            # Try to read from sandbox B (should fail)
-            result = client.process.run(
-                sandbox_b.id,
-                "cat",
-                RunCommandOptions(args=["/workspace/secret.txt"])
-            )
+            try:
+                # Write file in sandbox A (use /tmp for isolation test, /workspace is shared)
+                client.process.run(
+                    sandbox_a.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "echo 'secret_data' > /tmp/secret.txt"])
+                )
+                log_pass(f"Created file in sandbox A: {sandbox_a.id}")
 
-            if result.exit_code != 0:
-                log_pass("Sandbox isolation verified: B cannot read A's files")
-            else:
-                log_fail("Isolation broken: B can read A's files!")
+                # Try to read from sandbox B (should fail since /tmp is per-container)
+                result = client.process.run(
+                    sandbox_b.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "cat /tmp/secret.txt 2>/dev/null || echo NOT_FOUND"])
+                )
 
+                if "NOT_FOUND" in result.stdout or result.exit_code != 0:
+                    log_pass("Sandbox isolation verified: B cannot read A's files")
+                else:
+                    log_fail("Isolation broken: B can read A's files!")
+
+            finally:
+                client.sandbox.delete(sandbox_a.id, force=True)
+                client.sandbox.delete(sandbox_b.id, force=True)
         finally:
-            client.sandbox.delete(sandbox_a.id, force=True)
-            client.sandbox.delete(sandbox_b.id, force=True)
+            client.workspace.delete(workspace.id)
 
 
 def test_sync_long_running_command():
     """Test 4: Long running command (sync)"""
     log_section("Test 4: Sync Long Running Command")
 
-    with WorkspaceClient.create(API_URL, timeout=60.0) as client:
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = client.sandbox.create(params)
+    with WorkspaceClient.create(GRPC_URL, timeout=60.0) as client:
+        workspace = client.workspace.create(CreateWorkspaceParams(name="py-longrun-ws"))
 
         try:
-            start_time = time.time()
-            result = client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", "sleep 3 && echo 'done'"])
-            )
-            elapsed = time.time() - start_time
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = client.sandbox.create(params)
 
-            if result.exit_code == 0 and "done" in result.stdout and elapsed >= 3:
-                log_pass(f"Long running command completed in {elapsed:.1f}s")
-            else:
-                log_fail(f"Long running command failed: {result}")
+            try:
+                start_time = time.time()
+                result = client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "sleep 3 && echo 'done'"])
+                )
+                elapsed = time.time() - start_time
 
+                if result.exit_code == 0 and "done" in result.stdout and elapsed >= 3:
+                    log_pass(f"Long running command completed in {elapsed:.1f}s")
+                else:
+                    log_fail(f"Long running command failed: {result}")
+
+            finally:
+                client.sandbox.delete(sandbox.id, force=True)
         finally:
-            client.sandbox.delete(sandbox.id, force=True)
+            client.workspace.delete(workspace.id)
 
 
 def test_sync_python_execution():
     """Test 5: Execute Python script in sandbox (sync)"""
     log_section("Test 5: Sync Script Execution (bash)")
 
-    with WorkspaceClient.create(API_URL) as client:
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = client.sandbox.create(params)
+    with WorkspaceClient.create(GRPC_URL) as client:
+        workspace = client.workspace.create(CreateWorkspaceParams(name="py-script-ws"))
 
         try:
-            # Execute a bash script that does some computation
-            script = "for i in 1 2 3; do echo \"item_$i\"; done"
-            result = client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", script])
-            )
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = client.sandbox.create(params)
 
-            if result.exit_code == 0 and "item_1" in result.stdout and "item_3" in result.stdout:
-                log_pass(f"Bash script executed with loop output")
-            else:
-                log_fail(f"Bash script failed: {result}")
+            try:
+                # Execute a bash script that does some computation
+                script = "for i in 1 2 3; do echo \"item_$i\"; done"
+                result = client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", script])
+                )
 
-            # Test complex command with pipes
-            result = client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", "echo 'hello world' | tr 'a-z' 'A-Z'"])
-            )
+                if result.exit_code == 0 and "item_1" in result.stdout and "item_3" in result.stdout:
+                    log_pass(f"Bash script executed with loop output")
+                else:
+                    log_fail(f"Bash script failed: {result}")
 
-            if result.exit_code == 0 and "HELLO WORLD" in result.stdout:
-                log_pass(f"Pipe command success: {result.stdout.strip()}")
-            else:
-                log_fail(f"Pipe command failed: {result}")
+                # Test complex command with pipes
+                result = client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "echo 'hello world' | tr 'a-z' 'A-Z'"])
+                )
 
+                if result.exit_code == 0 and "HELLO WORLD" in result.stdout:
+                    log_pass(f"Pipe command success: {result.stdout.strip()}")
+                else:
+                    log_fail(f"Pipe command failed: {result}")
+
+            finally:
+                client.sandbox.delete(sandbox.id, force=True)
         finally:
-            client.sandbox.delete(sandbox.id, force=True)
+            client.workspace.delete(workspace.id)
 
 
 # ========================================
@@ -244,117 +271,132 @@ async def test_async_sandbox_lifecycle():
     """Test 6: Sandbox create, get, list, delete (async)"""
     log_section("Test 6: Async Sandbox Lifecycle")
 
-    async with AsyncWorkspaceClient.create(API_URL) as client:
-        # Create sandbox
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = await client.sandbox.create(params)
+    async with AsyncWorkspaceClient.create(GRPC_URL) as client:
+        workspace = await client.workspace.create(CreateWorkspaceParams(name="py-async-lifecycle-ws"))
 
-        if sandbox.id and sandbox.state == "running":
-            log_pass(f"Created sandbox (async): {sandbox.id}")
-        else:
-            log_fail(f"Failed to create sandbox: {sandbox}")
-            return
+        try:
+            # Create sandbox
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = await client.sandbox.create(params)
 
-        # Get sandbox
-        fetched = await client.sandbox.get(sandbox.id)
-        if fetched.id == sandbox.id:
-            log_pass(f"Got sandbox info (async): state={fetched.state}")
-        else:
-            log_fail("Failed to get sandbox")
+            if sandbox.id and sandbox.state == "running":
+                log_pass(f"Created sandbox (async): {sandbox.id}")
+            else:
+                log_fail(f"Failed to create sandbox: {sandbox}")
+                return
 
-        # List sandboxes
-        sandboxes = await client.sandbox.list()
-        if any(s.id == sandbox.id for s in sandboxes):
-            log_pass(f"Listed sandboxes (async): found {len(sandboxes)} total")
-        else:
-            log_fail("Sandbox not in list")
+            # Get sandbox
+            fetched = await client.sandbox.get(sandbox.id)
+            if fetched.id == sandbox.id:
+                log_pass(f"Got sandbox info (async): state={fetched.state}")
+            else:
+                log_fail("Failed to get sandbox")
 
-        # Delete sandbox
-        await client.sandbox.delete(sandbox.id, force=True)
-        log_pass(f"Deleted sandbox (async): {sandbox.id}")
+            # List sandboxes
+            sandboxes = await client.sandbox.list()
+            if any(s.id == sandbox.id for s in sandboxes):
+                log_pass(f"Listed sandboxes (async): found {len(sandboxes)} total")
+            else:
+                log_fail("Sandbox not in list")
+
+            # Delete sandbox
+            await client.sandbox.delete(sandbox.id, force=True)
+            log_pass(f"Deleted sandbox (async): {sandbox.id}")
+        finally:
+            await client.workspace.delete(workspace.id)
 
 
 async def test_async_process_execution():
     """Test 7: Process execution (async)"""
     log_section("Test 7: Async Process Execution")
 
-    async with AsyncWorkspaceClient.create(API_URL) as client:
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = await client.sandbox.create(params)
+    async with AsyncWorkspaceClient.create(GRPC_URL) as client:
+        workspace = await client.workspace.create(CreateWorkspaceParams(name="py-async-process-ws"))
 
         try:
-            # Simple echo command
-            result = await client.process.run(sandbox.id, "echo", RunCommandOptions(args=["Async", "Test"]))
-            if result.exit_code == 0 and "Async Test" in result.stdout:
-                log_pass(f"Async echo: stdout='{result.stdout.strip()}'")
-            else:
-                log_fail(f"Async echo failed: {result}")
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = await client.sandbox.create(params)
 
-            # Multiple commands
-            result = await client.process.run(
-                sandbox.id,
-                "bash",
-                RunCommandOptions(args=["-c", "pwd && whoami && hostname"])
-            )
-            if result.exit_code == 0:
-                log_pass(f"Async multi-command success")
-            else:
-                log_fail(f"Async multi-command failed: {result}")
+            try:
+                # Simple echo command
+                result = await client.process.run(sandbox.id, "echo", RunCommandOptions(args=["Async", "Test"]))
+                if result.exit_code == 0 and "Async Test" in result.stdout:
+                    log_pass(f"Async echo: stdout='{result.stdout.strip()}'")
+                else:
+                    log_fail(f"Async echo failed: {result}")
 
+                # Multiple commands
+                result = await client.process.run(
+                    sandbox.id,
+                    "bash",
+                    RunCommandOptions(args=["-c", "pwd && whoami && hostname"])
+                )
+                if result.exit_code == 0:
+                    log_pass(f"Async multi-command success")
+                else:
+                    log_fail(f"Async multi-command failed: {result}")
+
+            finally:
+                await client.sandbox.delete(sandbox.id, force=True)
         finally:
-            await client.sandbox.delete(sandbox.id, force=True)
+            await client.workspace.delete(workspace.id)
 
 
 async def test_async_concurrent_sandboxes():
     """Test 8: Concurrent sandbox operations (async)"""
     log_section("Test 8: Async Concurrent Sandbox Operations")
 
-    async with AsyncWorkspaceClient.create(API_URL) as client:
-        # Create multiple sandboxes concurrently
-        params = CreateSandboxParams(template=TEST_IMAGE)
-
-        start_time = time.time()
-        sandboxes = await asyncio.gather(
-            client.sandbox.create(params),
-            client.sandbox.create(params),
-            client.sandbox.create(params),
-        )
-        create_time = time.time() - start_time
-
-        sandbox_ids = [s.id for s in sandboxes]
-        if all(s.state == "running" for s in sandboxes):
-            log_pass(f"Created 3 sandboxes concurrently in {create_time:.2f}s")
-        else:
-            log_fail("Some sandboxes failed to start")
+    async with AsyncWorkspaceClient.create(GRPC_URL) as client:
+        workspace = await client.workspace.create(CreateWorkspaceParams(name="py-async-concurrent-ws"))
 
         try:
-            # Run commands concurrently
+            # Create multiple sandboxes concurrently
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+
             start_time = time.time()
-            results = await asyncio.gather(
-                client.process.run(sandbox_ids[0], "echo", RunCommandOptions(args=["sandbox1"])),
-                client.process.run(sandbox_ids[1], "echo", RunCommandOptions(args=["sandbox2"])),
-                client.process.run(sandbox_ids[2], "echo", RunCommandOptions(args=["sandbox3"])),
+            sandboxes = await asyncio.gather(
+                client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)),
+                client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)),
+                client.sandbox.create(CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)),
             )
-            cmd_time = time.time() - start_time
+            create_time = time.time() - start_time
 
-            if all(r.exit_code == 0 for r in results):
-                log_pass(f"Ran 3 commands concurrently in {cmd_time:.2f}s")
+            sandbox_ids = [s.id for s in sandboxes]
+            if all(s.state == "running" for s in sandboxes):
+                log_pass(f"Created 3 sandboxes concurrently in {create_time:.2f}s")
             else:
-                log_fail("Some concurrent commands failed")
+                log_fail("Some sandboxes failed to start")
 
+            try:
+                # Run commands concurrently
+                start_time = time.time()
+                results = await asyncio.gather(
+                    client.process.run(sandbox_ids[0], "echo", RunCommandOptions(args=["sandbox1"])),
+                    client.process.run(sandbox_ids[1], "echo", RunCommandOptions(args=["sandbox2"])),
+                    client.process.run(sandbox_ids[2], "echo", RunCommandOptions(args=["sandbox3"])),
+                )
+                cmd_time = time.time() - start_time
+
+                if all(r.exit_code == 0 for r in results):
+                    log_pass(f"Ran 3 commands concurrently in {cmd_time:.2f}s")
+                else:
+                    log_fail("Some concurrent commands failed")
+
+            finally:
+                # Delete concurrently
+                await asyncio.gather(*[
+                    client.sandbox.delete(sid, force=True) for sid in sandbox_ids
+                ])
+                log_pass("Deleted 3 sandboxes concurrently")
         finally:
-            # Delete concurrently
-            await asyncio.gather(*[
-                client.sandbox.delete(sid, force=True) for sid in sandbox_ids
-            ])
-            log_pass("Deleted 3 sandboxes concurrently")
+            await client.workspace.delete(workspace.id)
 
 
 async def test_async_error_handling():
     """Test 9: Error handling (async)"""
     log_section("Test 9: Async Error Handling")
 
-    async with AsyncWorkspaceClient.create(API_URL) as client:
+    async with AsyncWorkspaceClient.create(GRPC_URL) as client:
         # Try to get non-existent sandbox
         try:
             await client.sandbox.get("non-existent-sandbox-id")
@@ -362,24 +404,29 @@ async def test_async_error_handling():
         except Exception as e:
             log_pass(f"Correct error for non-existent sandbox: {type(e).__name__}")
 
-        # Create sandbox for more tests
-        params = CreateSandboxParams(template=TEST_IMAGE)
-        sandbox = await client.sandbox.create(params)
+        workspace = await client.workspace.create(CreateWorkspaceParams(name="py-async-error-ws"))
 
         try:
-            # Command that returns non-zero exit code
-            result = await client.process.run(
-                sandbox.id,
-                "cat",
-                RunCommandOptions(args=["/nonexistent/file.txt"])
-            )
-            if result.exit_code != 0 and result.stderr:
-                log_pass(f"Correct error for missing file: exit_code={result.exit_code}")
-            else:
-                log_fail("Expected non-zero exit code for missing file")
+            # Create sandbox for more tests
+            params = CreateSandboxParams(workspace_id=workspace.id, template=TEST_IMAGE)
+            sandbox = await client.sandbox.create(params)
 
+            try:
+                # Command that returns non-zero exit code
+                result = await client.process.run(
+                    sandbox.id,
+                    "cat",
+                    RunCommandOptions(args=["/nonexistent/file.txt"])
+                )
+                if result.exit_code != 0 and result.stderr:
+                    log_pass(f"Correct error for missing file: exit_code={result.exit_code}")
+                else:
+                    log_fail("Expected non-zero exit code for missing file")
+
+            finally:
+                await client.sandbox.delete(sandbox.id, force=True)
         finally:
-            await client.sandbox.delete(sandbox.id, force=True)
+            await client.workspace.delete(workspace.id)
 
 
 # ========================================
@@ -390,7 +437,7 @@ def main():
     print("\n" + "=" * 60)
     print("  Python SDK End-to-End Test Suite")
     print("=" * 60)
-    print(f"API URL: {API_URL}")
+    print(f"gRPC URL: {GRPC_URL}")
     print(f"Test Image: {TEST_IMAGE}")
 
     # Sync tests

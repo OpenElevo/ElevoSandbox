@@ -41,9 +41,29 @@ impl Default for TestConfig {
     }
 }
 
+/// Workspace creation request
+#[derive(Debug, Serialize)]
+pub struct CreateWorkspaceRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+/// Workspace response
+#[derive(Debug, Deserialize)]
+pub struct WorkspaceResponse {
+    pub id: String,
+    pub name: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
 /// Sandbox creation request
 #[derive(Debug, Serialize)]
 pub struct CreateSandboxRequest {
+    pub workspace_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,11 +76,13 @@ pub struct CreateSandboxRequest {
     pub timeout: Option<u64>,
 }
 
-impl Default for CreateSandboxRequest {
-    fn default() -> Self {
+impl CreateSandboxRequest {
+    pub fn new(workspace_id: String) -> Self {
         Self {
+            workspace_id,
             template: Some(
-                std::env::var("WORKSPACE_BASE_IMAGE").unwrap_or_else(|_| "rust:1.85".to_string()),
+                std::env::var("WORKSPACE_BASE_IMAGE")
+                    .unwrap_or_else(|_| "workspace-base:latest".to_string()),
             ),
             name: None,
             env: None,
@@ -163,11 +185,37 @@ pub struct ErrorResponse {
     pub details: Option<String>,
 }
 
+/// Helper to create a workspace for testing
+pub async fn create_test_workspace(config: &TestConfig, name: &str) -> WorkspaceResponse {
+    config
+        .client
+        .post(config.api_url("/workspaces"))
+        .json(&CreateWorkspaceRequest {
+            name: Some(name.to_string()),
+            metadata: None,
+        })
+        .send()
+        .await
+        .expect("Failed to create workspace")
+        .json()
+        .await
+        .expect("Failed to parse workspace response")
+}
+
 /// Helper to cleanup sandbox after test
 pub async fn cleanup_sandbox(config: &TestConfig, sandbox_id: &str) {
     let _ = config
         .client
         .delete(config.api_url(&format!("/sandboxes/{}?force=true", sandbox_id)))
+        .send()
+        .await;
+}
+
+/// Helper to cleanup workspace after test
+pub async fn cleanup_workspace(config: &TestConfig, workspace_id: &str) {
+    let _ = config
+        .client
+        .delete(config.api_url(&format!("/workspaces/{}", workspace_id)))
         .send()
         .await;
 }
