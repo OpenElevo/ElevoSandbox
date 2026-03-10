@@ -10,7 +10,7 @@
 
 services:
   workspace-server:
-    image: ${ELEVO_IMAGE:-ghcr.io/openelevo/elevosandbox-server}:${ELEVO_VERSION:-latest}
+    image: ${ELEVO_IMAGE}:${ELEVO_VERSION:-latest}
     container_name: elevo-workspace-server
     restart: unless-stopped
     ports:
@@ -34,7 +34,7 @@ services:
       - WORKSPACE_NFS_PORT=2049
 
       # Base image for sandbox containers
-      - WORKSPACE_BASE_IMAGE=${ELEVO_BASE_IMAGE:-ghcr.io/openelevo/elevosandbox-base}:${ELEVO_BASE_VERSION:-latest}
+      - WORKSPACE_BASE_IMAGE=${ELEVO_BASE_IMAGE}:${ELEVO_VERSION:-latest}
 
       # Agent
       - WORKSPACE_AGENT_TIMEOUT=${AGENT_TIMEOUT:-60}
