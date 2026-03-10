@@ -1,0 +1,34 @@
+[package]
+name = "fuse-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Shared FUSE filesystem core for Elevo Workspace"
+
+[dependencies]
+# Shared proto definitions
+workspace-proto = { path = "../workspace-proto" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# FUSE
+fuser = "0.16"
+
+# Caching
+moka = { version = "0.12", features = ["sync"] }
+dashmap = { workspace = true }
+
+# System
+libc = { workspace = true }
+
+# Utilities
+prost-types = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Logging
+tracing = { workspace = true }

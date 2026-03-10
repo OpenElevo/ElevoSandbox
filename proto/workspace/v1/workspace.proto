@@ -29,6 +29,12 @@ service WorkspaceService {
   rpc MoveFile(MoveFileRequest) returns (MoveFileResponse);
   rpc CopyFile(CopyFileRequest) returns (CopyFileResponse);
   rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);
+
+  // Register NFS transport (switch remote workspace from gRPC to NFS)
+  rpc RegisterNfsTransport(RegisterNfsTransportRequest) returns (RegisterNfsTransportResponse);
+
+  // Unregister NFS transport (switch back to gRPC)
+  rpc UnregisterNfsTransport(UnregisterNfsTransportRequest) returns (UnregisterNfsTransportResponse);
 }
 
 // Workspace resource
@@ -50,6 +56,12 @@ message Workspace {
 
   // Last update timestamp
   google.protobuf.Timestamp updated_at = 6;
+
+  // Storage type: "managed" or "remote"
+  string storage_type = 7;
+
+  // Storage configuration (JSON string, meaningful for remote workspaces)
+  string storage_config = 8;
 }
 
 // File information
@@ -77,6 +89,9 @@ message CreateWorkspaceRequest {
 
   // Custom metadata
   map<string, string> metadata = 2;
+
+  // Storage type: "managed" (default) or "remote" (Client-provided storage)
+  optional string storage_type = 3;
 }
 
 // Create workspace response
@@ -214,4 +229,25 @@ message GetFileInfoRequest {
 // Get file info response
 message GetFileInfoResponse {
   FileInfo file = 1;
+}
+
+// Register NFS transport request
+message RegisterNfsTransportRequest {
+  string workspace_id = 1;
+  string nfs_url = 2;
+}
+
+// Register NFS transport response
+message RegisterNfsTransportResponse {
+  Workspace workspace = 1;
+}
+
+// Unregister NFS transport request
+message UnregisterNfsTransportRequest {
+  string workspace_id = 1;
+}
+
+// Unregister NFS transport response
+message UnregisterNfsTransportResponse {
+  Workspace workspace = 1;
 }

@@ -1,6 +1,7 @@
 //! gRPC API handlers for Agent communication and FileSystem operations
 
 pub mod auth;
+pub mod client_storage;
 pub mod filesystem;
 pub mod process;
 pub mod pty;
@@ -24,6 +25,7 @@ use crate::proto::{
 };
 
 pub use auth::AuthInterceptor;
+pub use client_storage::ClientStorageServiceImpl;
 pub use filesystem::FileSystemServiceImpl;
 pub use process::GrpcProcessService;
 pub use pty::GrpcPtyService;

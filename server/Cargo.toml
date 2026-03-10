@@ -59,6 +59,13 @@ dotenvy = { workspace = true }
 # NFS server
 nfsserve = { workspace = true }
 
+# FUSE (server-side mount for remote workspaces)
+fuse-core = { path = "../fuse-core" }
+fuser = "0.16"
+
+# NFS remote mount support
+ipnet = "2"
+
 # System
 libc = { workspace = true }
 

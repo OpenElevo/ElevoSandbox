@@ -4,6 +4,7 @@ members = [
     "server",
     "agent",
     "workspace-proto",
+    "fuse-core",
     "fuse-client",
     "tests/integration",
     "tests/mcp-client",

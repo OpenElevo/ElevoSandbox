@@ -950,6 +950,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42703706b716c37f96a77aea830392ad231f44c9e9a67872fa5548707e11b11c"
 
 [[package]]
+name = "fuse-core"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "dashmap",
+ "fuser",
+ "libc",
+ "moka",
+ "prost-types",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "workspace-proto",
+]
+
+[[package]]
 name = "fuser"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4720,11 +4736,12 @@ name = "workspace-fuse"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "clap",
+ "fuse-core",
  "fuser",
  "libc",
- "moka",
  "prost-types",
  "tokio",
  "tokio-stream",
@@ -4759,7 +4776,10 @@ dependencies = [
  "config",
  "dashmap",
  "dotenvy",
+ "fuse-core",
+ "fuser",
  "futures",
+ "ipnet",
  "libc",
  "metrics",
  "metrics-exporter-prometheus",

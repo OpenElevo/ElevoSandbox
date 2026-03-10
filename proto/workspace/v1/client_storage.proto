@@ -1,0 +1,395 @@
+syntax = "proto3";
+
+package workspace.v1;
+
+option go_package = "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1";
+
+import "google/protobuf/timestamp.proto";
+
+// ClientStorageService — Client reverse-stream connection service.
+// Client connects to Server and serves file operations on its local directory.
+service ClientStorageService {
+  // Control stream: bidirectional, carries metadata operations and heartbeat
+  rpc Connect(stream ClientMessage) returns (stream ServerStorageMessage);
+
+  // Data stream: Client reads local file and streams to Server (client-streaming)
+  // Data direction: Client -> Server (file content from Client local disk to Server)
+  rpc ReadFileStream(stream ReadFileStreamRequest) returns (ReadFileStreamResponse);
+
+  // Data stream: Server streams data to Client for writing (server-streaming)
+  // Data direction: Server -> Client (file content from Server to Client local disk)
+  rpc WriteFileStream(WriteFileStreamRequest) returns (stream WriteFileStreamResponse);
+}
+
+// ============================================================
+// Control stream messages
+// ============================================================
+
+// Client -> Server message
+message ClientMessage {
+  oneof message {
+    // Handshake (first message)
+    StorageHandshake handshake = 1;
+    // Operation response
+    StorageOperationResponse operation_response = 2;
+    // File change notification (Client push)
+    FileChangedNotification file_changed = 3;
+    // Heartbeat response
+    StoragePong pong = 4;
+    // Data stream establishment failed
+    DataTransferFailed data_transfer_failed = 5;
+  }
+}
+
+// Server -> Client message
+message ServerStorageMessage {
+  oneof message {
+    // Handshake acknowledgment
+    StorageHandshakeAck handshake_ack = 1;
+    // File operation request
+    StorageOperationRequest operation_request = 2;
+    // Heartbeat
+    StoragePing ping = 3;
+    // Notify Client to initiate data stream RPC
+    StartDataTransfer start_data_transfer = 4;
+  }
+}
+
+// ============================================================
+// Handshake
+// ============================================================
+
+message StorageHandshake {
+  string workspace_id = 1;
+  // Client authentication token (reuses existing token mechanism)
+  string token = 2;
+}
+
+message StorageHandshakeAck {
+  bool success = 1;
+  optional string error = 2;
+}
+
+// ============================================================
+// Heartbeat
+// ============================================================
+
+message StoragePing {
+  uint64 timestamp = 1;
+}
+
+message StoragePong {
+  uint64 timestamp = 1;
+}
+
+// ============================================================
+// File operation request (Server -> Client)
+// ============================================================
+
+message StorageOperationRequest {
+  // Request correlation ID
+  string correlation_id = 1;
+  // Operation type
+  oneof operation {
+    StatRequest stat = 10;
+    ListDirRequest list_dir = 11;
+    ExistsRequest exists = 12;
+    ReadFileRangeRequest read_file_range = 13;
+    WriteFileAtRequest write_file_at = 14;
+    CreateFileRequest create_file = 15;
+    StorageMkdirRequest mkdir = 16;
+    RemoveFileRequest remove_file = 17;
+    RemoveDirRequest remove_dir = 18;
+    RenameRequest rename = 19;
+    CopyRequest copy = 20;
+    SetFileSizeRequest set_file_size = 21;
+    SetPermissionsRequest set_permissions = 22;
+    SetTimesRequest set_times = 23;
+    SymlinkRequest symlink = 24;
+    ReadLinkRequest read_link = 25;
+    StatFsRequest stat_fs = 26;
+  }
+}
+
+// --- Operation request messages ---
+// All paths are workspace-relative paths
+
+message StatRequest {
+  string path = 1;
+}
+
+message ListDirRequest {
+  string path = 1;
+}
+
+message ExistsRequest {
+  string path = 1;
+}
+
+message ReadFileRangeRequest {
+  string path = 1;
+  uint64 offset = 2;
+  uint32 length = 3;
+}
+
+message WriteFileAtRequest {
+  string path = 1;
+  uint64 offset = 2;
+  bytes data = 3;
+}
+
+message CreateFileRequest {
+  string path = 1;
+  bool exclusive = 2;
+}
+
+// Named StorageMkdirRequest to avoid conflict with workspace.proto MkdirRequest
+message StorageMkdirRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message RemoveFileRequest {
+  string path = 1;
+}
+
+message RemoveDirRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message RenameRequest {
+  string src = 1;
+  string dst = 2;
+  // 0=normal, 1=noreplace, 2=exchange
+  uint32 flags = 3;
+}
+
+message CopyRequest {
+  string src = 1;
+  string dst = 2;
+}
+
+message SetFileSizeRequest {
+  string path = 1;
+  uint64 size = 2;
+}
+
+message SetPermissionsRequest {
+  string path = 1;
+  uint32 mode = 2;
+}
+
+message SetTimesRequest {
+  string path = 1;
+  optional google.protobuf.Timestamp atime = 2;
+  optional google.protobuf.Timestamp mtime = 3;
+}
+
+message SymlinkRequest {
+  string link_path = 1;
+  string target = 2;
+}
+
+message ReadLinkRequest {
+  string path = 1;
+}
+
+message StatFsRequest {}
+
+// ============================================================
+// File operation response (Client -> Server)
+// ============================================================
+
+message StorageOperationResponse {
+  // Request correlation ID (matches the request)
+  string correlation_id = 1;
+  oneof result {
+    // Success result
+    StorageOperationSuccess success = 2;
+    // Error
+    StorageOperationError error = 3;
+  }
+}
+
+message StorageOperationSuccess {
+  oneof data {
+    FileStatData stat = 1;
+    ListDirData list_dir = 2;
+    ExistsData exists = 3;
+    ReadData read_data = 4;
+    WriteData write_data = 5;
+    ReadLinkData read_link = 6;
+    StatFsData stat_fs = 7;
+    Empty empty = 8;
+  }
+  // ListDir pagination: true when this is the last batch
+  bool is_last = 10;
+}
+
+// File metadata — aligned with server/src/infra/storage/mod.rs FileStat
+// file_type values: 0=File, 1=Directory, 2=Symlink
+message FileStatData {
+  string name = 1;
+  string path = 2;
+  // 0=File, 1=Directory, 2=Symlink
+  uint32 file_type = 3;
+  uint64 size = 4;
+  uint32 mode = 5;
+  uint32 uid = 6;
+  uint32 gid = 7;
+  optional google.protobuf.Timestamp modified_at = 8;
+  optional google.protobuf.Timestamp accessed_at = 9;
+  optional google.protobuf.Timestamp created_at = 10;
+}
+
+message ListDirData {
+  repeated FileStatData entries = 1;
+}
+
+message ExistsData {
+  bool exists = 1;
+}
+
+message ReadData {
+  bytes data = 1;
+}
+
+message WriteData {
+  uint64 bytes_written = 1;
+}
+
+message ReadLinkData {
+  string target = 1;
+}
+
+// Filesystem statistics — aligned with server/src/infra/storage/mod.rs FsStats
+message StatFsData {
+  uint64 blocks = 1;
+  uint64 bfree = 2;
+  uint64 bavail = 3;
+  uint64 files = 4;
+  uint64 ffree = 5;
+  uint32 bsize = 6;
+  uint32 namelen = 7;
+  uint32 frsize = 8;
+}
+
+message Empty {}
+
+// Error code enum covering all StorageError variants
+enum StorageErrorCode {
+  STORAGE_ERROR_CODE_UNSPECIFIED = 0;
+  STORAGE_ERROR_CODE_NOT_FOUND = 1;
+  STORAGE_ERROR_CODE_ALREADY_EXISTS = 2;
+  STORAGE_ERROR_CODE_IS_A_DIRECTORY = 3;
+  STORAGE_ERROR_CODE_NOT_A_DIRECTORY = 4;
+  STORAGE_ERROR_CODE_NOT_A_FILE = 5;
+  STORAGE_ERROR_CODE_DIRECTORY_NOT_EMPTY = 6;
+  STORAGE_ERROR_CODE_PERMISSION_DENIED = 7;
+  STORAGE_ERROR_CODE_PATH_TRAVERSAL_DENIED = 8;
+  STORAGE_ERROR_CODE_NOT_SUPPORTED = 9;
+  STORAGE_ERROR_CODE_IO_ERROR = 10;
+}
+
+message StorageOperationError {
+  StorageErrorCode code = 1;
+  string message = 2;
+}
+
+// ============================================================
+// Data stream association
+// ============================================================
+
+// Server notifies Client to initiate an independent data stream RPC
+message StartDataTransfer {
+  string transfer_id = 1;
+  DataTransferOperation operation = 2;
+  string path = 3;
+  // WRITE_FILE: file size if known
+  optional uint64 file_size = 4;
+  // READ_FILE range mode: offset and length
+  optional uint64 offset = 5;
+  optional uint64 length = 6;
+}
+
+enum DataTransferOperation {
+  DATA_TRANSFER_OPERATION_UNSPECIFIED = 0;
+  DATA_TRANSFER_OPERATION_READ_FILE = 1;
+  DATA_TRANSFER_OPERATION_WRITE_FILE = 2;
+}
+
+// Client notifies Server that data stream establishment failed
+message DataTransferFailed {
+  string transfer_id = 1;
+  string reason = 2;
+}
+
+// ============================================================
+// Data stream RPC messages
+// ============================================================
+
+// ReadFileStream: Client reads local file and streams to Server (client-streaming)
+message ReadFileStreamRequest {
+  oneof payload {
+    // First message: header with transfer_id
+    ReadFileStreamHeader header = 1;
+    // Subsequent messages: file data chunks
+    bytes data = 2;
+  }
+}
+
+message ReadFileStreamHeader {
+  string transfer_id = 1;
+  string workspace_id = 2;
+}
+
+// Server response after collecting all chunks
+message ReadFileStreamResponse {
+  uint64 bytes_read = 1;
+}
+
+// WriteFileStream: Server streams data to Client for writing (server-streaming)
+message WriteFileStreamRequest {
+  string transfer_id = 1;
+  string workspace_id = 2;
+}
+
+message WriteFileStreamResponse {
+  oneof payload {
+    // File data chunk
+    bytes data = 1;
+    // Transfer complete marker
+    WriteFileStreamDone done = 2;
+  }
+}
+
+message WriteFileStreamDone {
+  uint64 total_bytes = 1;
+}
+
+// ============================================================
+// File change notifications (Client -> Server)
+// ============================================================
+
+message FileChangedNotification {
+  repeated FileChangeEvent events = 1;
+  // When true (inotify degraded mode), Server should do full cache purge
+  bool full_purge = 2;
+}
+
+message FileChangeEvent {
+  string path = 1;
+  FileChangeType event_type = 2;
+  // New path for RENAMED events
+  optional string new_path = 3;
+}
+
+enum FileChangeType {
+  FILE_CHANGE_TYPE_UNSPECIFIED = 0;
+  FILE_CHANGE_TYPE_CREATED = 1;
+  FILE_CHANGE_TYPE_MODIFIED = 2;
+  FILE_CHANGE_TYPE_DELETED = 3;
+  FILE_CHANGE_TYPE_RENAMED = 4;
+  FILE_CHANGE_TYPE_ATTR_CHANGED = 5;
+}

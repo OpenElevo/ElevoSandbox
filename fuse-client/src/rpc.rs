@@ -17,12 +17,7 @@ use workspace_proto::{
     FsWriteAtRequest,
 };
 
-/// Directory entry from list_dir
-#[derive(Debug, Clone)]
-pub struct DirEntry {
-    pub name: String,
-    pub attr: Option<FsFileAttr>,
-}
+use fuse_core::backend::FuseDirEntry;
 
 /// gRPC client for FileSystemService
 #[derive(Clone)]
@@ -53,11 +48,13 @@ impl FileSystemRpcClient {
         })
     }
 
-    /// Add authorization header to request
+    /// Add authorization header to request (skipped if token is empty)
     fn authorize<T>(&self, mut request: Request<T>) -> Request<T> {
-        let token_value = format!("Bearer {}", self.token);
-        if let Ok(value) = MetadataValue::try_from(&token_value) {
-            request.metadata_mut().insert("authorization", value);
+        if !self.token.is_empty() {
+            let token_value = format!("Bearer {}", self.token);
+            if let Ok(value) = MetadataValue::try_from(&token_value) {
+                request.metadata_mut().insert("authorization", value);
+            }
         }
         request
     }
@@ -78,7 +75,7 @@ impl FileSystemRpcClient {
     }
 
     /// List directory contents
-    pub async fn list_dir(&self, path: &str) -> Result<Vec<DirEntry>, Status> {
+    pub async fn list_dir(&self, path: &str) -> Result<Vec<FuseDirEntry>, Status> {
         debug!(path = %path, "rpc: list_dir");
         let request = self.authorize(Request::new(FsListDirRequest {
             workspace_id: self.workspace_id.clone(),
@@ -92,7 +89,7 @@ impl FileSystemRpcClient {
         while let Some(response) = stream.next().await {
             let response = response?;
             for entry in response.entries {
-                entries.push(DirEntry {
+                entries.push(FuseDirEntry {
                     name: entry.name,
                     attr: entry.attr,
                 });

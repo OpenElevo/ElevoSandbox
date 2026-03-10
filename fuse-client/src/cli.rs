@@ -99,6 +99,7 @@ impl MountArgs {
     /// 2. --token-file option
     /// 3. --token-stdin option
     /// 4. --token command line argument
+    /// 5. Empty string (no authentication - for servers without auth)
     pub fn resolve_token(&self) -> io::Result<String> {
         // 1. Check environment variable first (highest priority, most secure)
         if let Ok(token) = std::env::var(TOKEN_ENV_VAR) {
@@ -140,13 +141,8 @@ impl MountArgs {
             return Ok(token.clone());
         }
 
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "no authentication token provided. Use {} env var, --token-file, --token-stdin, or --token",
-                TOKEN_ENV_VAR
-            ),
-        ))
+        // 5. No token provided - connect without authentication
+        Ok(String::new())
     }
 }
 

@@ -6,6 +6,10 @@
 
 pub mod lease;
 pub mod local;
+pub mod nfs_remote;
+pub mod nfs_remote_monitor;
+pub mod remote;
+pub mod router;
 pub mod s3fs_mount;
 
 use async_trait::async_trait;

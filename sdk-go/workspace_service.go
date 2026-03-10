@@ -28,6 +28,11 @@ func (w *WorkspaceService) Create(ctx context.Context, params *CreateWorkspacePa
 		req.Name = &params.Name
 	}
 
+	if params.StorageType != "" {
+		st := string(params.StorageType)
+		req.StorageType = &st
+	}
+
 	resp, err := w.client.workspaceClient.CreateWorkspace(w.client.withAuth(ctx), req)
 	if err != nil {
 		return nil, convertGrpcError(err)
@@ -247,6 +252,37 @@ func (w *WorkspaceService) FileExists(ctx context.Context, workspaceID, targetPa
 	return true, nil
 }
 
+// ==================== NFS Transport ====================
+
+// RegisterNfsTransport switches a remote workspace from gRPC to NFS transport.
+func (w *WorkspaceService) RegisterNfsTransport(ctx context.Context, workspaceID, nfsURL string) error {
+	req := &pb.RegisterNfsTransportRequest{
+		WorkspaceId: workspaceID,
+		NfsUrl:      nfsURL,
+	}
+
+	_, err := w.client.workspaceClient.RegisterNfsTransport(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
+}
+
+// UnregisterNfsTransport switches a remote workspace from NFS back to gRPC transport.
+func (w *WorkspaceService) UnregisterNfsTransport(ctx context.Context, workspaceID string) error {
+	req := &pb.UnregisterNfsTransportRequest{
+		WorkspaceId: workspaceID,
+	}
+
+	_, err := w.client.workspaceClient.UnregisterNfsTransport(w.client.withAuth(ctx), req)
+	if err != nil {
+		return convertGrpcError(err)
+	}
+
+	return nil
+}
+
 // ==================== Helper functions ====================
 
 func protoToWorkspace(ws *pb.Workspace) *Workspace {
@@ -270,13 +306,20 @@ func protoToWorkspace(ws *pb.Workspace) *Workspace {
 		nfsURL = *ws.NfsUrl
 	}
 
+	storageType := StorageTypeManaged
+	if ws.StorageType != "" {
+		storageType = StorageType(ws.StorageType)
+	}
+
 	return &Workspace{
-		ID:        ws.Id,
-		Name:      name,
-		NfsURL:    nfsURL,
-		Metadata:  ws.Metadata,
-		CreatedAt: createdAt,
-		UpdatedAt: updatedAt,
+		ID:            ws.Id,
+		Name:          name,
+		NfsURL:        nfsURL,
+		StorageType:   storageType,
+		StorageConfig: ws.StorageConfig,
+		Metadata:      ws.Metadata,
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
 	}
 }
 

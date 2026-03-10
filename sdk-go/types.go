@@ -4,20 +4,33 @@ import (
 	"time"
 )
 
+// StorageType represents the storage type of a workspace
+type StorageType string
+
+const (
+	// StorageTypeManaged indicates server-managed storage (local or S3)
+	StorageTypeManaged StorageType = "managed"
+	// StorageTypeRemote indicates client-provided remote storage
+	StorageTypeRemote StorageType = "remote"
+)
+
 // Workspace represents a workspace instance
 type Workspace struct {
-	ID        string            `json:"id"`
-	Name      string            `json:"name,omitempty"`
-	NfsURL    string            `json:"nfs_url,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	CreatedAt time.Time         `json:"created_at"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name,omitempty"`
+	NfsURL        string            `json:"nfs_url,omitempty"`
+	StorageType   StorageType       `json:"storage_type"`
+	StorageConfig string            `json:"storage_config,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 // CreateWorkspaceParams contains parameters for creating a workspace
 type CreateWorkspaceParams struct {
-	Name     string            `json:"name,omitempty"`
-	Metadata map[string]string `json:"metadata,omitempty"`
+	Name        string            `json:"name,omitempty"`
+	StorageType StorageType       `json:"storage_type,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // ListWorkspacesResponse represents the response from listing workspaces

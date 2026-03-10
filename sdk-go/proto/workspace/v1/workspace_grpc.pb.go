@@ -19,18 +19,20 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkspaceService_CreateWorkspace_FullMethodName = "/workspace.v1.WorkspaceService/CreateWorkspace"
-	WorkspaceService_GetWorkspace_FullMethodName    = "/workspace.v1.WorkspaceService/GetWorkspace"
-	WorkspaceService_ListWorkspaces_FullMethodName  = "/workspace.v1.WorkspaceService/ListWorkspaces"
-	WorkspaceService_DeleteWorkspace_FullMethodName = "/workspace.v1.WorkspaceService/DeleteWorkspace"
-	WorkspaceService_ReadFile_FullMethodName        = "/workspace.v1.WorkspaceService/ReadFile"
-	WorkspaceService_WriteFile_FullMethodName       = "/workspace.v1.WorkspaceService/WriteFile"
-	WorkspaceService_ListFiles_FullMethodName       = "/workspace.v1.WorkspaceService/ListFiles"
-	WorkspaceService_Mkdir_FullMethodName           = "/workspace.v1.WorkspaceService/Mkdir"
-	WorkspaceService_DeleteFile_FullMethodName      = "/workspace.v1.WorkspaceService/DeleteFile"
-	WorkspaceService_MoveFile_FullMethodName        = "/workspace.v1.WorkspaceService/MoveFile"
-	WorkspaceService_CopyFile_FullMethodName        = "/workspace.v1.WorkspaceService/CopyFile"
-	WorkspaceService_GetFileInfo_FullMethodName     = "/workspace.v1.WorkspaceService/GetFileInfo"
+	WorkspaceService_CreateWorkspace_FullMethodName        = "/workspace.v1.WorkspaceService/CreateWorkspace"
+	WorkspaceService_GetWorkspace_FullMethodName           = "/workspace.v1.WorkspaceService/GetWorkspace"
+	WorkspaceService_ListWorkspaces_FullMethodName         = "/workspace.v1.WorkspaceService/ListWorkspaces"
+	WorkspaceService_DeleteWorkspace_FullMethodName        = "/workspace.v1.WorkspaceService/DeleteWorkspace"
+	WorkspaceService_ReadFile_FullMethodName               = "/workspace.v1.WorkspaceService/ReadFile"
+	WorkspaceService_WriteFile_FullMethodName              = "/workspace.v1.WorkspaceService/WriteFile"
+	WorkspaceService_ListFiles_FullMethodName              = "/workspace.v1.WorkspaceService/ListFiles"
+	WorkspaceService_Mkdir_FullMethodName                  = "/workspace.v1.WorkspaceService/Mkdir"
+	WorkspaceService_DeleteFile_FullMethodName             = "/workspace.v1.WorkspaceService/DeleteFile"
+	WorkspaceService_MoveFile_FullMethodName               = "/workspace.v1.WorkspaceService/MoveFile"
+	WorkspaceService_CopyFile_FullMethodName               = "/workspace.v1.WorkspaceService/CopyFile"
+	WorkspaceService_GetFileInfo_FullMethodName            = "/workspace.v1.WorkspaceService/GetFileInfo"
+	WorkspaceService_RegisterNfsTransport_FullMethodName   = "/workspace.v1.WorkspaceService/RegisterNfsTransport"
+	WorkspaceService_UnregisterNfsTransport_FullMethodName = "/workspace.v1.WorkspaceService/UnregisterNfsTransport"
 )
 
 // WorkspaceServiceClient is the client API for WorkspaceService service.
@@ -56,6 +58,10 @@ type WorkspaceServiceClient interface {
 	MoveFile(ctx context.Context, in *MoveFileRequest, opts ...grpc.CallOption) (*MoveFileResponse, error)
 	CopyFile(ctx context.Context, in *CopyFileRequest, opts ...grpc.CallOption) (*CopyFileResponse, error)
 	GetFileInfo(ctx context.Context, in *GetFileInfoRequest, opts ...grpc.CallOption) (*GetFileInfoResponse, error)
+	// Register NFS transport (switch remote workspace from gRPC to NFS)
+	RegisterNfsTransport(ctx context.Context, in *RegisterNfsTransportRequest, opts ...grpc.CallOption) (*RegisterNfsTransportResponse, error)
+	// Unregister NFS transport (switch back to gRPC)
+	UnregisterNfsTransport(ctx context.Context, in *UnregisterNfsTransportRequest, opts ...grpc.CallOption) (*UnregisterNfsTransportResponse, error)
 }
 
 type workspaceServiceClient struct {
@@ -186,6 +192,26 @@ func (c *workspaceServiceClient) GetFileInfo(ctx context.Context, in *GetFileInf
 	return out, nil
 }
 
+func (c *workspaceServiceClient) RegisterNfsTransport(ctx context.Context, in *RegisterNfsTransportRequest, opts ...grpc.CallOption) (*RegisterNfsTransportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RegisterNfsTransportResponse)
+	err := c.cc.Invoke(ctx, WorkspaceService_RegisterNfsTransport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workspaceServiceClient) UnregisterNfsTransport(ctx context.Context, in *UnregisterNfsTransportRequest, opts ...grpc.CallOption) (*UnregisterNfsTransportResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnregisterNfsTransportResponse)
+	err := c.cc.Invoke(ctx, WorkspaceService_UnregisterNfsTransport_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorkspaceServiceServer is the server API for WorkspaceService service.
 // All implementations must embed UnimplementedWorkspaceServiceServer
 // for forward compatibility.
@@ -209,6 +235,10 @@ type WorkspaceServiceServer interface {
 	MoveFile(context.Context, *MoveFileRequest) (*MoveFileResponse, error)
 	CopyFile(context.Context, *CopyFileRequest) (*CopyFileResponse, error)
 	GetFileInfo(context.Context, *GetFileInfoRequest) (*GetFileInfoResponse, error)
+	// Register NFS transport (switch remote workspace from gRPC to NFS)
+	RegisterNfsTransport(context.Context, *RegisterNfsTransportRequest) (*RegisterNfsTransportResponse, error)
+	// Unregister NFS transport (switch back to gRPC)
+	UnregisterNfsTransport(context.Context, *UnregisterNfsTransportRequest) (*UnregisterNfsTransportResponse, error)
 	mustEmbedUnimplementedWorkspaceServiceServer()
 }
 
@@ -254,6 +284,12 @@ func (UnimplementedWorkspaceServiceServer) CopyFile(context.Context, *CopyFileRe
 }
 func (UnimplementedWorkspaceServiceServer) GetFileInfo(context.Context, *GetFileInfoRequest) (*GetFileInfoResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetFileInfo not implemented")
+}
+func (UnimplementedWorkspaceServiceServer) RegisterNfsTransport(context.Context, *RegisterNfsTransportRequest) (*RegisterNfsTransportResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RegisterNfsTransport not implemented")
+}
+func (UnimplementedWorkspaceServiceServer) UnregisterNfsTransport(context.Context, *UnregisterNfsTransportRequest) (*UnregisterNfsTransportResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnregisterNfsTransport not implemented")
 }
 func (UnimplementedWorkspaceServiceServer) mustEmbedUnimplementedWorkspaceServiceServer() {}
 func (UnimplementedWorkspaceServiceServer) testEmbeddedByValue()                          {}
@@ -492,6 +528,42 @@ func _WorkspaceService_GetFileInfo_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkspaceService_RegisterNfsTransport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RegisterNfsTransportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceServiceServer).RegisterNfsTransport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkspaceService_RegisterNfsTransport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkspaceServiceServer).RegisterNfsTransport(ctx, req.(*RegisterNfsTransportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkspaceService_UnregisterNfsTransport_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterNfsTransportRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkspaceServiceServer).UnregisterNfsTransport(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkspaceService_UnregisterNfsTransport_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkspaceServiceServer).UnregisterNfsTransport(ctx, req.(*UnregisterNfsTransportRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorkspaceService_ServiceDesc is the grpc.ServiceDesc for WorkspaceService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -546,6 +618,14 @@ var WorkspaceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetFileInfo",
 			Handler:    _WorkspaceService_GetFileInfo_Handler,
+		},
+		{
+			MethodName: "RegisterNfsTransport",
+			Handler:    _WorkspaceService_RegisterNfsTransport_Handler,
+		},
+		{
+			MethodName: "UnregisterNfsTransport",
+			Handler:    _WorkspaceService_UnregisterNfsTransport_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

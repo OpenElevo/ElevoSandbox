@@ -23,8 +23,8 @@ pub use config::Config;
 pub use error::{Error, Result};
 
 use api::grpc::{
-    AuthInterceptor, FileSystemServiceImpl, GrpcProcessService, GrpcPtyService,
-    GrpcSandboxService, GrpcWorkspaceService,
+    AuthInterceptor, ClientStorageServiceImpl, FileSystemServiceImpl, GrpcProcessService,
+    GrpcPtyService, GrpcSandboxService, GrpcWorkspaceService,
 };
 use config::StorageConfig;
 use infra::agent_pool::AgentConnPool;
@@ -34,9 +34,14 @@ use infra::nfs::{NfsManager, NfsMode};
 use infra::sqlite::SandboxRepository;
 use infra::storage::lease::SqliteLeaseManager;
 use infra::storage::local::LocalStorageBackend;
+use infra::fuse::mount::FuseMountManager;
+use infra::storage::remote::RemoteStoragePool;
+use infra::storage::router::StorageRouter;
+use infra::storage::nfs_remote::RemoteNfsMountManager;
 use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonitor};
 use infra::storage::StorageBackend;
 use infra::workspace_repository::WorkspaceRepository;
+use proto::client_storage_service_server::ClientStorageServiceServer;
 use proto::file_system_service_server::FileSystemServiceServer;
 use proto::process_service_server::ProcessServiceServer;
 use proto::pty_service_server::PtyServiceServer;
@@ -44,6 +49,8 @@ use proto::sandbox_service_server::SandboxServiceServer;
 use proto::workspace_service_server::WorkspaceServiceServer;
 use service::process::ProcessService;
 use service::pty::PtyService;
+use service::recovery::RecoveryService;
+use service::remote_storage::RemoteStorageService;
 use service::sandbox::SandboxService;
 use service::workspace::WorkspaceService;
 
@@ -170,7 +177,10 @@ async fn main() -> anyhow::Result<()> {
     // Initialize storage backend (local or S3 via s3fs-fuse)
     let (storage, s3_mount_manager) = init_storage(&config.storage).await?;
 
-    // Initialize NFS manager
+    // Wrap the default backend with StorageRouter for per-workspace routing
+    let storage_router = Arc::new(StorageRouter::new(storage.clone()));
+
+    // Initialize NFS manager (uses StorageRouter which implements StorageBackend)
     let nfs_mode = match config.nfs_mode.as_str() {
         "system" => NfsMode::System,
         _ => NfsMode::Embedded,
@@ -179,7 +189,7 @@ async fn main() -> anyhow::Result<()> {
         nfs_mode,
         config.nfs_port,
         config.get_nfs_host().to_string(),
-        storage.clone(),
+        storage_router.clone() as Arc<dyn StorageBackend>,
     ));
 
     // Start NFS server if embedded mode
@@ -197,13 +207,51 @@ async fn main() -> anyhow::Result<()> {
     let holder_id = format!("server-{}", std::process::id());
     info!("Server holder ID: {}", holder_id);
 
+    // Initialize remote storage pool for Client-provided storage
+    let remote_storage_pool = Arc::new(RemoteStoragePool::new());
+
+    // Initialize FUSE mount manager for remote workspaces
+    let fuse_manager = Arc::new(FuseMountManager::new(
+        config.storage.workspace_dir().to_path_buf(),
+        std::time::Duration::from_secs(config.fuse_entry_timeout_secs),
+    ));
+
+    // Initialize NFS remote mount manager
+    let nfs_allowed_cidrs: Vec<ipnet::IpNet> = config
+        .nfs_allowed_cidrs
+        .iter()
+        .filter_map(|cidr| cidr.parse().ok())
+        .collect();
+    let nfs_remote = Arc::new(RemoteNfsMountManager::new(
+        config.storage.workspace_dir().to_path_buf(),
+        nfs_allowed_cidrs,
+    ));
+
+    // Run recovery for remote workspaces before accepting connections
+    let recovery_service = RecoveryService::new(
+        workspace_repository.clone(),
+        storage_router.clone(),
+        fuse_manager.clone(),
+        nfs_remote.clone(),
+        remote_storage_pool.clone(),
+        config.remote_op_timeout_secs,
+        config.remote_max_concurrent_requests,
+        config.remote_data_stream_threshold,
+        config.remote_transfer_timeout_secs,
+    );
+    recovery_service.run().await;
+
     // Initialize services
     let workspace_service = Arc::new(WorkspaceService::new(
         workspace_repository.clone(),
         nfs_manager.clone(),
-        storage.clone(),
+        storage_router.clone(),
+        config.clone(),
         lease_manager as Arc<dyn infra::storage::lease::WorkspaceLeaseManager>,
         holder_id,
+        fuse_manager.clone(),
+        nfs_remote.clone(),
+        remote_storage_pool.clone(),
     ));
 
     let sandbox_service = Arc::new(SandboxService::new(
@@ -223,6 +271,42 @@ async fn main() -> anyhow::Result<()> {
         agent_pool.clone(),
         sandbox_repository.clone(),
     ));
+
+    // Create RemoteStorageService for channel switching
+    let remote_storage_service = Arc::new(RemoteStorageService::new(
+        workspace_repository.clone(),
+        storage_router.clone(),
+        fuse_manager.clone(),
+        nfs_remote.clone(),
+        remote_storage_pool.clone(),
+        config.clone(),
+    ));
+
+    // Create ClientStorageService for remote workspace connections
+    let client_storage_service = ClientStorageServiceImpl::new(
+        remote_storage_pool.clone(),
+        storage_router.clone(),
+        workspace_repository.clone(),
+        config.clone(),
+        fuse_manager.clone(),
+    );
+
+    // Start health monitors for remote workspaces
+    let fuse_monitor = infra::fuse::monitor::FuseMountMonitor::new(
+        fuse_manager.clone(),
+        remote_storage_pool.clone(),
+        std::time::Duration::from_secs(30),
+    );
+    fuse_monitor.start();
+    info!("FUSE mount health monitor started (30s interval)");
+
+    let nfs_monitor = infra::storage::nfs_remote_monitor::NfsRemoteMountMonitor::new(
+        workspace_repository.clone(),
+        nfs_remote.clone(),
+        std::time::Duration::from_secs(30),
+    );
+    nfs_monitor.start();
+    info!("NFS remote mount health monitor started (30s interval)");
 
     // Create application state
     let state = AppState {
@@ -279,13 +363,19 @@ async fn main() -> anyhow::Result<()> {
     let agent_grpc_server = api::grpc::create_server(agent_pool.clone());
 
     // Build gRPC router with all services
-    let workspace_grpc = GrpcWorkspaceService::new(state.workspace_service.clone());
+    let workspace_grpc = GrpcWorkspaceService::new(
+        state.workspace_service.clone(),
+        remote_storage_service.clone(),
+    );
     let sandbox_grpc = GrpcSandboxService::new(state.sandbox_service.clone());
     let process_grpc = GrpcProcessService::new(state.process_service.clone());
     let pty_grpc = GrpcPtyService::new(state.pty_service.clone(), agent_pool.clone());
 
+    let client_storage_grpc_server =
+        ClientStorageServiceServer::new(client_storage_service);
+
     let grpc_router = if config.fs_api_enabled {
-        let fs_service = FileSystemServiceImpl::new(storage.clone());
+        let fs_service = FileSystemServiceImpl::new(storage_router.clone() as Arc<dyn StorageBackend>);
         if let Some(ref token) = config.fs_api_token {
             info!("FileSystemService enabled with token authentication");
             let auth_interceptor = AuthInterceptor::new(token.clone());
@@ -294,6 +384,7 @@ async fn main() -> anyhow::Result<()> {
             Server::builder()
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
+                .add_service(client_storage_grpc_server)
                 .add_service(WorkspaceServiceServer::new(workspace_grpc))
                 .add_service(SandboxServiceServer::new(sandbox_grpc))
                 .add_service(ProcessServiceServer::new(process_grpc))
@@ -304,6 +395,7 @@ async fn main() -> anyhow::Result<()> {
             Server::builder()
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
+                .add_service(client_storage_grpc_server)
                 .add_service(WorkspaceServiceServer::new(workspace_grpc))
                 .add_service(SandboxServiceServer::new(sandbox_grpc))
                 .add_service(ProcessServiceServer::new(process_grpc))
@@ -313,6 +405,7 @@ async fn main() -> anyhow::Result<()> {
         info!("FileSystemService disabled");
         Server::builder()
             .add_service(agent_grpc_server)
+            .add_service(client_storage_grpc_server)
             .add_service(WorkspaceServiceServer::new(workspace_grpc))
             .add_service(SandboxServiceServer::new(sandbox_grpc))
             .add_service(ProcessServiceServer::new(process_grpc))

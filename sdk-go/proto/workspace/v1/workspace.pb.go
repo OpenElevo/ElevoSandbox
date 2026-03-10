@@ -36,7 +36,11 @@ type Workspace struct {
 	// Creation timestamp
 	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	// Last update timestamp
-	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	UpdatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// Storage type: "managed" or "remote"
+	StorageType string `protobuf:"bytes,7,opt,name=storage_type,json=storageType,proto3" json:"storage_type,omitempty"`
+	// Storage configuration (JSON string, meaningful for remote workspaces)
+	StorageConfig string `protobuf:"bytes,8,opt,name=storage_config,json=storageConfig,proto3" json:"storage_config,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,6 +115,20 @@ func (x *Workspace) GetUpdatedAt() *timestamppb.Timestamp {
 		return x.UpdatedAt
 	}
 	return nil
+}
+
+func (x *Workspace) GetStorageType() string {
+	if x != nil {
+		return x.StorageType
+	}
+	return ""
+}
+
+func (x *Workspace) GetStorageConfig() string {
+	if x != nil {
+		return x.StorageConfig
+	}
+	return ""
 }
 
 // File information
@@ -201,7 +219,9 @@ type CreateWorkspaceRequest struct {
 	// Optional name
 	Name *string `protobuf:"bytes,1,opt,name=name,proto3,oneof" json:"name,omitempty"`
 	// Custom metadata
-	Metadata      map[string]string `protobuf:"bytes,2,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Metadata map[string]string `protobuf:"bytes,2,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Storage type: "managed" (default) or "remote" (Client-provided storage)
+	StorageType   *string `protobuf:"bytes,3,opt,name=storage_type,json=storageType,proto3,oneof" json:"storage_type,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -248,6 +268,13 @@ func (x *CreateWorkspaceRequest) GetMetadata() map[string]string {
 		return x.Metadata
 	}
 	return nil
+}
+
+func (x *CreateWorkspaceRequest) GetStorageType() string {
+	if x != nil && x.StorageType != nil {
+		return *x.StorageType
+	}
+	return ""
 }
 
 // Create workspace response
@@ -1409,11 +1436,199 @@ func (x *GetFileInfoResponse) GetFile() *FileInfo {
 	return nil
 }
 
+// Register NFS transport request
+type RegisterNfsTransportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	NfsUrl        string                 `protobuf:"bytes,2,opt,name=nfs_url,json=nfsUrl,proto3" json:"nfs_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterNfsTransportRequest) Reset() {
+	*x = RegisterNfsTransportRequest{}
+	mi := &file_workspace_v1_workspace_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterNfsTransportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterNfsTransportRequest) ProtoMessage() {}
+
+func (x *RegisterNfsTransportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_v1_workspace_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterNfsTransportRequest.ProtoReflect.Descriptor instead.
+func (*RegisterNfsTransportRequest) Descriptor() ([]byte, []int) {
+	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *RegisterNfsTransportRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RegisterNfsTransportRequest) GetNfsUrl() string {
+	if x != nil {
+		return x.NfsUrl
+	}
+	return ""
+}
+
+// Register NFS transport response
+type RegisterNfsTransportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workspace     *Workspace             `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RegisterNfsTransportResponse) Reset() {
+	*x = RegisterNfsTransportResponse{}
+	mi := &file_workspace_v1_workspace_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RegisterNfsTransportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RegisterNfsTransportResponse) ProtoMessage() {}
+
+func (x *RegisterNfsTransportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_v1_workspace_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RegisterNfsTransportResponse.ProtoReflect.Descriptor instead.
+func (*RegisterNfsTransportResponse) Descriptor() ([]byte, []int) {
+	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *RegisterNfsTransportResponse) GetWorkspace() *Workspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
+// Unregister NFS transport request
+type UnregisterNfsTransportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterNfsTransportRequest) Reset() {
+	*x = UnregisterNfsTransportRequest{}
+	mi := &file_workspace_v1_workspace_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterNfsTransportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterNfsTransportRequest) ProtoMessage() {}
+
+func (x *UnregisterNfsTransportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_v1_workspace_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterNfsTransportRequest.ProtoReflect.Descriptor instead.
+func (*UnregisterNfsTransportRequest) Descriptor() ([]byte, []int) {
+	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *UnregisterNfsTransportRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+// Unregister NFS transport response
+type UnregisterNfsTransportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workspace     *Workspace             `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterNfsTransportResponse) Reset() {
+	*x = UnregisterNfsTransportResponse{}
+	mi := &file_workspace_v1_workspace_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterNfsTransportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterNfsTransportResponse) ProtoMessage() {}
+
+func (x *UnregisterNfsTransportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_v1_workspace_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterNfsTransportResponse.ProtoReflect.Descriptor instead.
+func (*UnregisterNfsTransportResponse) Descriptor() ([]byte, []int) {
+	return file_workspace_v1_workspace_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *UnregisterNfsTransportResponse) GetWorkspace() *Workspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
 var File_workspace_v1_workspace_proto protoreflect.FileDescriptor
 
 const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\n" +
-	"\x1cworkspace/v1/workspace.proto\x12\fworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdd\x02\n" +
+	"\x1cworkspace/v1/workspace.proto\x12\fworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa7\x03\n" +
 	"\tWorkspace\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
 	"\x04name\x18\x02 \x01(\tH\x00R\x04name\x88\x01\x01\x12\x1c\n" +
@@ -1422,7 +1637,9 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x1a;\n" +
+	"updated_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12!\n" +
+	"\fstorage_type\x18\a \x01(\tR\vstorageType\x12%\n" +
+	"\x0estorage_config\x18\b \x01(\tR\rstorageConfig\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
@@ -1436,14 +1653,16 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\x04size\x18\x04 \x01(\x04R\x04size\x12@\n" +
 	"\vmodified_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampH\x00R\n" +
 	"modifiedAt\x88\x01\x01B\x0e\n" +
-	"\f_modified_at\"\xc7\x01\n" +
+	"\f_modified_at\"\x80\x02\n" +
 	"\x16CreateWorkspaceRequest\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tH\x00R\x04name\x88\x01\x01\x12N\n" +
-	"\bmetadata\x18\x02 \x03(\v22.workspace.v1.CreateWorkspaceRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x02 \x03(\v22.workspace.v1.CreateWorkspaceRequest.MetadataEntryR\bmetadata\x12&\n" +
+	"\fstorage_type\x18\x03 \x01(\tH\x01R\vstorageType\x88\x01\x01\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
-	"\x05_name\"P\n" +
+	"\x05_nameB\x0f\n" +
+	"\r_storage_type\"P\n" +
 	"\x17CreateWorkspaceResponse\x125\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x17.workspace.v1.WorkspaceR\tworkspace\"%\n" +
 	"\x13GetWorkspaceRequest\x12\x0e\n" +
@@ -1510,7 +1729,16 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\"A\n" +
 	"\x13GetFileInfoResponse\x12*\n" +
-	"\x04file\x18\x01 \x01(\v2\x16.workspace.v1.FileInfoR\x04file2\xea\a\n" +
+	"\x04file\x18\x01 \x01(\v2\x16.workspace.v1.FileInfoR\x04file\"Y\n" +
+	"\x1bRegisterNfsTransportRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\anfs_url\x18\x02 \x01(\tR\x06nfsUrl\"U\n" +
+	"\x1cRegisterNfsTransportResponse\x125\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x17.workspace.v1.WorkspaceR\tworkspace\"B\n" +
+	"\x1dUnregisterNfsTransportRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\"W\n" +
+	"\x1eUnregisterNfsTransportResponse\x125\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x17.workspace.v1.WorkspaceR\tworkspace2\xce\t\n" +
 	"\x10WorkspaceService\x12^\n" +
 	"\x0fCreateWorkspace\x12$.workspace.v1.CreateWorkspaceRequest\x1a%.workspace.v1.CreateWorkspaceResponse\x12U\n" +
 	"\fGetWorkspace\x12!.workspace.v1.GetWorkspaceRequest\x1a\".workspace.v1.GetWorkspaceResponse\x12[\n" +
@@ -1524,7 +1752,9 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"DeleteFile\x12\x1f.workspace.v1.DeleteFileRequest\x1a .workspace.v1.DeleteFileResponse\x12I\n" +
 	"\bMoveFile\x12\x1d.workspace.v1.MoveFileRequest\x1a\x1e.workspace.v1.MoveFileResponse\x12I\n" +
 	"\bCopyFile\x12\x1d.workspace.v1.CopyFileRequest\x1a\x1e.workspace.v1.CopyFileResponse\x12R\n" +
-	"\vGetFileInfo\x12 .workspace.v1.GetFileInfoRequest\x1a!.workspace.v1.GetFileInfoResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\vGetFileInfo\x12 .workspace.v1.GetFileInfoRequest\x1a!.workspace.v1.GetFileInfoResponse\x12m\n" +
+	"\x14RegisterNfsTransport\x12).workspace.v1.RegisterNfsTransportRequest\x1a*.workspace.v1.RegisterNfsTransportResponse\x12s\n" +
+	"\x16UnregisterNfsTransport\x12+.workspace.v1.UnregisterNfsTransportRequest\x1a,.workspace.v1.UnregisterNfsTransportResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_workspace_proto_rawDescOnce sync.Once
@@ -1538,78 +1768,88 @@ func file_workspace_v1_workspace_proto_rawDescGZIP() []byte {
 	return file_workspace_v1_workspace_proto_rawDescData
 }
 
-var file_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 28)
+var file_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_workspace_v1_workspace_proto_goTypes = []any{
-	(*Workspace)(nil),               // 0: workspace.v1.Workspace
-	(*FileInfo)(nil),                // 1: workspace.v1.FileInfo
-	(*CreateWorkspaceRequest)(nil),  // 2: workspace.v1.CreateWorkspaceRequest
-	(*CreateWorkspaceResponse)(nil), // 3: workspace.v1.CreateWorkspaceResponse
-	(*GetWorkspaceRequest)(nil),     // 4: workspace.v1.GetWorkspaceRequest
-	(*GetWorkspaceResponse)(nil),    // 5: workspace.v1.GetWorkspaceResponse
-	(*ListWorkspacesRequest)(nil),   // 6: workspace.v1.ListWorkspacesRequest
-	(*ListWorkspacesResponse)(nil),  // 7: workspace.v1.ListWorkspacesResponse
-	(*DeleteWorkspaceRequest)(nil),  // 8: workspace.v1.DeleteWorkspaceRequest
-	(*DeleteWorkspaceResponse)(nil), // 9: workspace.v1.DeleteWorkspaceResponse
-	(*ReadFileRequest)(nil),         // 10: workspace.v1.ReadFileRequest
-	(*ReadFileResponse)(nil),        // 11: workspace.v1.ReadFileResponse
-	(*WriteFileRequest)(nil),        // 12: workspace.v1.WriteFileRequest
-	(*WriteFileResponse)(nil),       // 13: workspace.v1.WriteFileResponse
-	(*ListFilesRequest)(nil),        // 14: workspace.v1.ListFilesRequest
-	(*ListFilesResponse)(nil),       // 15: workspace.v1.ListFilesResponse
-	(*MkdirRequest)(nil),            // 16: workspace.v1.MkdirRequest
-	(*MkdirResponse)(nil),           // 17: workspace.v1.MkdirResponse
-	(*DeleteFileRequest)(nil),       // 18: workspace.v1.DeleteFileRequest
-	(*DeleteFileResponse)(nil),      // 19: workspace.v1.DeleteFileResponse
-	(*MoveFileRequest)(nil),         // 20: workspace.v1.MoveFileRequest
-	(*MoveFileResponse)(nil),        // 21: workspace.v1.MoveFileResponse
-	(*CopyFileRequest)(nil),         // 22: workspace.v1.CopyFileRequest
-	(*CopyFileResponse)(nil),        // 23: workspace.v1.CopyFileResponse
-	(*GetFileInfoRequest)(nil),      // 24: workspace.v1.GetFileInfoRequest
-	(*GetFileInfoResponse)(nil),     // 25: workspace.v1.GetFileInfoResponse
-	nil,                             // 26: workspace.v1.Workspace.MetadataEntry
-	nil,                             // 27: workspace.v1.CreateWorkspaceRequest.MetadataEntry
-	(*timestamppb.Timestamp)(nil),   // 28: google.protobuf.Timestamp
+	(*Workspace)(nil),                      // 0: workspace.v1.Workspace
+	(*FileInfo)(nil),                       // 1: workspace.v1.FileInfo
+	(*CreateWorkspaceRequest)(nil),         // 2: workspace.v1.CreateWorkspaceRequest
+	(*CreateWorkspaceResponse)(nil),        // 3: workspace.v1.CreateWorkspaceResponse
+	(*GetWorkspaceRequest)(nil),            // 4: workspace.v1.GetWorkspaceRequest
+	(*GetWorkspaceResponse)(nil),           // 5: workspace.v1.GetWorkspaceResponse
+	(*ListWorkspacesRequest)(nil),          // 6: workspace.v1.ListWorkspacesRequest
+	(*ListWorkspacesResponse)(nil),         // 7: workspace.v1.ListWorkspacesResponse
+	(*DeleteWorkspaceRequest)(nil),         // 8: workspace.v1.DeleteWorkspaceRequest
+	(*DeleteWorkspaceResponse)(nil),        // 9: workspace.v1.DeleteWorkspaceResponse
+	(*ReadFileRequest)(nil),                // 10: workspace.v1.ReadFileRequest
+	(*ReadFileResponse)(nil),               // 11: workspace.v1.ReadFileResponse
+	(*WriteFileRequest)(nil),               // 12: workspace.v1.WriteFileRequest
+	(*WriteFileResponse)(nil),              // 13: workspace.v1.WriteFileResponse
+	(*ListFilesRequest)(nil),               // 14: workspace.v1.ListFilesRequest
+	(*ListFilesResponse)(nil),              // 15: workspace.v1.ListFilesResponse
+	(*MkdirRequest)(nil),                   // 16: workspace.v1.MkdirRequest
+	(*MkdirResponse)(nil),                  // 17: workspace.v1.MkdirResponse
+	(*DeleteFileRequest)(nil),              // 18: workspace.v1.DeleteFileRequest
+	(*DeleteFileResponse)(nil),             // 19: workspace.v1.DeleteFileResponse
+	(*MoveFileRequest)(nil),                // 20: workspace.v1.MoveFileRequest
+	(*MoveFileResponse)(nil),               // 21: workspace.v1.MoveFileResponse
+	(*CopyFileRequest)(nil),                // 22: workspace.v1.CopyFileRequest
+	(*CopyFileResponse)(nil),               // 23: workspace.v1.CopyFileResponse
+	(*GetFileInfoRequest)(nil),             // 24: workspace.v1.GetFileInfoRequest
+	(*GetFileInfoResponse)(nil),            // 25: workspace.v1.GetFileInfoResponse
+	(*RegisterNfsTransportRequest)(nil),    // 26: workspace.v1.RegisterNfsTransportRequest
+	(*RegisterNfsTransportResponse)(nil),   // 27: workspace.v1.RegisterNfsTransportResponse
+	(*UnregisterNfsTransportRequest)(nil),  // 28: workspace.v1.UnregisterNfsTransportRequest
+	(*UnregisterNfsTransportResponse)(nil), // 29: workspace.v1.UnregisterNfsTransportResponse
+	nil,                                    // 30: workspace.v1.Workspace.MetadataEntry
+	nil,                                    // 31: workspace.v1.CreateWorkspaceRequest.MetadataEntry
+	(*timestamppb.Timestamp)(nil),          // 32: google.protobuf.Timestamp
 }
 var file_workspace_v1_workspace_proto_depIdxs = []int32{
-	26, // 0: workspace.v1.Workspace.metadata:type_name -> workspace.v1.Workspace.MetadataEntry
-	28, // 1: workspace.v1.Workspace.created_at:type_name -> google.protobuf.Timestamp
-	28, // 2: workspace.v1.Workspace.updated_at:type_name -> google.protobuf.Timestamp
-	28, // 3: workspace.v1.FileInfo.modified_at:type_name -> google.protobuf.Timestamp
-	27, // 4: workspace.v1.CreateWorkspaceRequest.metadata:type_name -> workspace.v1.CreateWorkspaceRequest.MetadataEntry
+	30, // 0: workspace.v1.Workspace.metadata:type_name -> workspace.v1.Workspace.MetadataEntry
+	32, // 1: workspace.v1.Workspace.created_at:type_name -> google.protobuf.Timestamp
+	32, // 2: workspace.v1.Workspace.updated_at:type_name -> google.protobuf.Timestamp
+	32, // 3: workspace.v1.FileInfo.modified_at:type_name -> google.protobuf.Timestamp
+	31, // 4: workspace.v1.CreateWorkspaceRequest.metadata:type_name -> workspace.v1.CreateWorkspaceRequest.MetadataEntry
 	0,  // 5: workspace.v1.CreateWorkspaceResponse.workspace:type_name -> workspace.v1.Workspace
 	0,  // 6: workspace.v1.GetWorkspaceResponse.workspace:type_name -> workspace.v1.Workspace
 	0,  // 7: workspace.v1.ListWorkspacesResponse.workspaces:type_name -> workspace.v1.Workspace
 	1,  // 8: workspace.v1.ListFilesResponse.files:type_name -> workspace.v1.FileInfo
 	1,  // 9: workspace.v1.GetFileInfoResponse.file:type_name -> workspace.v1.FileInfo
-	2,  // 10: workspace.v1.WorkspaceService.CreateWorkspace:input_type -> workspace.v1.CreateWorkspaceRequest
-	4,  // 11: workspace.v1.WorkspaceService.GetWorkspace:input_type -> workspace.v1.GetWorkspaceRequest
-	6,  // 12: workspace.v1.WorkspaceService.ListWorkspaces:input_type -> workspace.v1.ListWorkspacesRequest
-	8,  // 13: workspace.v1.WorkspaceService.DeleteWorkspace:input_type -> workspace.v1.DeleteWorkspaceRequest
-	10, // 14: workspace.v1.WorkspaceService.ReadFile:input_type -> workspace.v1.ReadFileRequest
-	12, // 15: workspace.v1.WorkspaceService.WriteFile:input_type -> workspace.v1.WriteFileRequest
-	14, // 16: workspace.v1.WorkspaceService.ListFiles:input_type -> workspace.v1.ListFilesRequest
-	16, // 17: workspace.v1.WorkspaceService.Mkdir:input_type -> workspace.v1.MkdirRequest
-	18, // 18: workspace.v1.WorkspaceService.DeleteFile:input_type -> workspace.v1.DeleteFileRequest
-	20, // 19: workspace.v1.WorkspaceService.MoveFile:input_type -> workspace.v1.MoveFileRequest
-	22, // 20: workspace.v1.WorkspaceService.CopyFile:input_type -> workspace.v1.CopyFileRequest
-	24, // 21: workspace.v1.WorkspaceService.GetFileInfo:input_type -> workspace.v1.GetFileInfoRequest
-	3,  // 22: workspace.v1.WorkspaceService.CreateWorkspace:output_type -> workspace.v1.CreateWorkspaceResponse
-	5,  // 23: workspace.v1.WorkspaceService.GetWorkspace:output_type -> workspace.v1.GetWorkspaceResponse
-	7,  // 24: workspace.v1.WorkspaceService.ListWorkspaces:output_type -> workspace.v1.ListWorkspacesResponse
-	9,  // 25: workspace.v1.WorkspaceService.DeleteWorkspace:output_type -> workspace.v1.DeleteWorkspaceResponse
-	11, // 26: workspace.v1.WorkspaceService.ReadFile:output_type -> workspace.v1.ReadFileResponse
-	13, // 27: workspace.v1.WorkspaceService.WriteFile:output_type -> workspace.v1.WriteFileResponse
-	15, // 28: workspace.v1.WorkspaceService.ListFiles:output_type -> workspace.v1.ListFilesResponse
-	17, // 29: workspace.v1.WorkspaceService.Mkdir:output_type -> workspace.v1.MkdirResponse
-	19, // 30: workspace.v1.WorkspaceService.DeleteFile:output_type -> workspace.v1.DeleteFileResponse
-	21, // 31: workspace.v1.WorkspaceService.MoveFile:output_type -> workspace.v1.MoveFileResponse
-	23, // 32: workspace.v1.WorkspaceService.CopyFile:output_type -> workspace.v1.CopyFileResponse
-	25, // 33: workspace.v1.WorkspaceService.GetFileInfo:output_type -> workspace.v1.GetFileInfoResponse
-	22, // [22:34] is the sub-list for method output_type
-	10, // [10:22] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	0,  // 10: workspace.v1.RegisterNfsTransportResponse.workspace:type_name -> workspace.v1.Workspace
+	0,  // 11: workspace.v1.UnregisterNfsTransportResponse.workspace:type_name -> workspace.v1.Workspace
+	2,  // 12: workspace.v1.WorkspaceService.CreateWorkspace:input_type -> workspace.v1.CreateWorkspaceRequest
+	4,  // 13: workspace.v1.WorkspaceService.GetWorkspace:input_type -> workspace.v1.GetWorkspaceRequest
+	6,  // 14: workspace.v1.WorkspaceService.ListWorkspaces:input_type -> workspace.v1.ListWorkspacesRequest
+	8,  // 15: workspace.v1.WorkspaceService.DeleteWorkspace:input_type -> workspace.v1.DeleteWorkspaceRequest
+	10, // 16: workspace.v1.WorkspaceService.ReadFile:input_type -> workspace.v1.ReadFileRequest
+	12, // 17: workspace.v1.WorkspaceService.WriteFile:input_type -> workspace.v1.WriteFileRequest
+	14, // 18: workspace.v1.WorkspaceService.ListFiles:input_type -> workspace.v1.ListFilesRequest
+	16, // 19: workspace.v1.WorkspaceService.Mkdir:input_type -> workspace.v1.MkdirRequest
+	18, // 20: workspace.v1.WorkspaceService.DeleteFile:input_type -> workspace.v1.DeleteFileRequest
+	20, // 21: workspace.v1.WorkspaceService.MoveFile:input_type -> workspace.v1.MoveFileRequest
+	22, // 22: workspace.v1.WorkspaceService.CopyFile:input_type -> workspace.v1.CopyFileRequest
+	24, // 23: workspace.v1.WorkspaceService.GetFileInfo:input_type -> workspace.v1.GetFileInfoRequest
+	26, // 24: workspace.v1.WorkspaceService.RegisterNfsTransport:input_type -> workspace.v1.RegisterNfsTransportRequest
+	28, // 25: workspace.v1.WorkspaceService.UnregisterNfsTransport:input_type -> workspace.v1.UnregisterNfsTransportRequest
+	3,  // 26: workspace.v1.WorkspaceService.CreateWorkspace:output_type -> workspace.v1.CreateWorkspaceResponse
+	5,  // 27: workspace.v1.WorkspaceService.GetWorkspace:output_type -> workspace.v1.GetWorkspaceResponse
+	7,  // 28: workspace.v1.WorkspaceService.ListWorkspaces:output_type -> workspace.v1.ListWorkspacesResponse
+	9,  // 29: workspace.v1.WorkspaceService.DeleteWorkspace:output_type -> workspace.v1.DeleteWorkspaceResponse
+	11, // 30: workspace.v1.WorkspaceService.ReadFile:output_type -> workspace.v1.ReadFileResponse
+	13, // 31: workspace.v1.WorkspaceService.WriteFile:output_type -> workspace.v1.WriteFileResponse
+	15, // 32: workspace.v1.WorkspaceService.ListFiles:output_type -> workspace.v1.ListFilesResponse
+	17, // 33: workspace.v1.WorkspaceService.Mkdir:output_type -> workspace.v1.MkdirResponse
+	19, // 34: workspace.v1.WorkspaceService.DeleteFile:output_type -> workspace.v1.DeleteFileResponse
+	21, // 35: workspace.v1.WorkspaceService.MoveFile:output_type -> workspace.v1.MoveFileResponse
+	23, // 36: workspace.v1.WorkspaceService.CopyFile:output_type -> workspace.v1.CopyFileResponse
+	25, // 37: workspace.v1.WorkspaceService.GetFileInfo:output_type -> workspace.v1.GetFileInfoResponse
+	27, // 38: workspace.v1.WorkspaceService.RegisterNfsTransport:output_type -> workspace.v1.RegisterNfsTransportResponse
+	29, // 39: workspace.v1.WorkspaceService.UnregisterNfsTransport:output_type -> workspace.v1.UnregisterNfsTransportResponse
+	26, // [26:40] is the sub-list for method output_type
+	12, // [12:26] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_workspace_v1_workspace_proto_init() }
@@ -1627,7 +1867,7 @@ func file_workspace_v1_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workspace_v1_workspace_proto_rawDesc), len(file_workspace_v1_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   28,
+			NumMessages:   32,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

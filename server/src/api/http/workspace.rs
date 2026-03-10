@@ -14,6 +14,7 @@ use crate::{AppState, Result};
 #[derive(Debug, Deserialize)]
 pub struct CreateWorkspaceRequest {
     pub name: Option<String>,
+    pub storage_type: Option<String>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -23,6 +24,8 @@ pub struct WorkspaceResponse {
     pub id: String,
     pub name: Option<String>,
     pub nfs_url: Option<String>,
+    pub storage_type: String,
+    pub storage_config: String,
     pub metadata: std::collections::HashMap<String, String>,
     pub created_at: String,
     pub updated_at: String,
@@ -97,21 +100,26 @@ pub async fn create_workspace(
     State(state): State<AppState>,
     Json(req): Json<CreateWorkspaceRequest>,
 ) -> Result<Json<WorkspaceResponse>> {
+    let storage_type = match req.storage_type.as_deref() {
+        Some("remote") => Some(crate::domain::workspace::StorageType::Remote),
+        Some("managed") | None => None,
+        Some(other) => {
+            return Err(crate::error::Error::InvalidParameter(format!(
+                "invalid storage_type: '{}', must be 'managed' or 'remote'",
+                other
+            )));
+        }
+    };
+
     let params = crate::domain::workspace::CreateWorkspaceParams {
         name: req.name,
+        storage_type,
         metadata: req.metadata,
     };
 
     let workspace = state.workspace_service.create(params).await?;
 
-    Ok(Json(WorkspaceResponse {
-        id: workspace.id,
-        name: workspace.name,
-        nfs_url: workspace.nfs_url,
-        metadata: workspace.metadata,
-        created_at: workspace.created_at.to_rfc3339(),
-        updated_at: workspace.updated_at.to_rfc3339(),
-    }))
+    Ok(Json(workspace_to_response(workspace)))
 }
 
 /// Get a workspace by ID
@@ -121,14 +129,7 @@ pub async fn get_workspace(
 ) -> Result<Json<WorkspaceResponse>> {
     let workspace = state.workspace_service.get(&id).await?;
 
-    Ok(Json(WorkspaceResponse {
-        id: workspace.id,
-        name: workspace.name,
-        nfs_url: workspace.nfs_url,
-        metadata: workspace.metadata,
-        created_at: workspace.created_at.to_rfc3339(),
-        updated_at: workspace.updated_at.to_rfc3339(),
-    }))
+    Ok(Json(workspace_to_response(workspace)))
 }
 
 /// List all workspaces
@@ -138,22 +139,27 @@ pub async fn list_workspaces(
     let workspaces = state.workspace_service.list().await?;
     let total = workspaces.len();
 
-    let responses: Vec<WorkspaceResponse> = workspaces
-        .into_iter()
-        .map(|w| WorkspaceResponse {
-            id: w.id,
-            name: w.name,
-            nfs_url: w.nfs_url,
-            metadata: w.metadata,
-            created_at: w.created_at.to_rfc3339(),
-            updated_at: w.updated_at.to_rfc3339(),
-        })
-        .collect();
+    let responses: Vec<WorkspaceResponse> =
+        workspaces.into_iter().map(workspace_to_response).collect();
 
     Ok(Json(ListWorkspacesResponse {
         workspaces: responses,
         total,
     }))
+}
+
+fn workspace_to_response(w: crate::domain::workspace::Workspace) -> WorkspaceResponse {
+    let storage_config = serde_json::to_string(&w.storage_config).unwrap_or_default();
+    WorkspaceResponse {
+        id: w.id,
+        name: w.name,
+        nfs_url: w.nfs_url,
+        storage_type: w.storage_type.as_str().to_string(),
+        storage_config,
+        metadata: w.metadata,
+        created_at: w.created_at.to_rfc3339(),
+        updated_at: w.updated_at.to_rfc3339(),
+    }
 }
 
 /// Delete a workspace

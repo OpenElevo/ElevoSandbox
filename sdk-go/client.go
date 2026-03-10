@@ -97,6 +97,12 @@ func NewClient(serverAddr string, opts ...ClientOptions) (*Client, error) {
 	return c, nil
 }
 
+// NewStorageProvider creates a new StorageProvider that shares a local directory
+// through the existing gRPC connection.
+func (c *Client) NewStorageProvider(config StorageProviderConfig) *StorageProvider {
+	return NewStorageProvider(c.conn, config)
+}
+
 // Close closes the gRPC connection
 func (c *Client) Close() error {
 	if c.conn != nil {

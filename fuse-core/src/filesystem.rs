@@ -1,6 +1,9 @@
-//! FUSE filesystem implementation
+//! Generic FUSE filesystem implementation
 //!
-//! Implements the fuser::Filesystem trait for remote workspace access.
+//! Implements the `fuser::Filesystem` trait parameterized by a `FuseBackend`.
+//! This allows the same FUSE logic to be used with different backends:
+//! - `RpcFuseBackend` for the standalone fuse-client (gRPC calls)
+//! - `ServerFuseBackend` for server-side FUSE mounts (direct storage calls)
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -12,18 +15,16 @@ use fuser::{
     FileAttr, FileType, Filesystem, ReplyAttr, ReplyCreate, ReplyData, ReplyDirectory, ReplyEmpty,
     ReplyEntry, ReplyOpen, ReplyStatfs, ReplyWrite, Request, TimeOrNow,
 };
-use libc::{EACCES, EEXIST, EINVAL, EIO, EISDIR, ENOENT, ENOSPC, ENOSYS, ENOTDIR, ENOTEMPTY};
-use tokio::runtime::Runtime;
-use tonic::Status;
-use tonic_types::StatusExt;
+use libc::{EINVAL, ENOENT, ENOSYS};
+use tokio::runtime::Handle;
 use tracing::{debug, warn};
-use workspace_proto::{FsFileAttr, FsFileType};
+use workspace_proto::{FsFileAttr, FsFileType, FsRenameFlags};
 
+use crate::backend::FuseBackend;
 use crate::cache::{
     fs_file_type_to_fuse, i32_to_fs_file_type, DirCache, MetadataCache, ReadCache, StatfsCache,
 };
 use crate::inode::{join_path, InodeTable, ROOT_INODE};
-use crate::rpc::FileSystemRpcClient;
 
 /// TTL for FUSE attribute caching
 const ATTR_TTL: Duration = Duration::from_secs(1);
@@ -32,8 +33,6 @@ const ATTR_TTL: Duration = Duration::from_secs(1);
 const GENERATION: u64 = 1;
 
 /// File handle information
-///
-/// Tracks open file state for cache invalidation and write detection.
 struct FileHandle {
     /// Corresponding inode
     #[allow(dead_code)]
@@ -47,15 +46,18 @@ struct FileHandle {
     flags: u32,
 }
 
-/// Workspace FUSE filesystem
-pub struct WorkspaceFuse {
-    /// Workspace ID (kept for debugging/logging)
+/// Generic workspace FUSE filesystem parameterized by backend.
+///
+/// Holds all caching state and inode mappings. Uses a `tokio::runtime::Handle`
+/// (not an owned Runtime) so both fuse-client and server can provide their own.
+pub struct WorkspaceFuse<B: FuseBackend> {
+    /// Workspace ID (for debugging/logging)
     #[allow(dead_code)]
     workspace_id: String,
-    /// Tokio runtime for async operations
-    runtime: Runtime,
-    /// RPC client
-    rpc: Arc<FileSystemRpcClient>,
+    /// Tokio runtime handle for async operations
+    handle: Handle,
+    /// Backend for actual file operations
+    backend: Arc<B>,
     /// Inode table
     inodes: InodeTable,
     /// Metadata cache
@@ -70,7 +72,7 @@ pub struct WorkspaceFuse {
     next_fh: AtomicU64,
     /// File handle table: fh → FileHandle
     fh_table: RwLock<HashMap<u64, FileHandle>>,
-    /// Readahead state: path → last read block index (for sequential read detection)
+    /// Readahead state: path → last read block index
     readahead_state: RwLock<HashMap<String, u64>>,
     /// Current uid
     uid: u32,
@@ -78,12 +80,15 @@ pub struct WorkspaceFuse {
     gid: u32,
 }
 
-impl WorkspaceFuse {
-    /// Create a new WorkspaceFuse instance
+impl<B: FuseBackend> WorkspaceFuse<B> {
+    /// Create a new WorkspaceFuse instance.
+    ///
+    /// Takes a `tokio::runtime::Handle` rather than an owned `Runtime`, so callers
+    /// can share a runtime across multiple mounts (server) or pass a dedicated one (client).
     pub fn new(
         workspace_id: String,
-        runtime: Runtime,
-        rpc: FileSystemRpcClient,
+        handle: Handle,
+        backend: B,
         cache_ttl: Duration,
         block_size: u32,
         read_cache_size_bytes: u64,
@@ -93,8 +98,8 @@ impl WorkspaceFuse {
 
         Self {
             workspace_id,
-            runtime,
-            rpc: Arc::new(rpc),
+            handle,
+            backend: Arc::new(backend),
             inodes: InodeTable::new(),
             meta_cache: MetadataCache::new(cache_ttl),
             dir_cache: DirCache::new(cache_ttl),
@@ -111,57 +116,6 @@ impl WorkspaceFuse {
     /// Allocate a new file handle
     fn alloc_fh(&self) -> u64 {
         self.next_fh.fetch_add(1, Ordering::SeqCst)
-    }
-
-    /// Convert gRPC Status to errno
-    ///
-    /// First tries to extract errno from structured error details (tonic-types),
-    /// then falls back to status code mapping for compatibility with older servers.
-    fn status_to_errno(&self, status: &Status) -> i32 {
-        // Try to extract errno from structured error details first
-        let details = status.get_error_details();
-        if let Some(error_info) = details.error_info() {
-            if let Some(errno_str) = error_info.metadata.get("errno") {
-                if let Ok(errno) = errno_str.parse::<i32>() {
-                    return errno;
-                }
-            }
-        }
-
-        // Fallback: map status code to errno (for compatibility with older servers)
-        match status.code() {
-            tonic::Code::NotFound => ENOENT,
-            tonic::Code::AlreadyExists => EEXIST,
-            tonic::Code::PermissionDenied | tonic::Code::Unauthenticated => EACCES,
-            tonic::Code::ResourceExhausted => ENOSPC,
-            tonic::Code::InvalidArgument => {
-                // Legacy: parse message for specific errors
-                let msg = status.message();
-                if msg.contains("EISDIR") {
-                    EISDIR
-                } else if msg.contains("ENOTDIR") {
-                    ENOTDIR
-                } else {
-                    EINVAL
-                }
-            }
-            tonic::Code::FailedPrecondition => {
-                // Legacy: parse message for specific errors
-                let msg = status.message();
-                if msg.contains("ENOTEMPTY") {
-                    ENOTEMPTY
-                } else if msg.contains("EISDIR") {
-                    EISDIR
-                } else if msg.contains("ENOTDIR") {
-                    ENOTDIR
-                } else {
-                    EIO
-                }
-            }
-            tonic::Code::Unimplemented => ENOSYS,
-            tonic::Code::Unavailable | tonic::Code::DeadlineExceeded => EIO,
-            _ => EIO,
-        }
     }
 
     /// Convert FsFileAttr to fuser FileAttr
@@ -194,8 +148,6 @@ impl WorkspaceFuse {
         FileAttr {
             ino: inode,
             size: attr.size,
-            // Use blocks from server if available, otherwise estimate from size
-            // This provides backward compatibility with older servers that don't return blocks
             blocks: if attr.blocks > 0 {
                 attr.blocks
             } else {
@@ -217,28 +169,68 @@ impl WorkspaceFuse {
     }
 
     /// Get attributes with caching
-    #[allow(clippy::result_large_err)]
-    fn get_attr_cached(&self, path: &str) -> Result<FsFileAttr, Status> {
+    fn get_attr_cached(&self, path: &str) -> Result<FsFileAttr, i32> {
         // Check cache first
         if let Some(cached) = self.meta_cache.get(path) {
             return Ok(cached.attr);
         }
 
-        // Fetch from server
-        let rpc = self.rpc.clone();
+        // Fetch from backend
+        let backend = self.backend.clone();
         let path_owned = path.to_string();
         let attr = self
-            .runtime
-            .block_on(async move { rpc.stat(&path_owned).await })?;
+            .handle
+            .block_on(async move { backend.getattr(&path_owned).await })
+            .map_err(|e| e.to_errno())?;
 
         // Cache the result
         self.meta_cache.insert(path, attr);
 
         Ok(attr)
     }
+
+    /// Invalidate cache for a specific path.
+    ///
+    /// Called by `FuseMountManager` when receiving `FileChanged` events from the Client.
+    pub fn invalidate_path(&self, path: &str) {
+        self.meta_cache.invalidate(path);
+        self.dir_cache.invalidate(path);
+        self.read_cache.invalidate_file(path);
+
+        // Also invalidate parent directory listing (new/deleted entries)
+        if let Some(parent) = path.rsplit_once('/').map(|(p, _)| p) {
+            self.dir_cache.invalidate(parent);
+        } else if !path.is_empty() {
+            // Parent is root
+            self.dir_cache.invalidate("");
+        }
+    }
+
+    /// Purge all caches (used on Client reconnection)
+    pub fn purge_all_caches(&self) {
+        self.meta_cache.invalidate_all();
+        self.dir_cache.invalidate_all();
+        self.read_cache.invalidate_all();
+        self.statfs_cache.invalidate();
+    }
 }
 
-impl Filesystem for WorkspaceFuse {
+/// Newtype wrapper that holds `Arc<WorkspaceFuse<B>>` and implements `fuser::Filesystem`.
+///
+/// This is necessary because `fuser::mount2` takes ownership of the filesystem,
+/// but we need to retain a reference for cache invalidation from `FuseMountManager`.
+pub struct FuseFilesystemWrapper<B: FuseBackend> {
+    inner: Arc<WorkspaceFuse<B>>,
+}
+
+impl<B: FuseBackend> FuseFilesystemWrapper<B> {
+    /// Create a new wrapper from an `Arc<WorkspaceFuse<B>>`.
+    pub fn new(inner: Arc<WorkspaceFuse<B>>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<B: FuseBackend> Filesystem for FuseFilesystemWrapper<B> {
     fn init(
         &mut self,
         _req: &Request<'_>,
@@ -263,8 +255,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, name = %name, "lookup");
 
-        // Build full path
-        let path = match self.inodes.build_child_path(parent, name) {
+        let path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -272,16 +263,14 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        // Get attributes
-        match self.get_attr_cached(&path) {
+        match self.inner.get_attr_cached(&path) {
             Ok(attr) => {
-                let inode = self.inodes.get_or_create(&path);
-                let fuse_attr = self.proto_attr_to_fuse(inode, &attr);
+                let inode = self.inner.inodes.get_or_create(&path);
+                let fuse_attr = self.inner.proto_attr_to_fuse(inode, &attr);
                 reply.entry(&ATTR_TTL, &fuse_attr, GENERATION);
             }
-            Err(status) => {
-                let errno = self.status_to_errno(&status);
-                debug!(path = %path, errno = errno, "lookup failed: {}", status.message());
+            Err(errno) => {
+                debug!(path = %path, errno = errno, "lookup failed");
                 reply.error(errno);
             }
         }
@@ -290,7 +279,7 @@ impl Filesystem for WorkspaceFuse {
     fn getattr(&mut self, _req: &Request<'_>, ino: u64, _fh: Option<u64>, reply: ReplyAttr) {
         debug!(ino = ino, "getattr");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -298,13 +287,13 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        match self.get_attr_cached(&path) {
+        match self.inner.get_attr_cached(&path) {
             Ok(attr) => {
-                let fuse_attr = self.proto_attr_to_fuse(ino, &attr);
+                let fuse_attr = self.inner.proto_attr_to_fuse(ino, &attr);
                 reply.attr(&ATTR_TTL, &fuse_attr);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(errno) => {
+                reply.error(errno);
             }
         }
     }
@@ -313,12 +302,12 @@ impl Filesystem for WorkspaceFuse {
         &mut self,
         _req: &Request<'_>,
         ino: u64,
-        _mode: Option<u32>,
+        mode: Option<u32>,
         _uid: Option<u32>,
         _gid: Option<u32>,
         size: Option<u64>,
-        _atime: Option<TimeOrNow>,
-        _mtime: Option<TimeOrNow>,
+        atime: Option<TimeOrNow>,
+        mtime: Option<TimeOrNow>,
         _ctime: Option<SystemTime>,
         _fh: Option<u64>,
         _crtime: Option<SystemTime>,
@@ -329,7 +318,7 @@ impl Filesystem for WorkspaceFuse {
     ) {
         debug!(ino = ino, size = ?size, "setattr");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -337,66 +326,30 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        // Convert TimeOrNow to timestamps
-        let atime = _atime.map(|t| match t {
-            TimeOrNow::SpecificTime(st) => {
-                let d = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-                prost_types::Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                }
-            }
-            TimeOrNow::Now => {
-                let d = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default();
-                prost_types::Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                }
-            }
-        });
+        let atime_ts = atime.map(|t| time_or_now_to_timestamp(t));
+        let mtime_ts = mtime.map(|t| time_or_now_to_timestamp(t));
 
-        let mtime = _mtime.map(|t| match t {
-            TimeOrNow::SpecificTime(st) => {
-                let d = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-                prost_types::Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                }
-            }
-            TimeOrNow::Now => {
-                let d = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default();
-                prost_types::Timestamp {
-                    seconds: d.as_secs() as i64,
-                    nanos: d.subsec_nanos() as i32,
-                }
-            }
-        });
-
-        let mode = _mode;
-
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
-        let result = self
-            .runtime
-            .block_on(async move { rpc.set_attr(&path_owned, size, mode, atime, mtime).await });
+        let result = self.inner.handle.block_on(async move {
+            backend
+                .setattr(&path_owned, size, mode, atime_ts, mtime_ts)
+                .await
+        });
 
         match result {
             Ok(attr) => {
                 // Invalidate cache
-                self.meta_cache.invalidate(&path);
+                self.inner.meta_cache.invalidate(&path);
                 if size.is_some() {
-                    self.read_cache.invalidate_file(&path);
+                    self.inner.read_cache.invalidate_file(&path);
                 }
 
-                let fuse_attr = self.proto_attr_to_fuse(ino, &attr);
+                let fuse_attr = self.inner.proto_attr_to_fuse(ino, &attr);
                 reply.attr(&ATTR_TTL, &fuse_attr);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -414,7 +367,7 @@ impl Filesystem for WorkspaceFuse {
     ) {
         debug!(ino = ino, offset = offset, size = size, "read");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -424,22 +377,22 @@ impl Filesystem for WorkspaceFuse {
 
         let offset = offset as u64;
         let size = size as usize;
-        let block_size = self.read_cache.block_size() as u64;
+        let block_size = self.inner.read_cache.block_size() as u64;
 
         // Calculate block range
-        let start_block = self.read_cache.offset_to_block_idx(offset);
+        let start_block = self.inner.read_cache.offset_to_block_idx(offset);
         let end_block = if size == 0 {
             start_block
         } else {
-            self.read_cache
+            self.inner
+                .read_cache
                 .offset_to_block_idx(offset + size as u64 - 1)
         };
 
         // Check for sequential read pattern and determine if we should prefetch
         let should_prefetch = {
-            let readahead = self.readahead_state.read().unwrap();
+            let readahead = self.inner.readahead_state.read().unwrap();
             if let Some(&last_block) = readahead.get(&path) {
-                // Sequential if current start is right after last read block
                 start_block == last_block + 1
             } else {
                 false
@@ -453,26 +406,27 @@ impl Filesystem for WorkspaceFuse {
         let mut last_block_was_eof = false;
 
         for block_idx in start_block..=end_block {
-            let block_start = self.read_cache.block_idx_to_offset(block_idx);
+            let block_start = self.inner.read_cache.block_idx_to_offset(block_idx);
 
-            // Get block data (from cache or server)
-            let block_data = if let Some(cached) = self.read_cache.get(&path, block_idx) {
+            // Get block data (from cache or backend)
+            let block_data = if let Some(cached) = self.inner.read_cache.get(&path, block_idx) {
                 cached
             } else {
-                // Fetch from server
-                let rpc = self.rpc.clone();
+                // Fetch from backend
+                let backend = self.inner.backend.clone();
                 let path_owned = path.clone();
-                let fetch_size = self.read_cache.block_size();
-                match self.runtime.block_on(async move {
-                    rpc.read_at(&path_owned, block_start, fetch_size).await
+                let fetch_size = self.inner.read_cache.block_size();
+                match self.inner.handle.block_on(async move {
+                    backend.read(&path_owned, block_start, fetch_size).await
                 }) {
                     Ok(data) => {
-                        // Cache the block
-                        self.read_cache.insert(&path, block_idx, data.clone());
+                        self.inner
+                            .read_cache
+                            .insert(&path, block_idx, data.clone());
                         Arc::new(data)
                     }
-                    Err(status) => {
-                        reply.error(self.status_to_errno(&status));
+                    Err(e) => {
+                        reply.error(e.to_errno());
                         return;
                     }
                 }
@@ -498,7 +452,6 @@ impl Filesystem for WorkspaceFuse {
                 result_data.extend_from_slice(&block_data[block_offset_in_data..actual_end]);
             }
 
-            // Update current offset for next iteration
             current_offset = block_end;
 
             // If we've reached EOF (block smaller than block_size), stop
@@ -508,27 +461,24 @@ impl Filesystem for WorkspaceFuse {
             }
         }
 
-        // Update readahead state with the last block we read
+        // Update readahead state
         {
-            let mut readahead = self.readahead_state.write().unwrap();
+            let mut readahead = self.inner.readahead_state.write().unwrap();
             readahead.insert(path.clone(), end_block);
         }
 
-        // Prefetch next block asynchronously if sequential read pattern detected and not at EOF
-        // This does not block the current read operation
+        // Prefetch next block asynchronously if sequential read pattern detected
         if should_prefetch && !last_block_was_eof {
             let prefetch_block = end_block + 1;
-            // Only prefetch if not already cached
-            if self.read_cache.get(&path, prefetch_block).is_none() {
-                let rpc = self.rpc.clone();
+            if self.inner.read_cache.get(&path, prefetch_block).is_none() {
+                let backend = self.inner.backend.clone();
                 let path_owned = path.clone();
-                let block_start = self.read_cache.block_idx_to_offset(prefetch_block);
-                let fetch_size = self.read_cache.block_size();
-                let read_cache = Arc::clone(&self.read_cache);
+                let block_start = self.inner.read_cache.block_idx_to_offset(prefetch_block);
+                let fetch_size = self.inner.read_cache.block_size();
+                let read_cache = Arc::clone(&self.inner.read_cache);
 
-                // Spawn async prefetch task - does not block current read
-                self.runtime.spawn(async move {
-                    if let Ok(data) = rpc.read_at(&path_owned, block_start, fetch_size).await {
+                self.inner.handle.spawn(async move {
+                    if let Ok(data) = backend.read(&path_owned, block_start, fetch_size).await {
                         read_cache.insert(&path_owned, prefetch_block, data);
                         debug!(path = %path_owned, block = prefetch_block, "prefetched block async");
                     }
@@ -553,7 +503,7 @@ impl Filesystem for WorkspaceFuse {
     ) {
         debug!(ino = ino, offset = offset, size = data.len(), "write");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -561,33 +511,34 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let data_owned = data.to_vec();
         let offset = offset as u64;
 
         let result = self
-            .runtime
-            .block_on(async move { rpc.write_at(&path_owned, offset, &data_owned).await });
+            .inner
+            .handle
+            .block_on(async move { backend.write(&path_owned, offset, &data_owned).await });
 
         match result {
             Ok(bytes_written) => {
                 // Mark file handle as having written data
                 {
-                    let mut fh_table = self.fh_table.write().unwrap();
+                    let mut fh_table = self.inner.fh_table.write().unwrap();
                     if let Some(handle) = fh_table.get_mut(&fh) {
                         handle.has_written = true;
                     }
                 }
 
                 // Invalidate caches
-                self.meta_cache.invalidate(&path);
-                self.read_cache.invalidate_file(&path);
+                self.inner.meta_cache.invalidate(&path);
+                self.inner.read_cache.invalidate_file(&path);
 
                 reply.written(bytes_written as u32);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -602,7 +553,7 @@ impl Filesystem for WorkspaceFuse {
     ) {
         debug!(ino = ino, offset = offset, "readdir");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -611,22 +562,23 @@ impl Filesystem for WorkspaceFuse {
         };
 
         // Check cache
-        let entries = if let Some(cached) = self.dir_cache.get(&path) {
+        let entries = if let Some(cached) = self.inner.dir_cache.get(&path) {
             cached
         } else {
-            // Fetch from server
-            let rpc = self.rpc.clone();
+            // Fetch from backend
+            let backend = self.inner.backend.clone();
             let path_owned = path.clone();
             match self
-                .runtime
-                .block_on(async move { rpc.list_dir(&path_owned).await })
+                .inner
+                .handle
+                .block_on(async move { backend.readdir(&path_owned).await })
             {
                 Ok(entries) => {
-                    self.dir_cache.insert(&path, entries.clone());
+                    self.inner.dir_cache.insert(&path, entries.clone());
                     Arc::new(entries)
                 }
-                Err(status) => {
-                    reply.error(self.status_to_errno(&status));
+                Err(e) => {
+                    reply.error(e.to_errno());
                     return;
                 }
             }
@@ -641,9 +593,8 @@ impl Filesystem for WorkspaceFuse {
             let parent_ino = if ino == ROOT_INODE {
                 ROOT_INODE
             } else {
-                // Find parent
                 if let Some(parent_path) = path.rsplit_once('/').map(|(p, _)| p.to_string()) {
-                    self.inodes.get_or_create(&parent_path)
+                    self.inner.inodes.get_or_create(&parent_path)
                 } else {
                     ROOT_INODE
                 }
@@ -662,9 +613,8 @@ impl Filesystem for WorkspaceFuse {
             }
 
             let child_path = join_path(&path, &entry.name);
-            let child_ino = self.inodes.get_or_create(&child_path);
+            let child_ino = self.inner.inodes.get_or_create(&child_path);
 
-            // Get file type from attr, default to RegularFile if attr is missing
             let file_type = entry
                 .attr
                 .as_ref()
@@ -673,7 +623,7 @@ impl Filesystem for WorkspaceFuse {
 
             // Cache the metadata if available
             if let Some(ref attr) = entry.attr {
-                self.meta_cache.insert(&child_path, *attr);
+                self.inner.meta_cache.insert(&child_path, *attr);
             }
 
             if reply.add(child_ino, entry_offset + 1, file_type, &entry.name) {
@@ -703,7 +653,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, name = %name, mode = mode, "mkdir");
 
-        let path = match self.inodes.build_child_path(parent, name) {
+        let path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -711,25 +661,25 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let result = self
-            .runtime
-            .block_on(async move { rpc.mkdir(&path_owned, mode).await });
+            .inner
+            .handle
+            .block_on(async move { backend.mkdir(&path_owned, mode).await });
 
         match result {
             Ok(attr) => {
-                // Invalidate parent directory cache
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
 
-                let inode = self.inodes.get_or_create(&path);
-                let fuse_attr = self.proto_attr_to_fuse(inode, &attr);
+                let inode = self.inner.inodes.get_or_create(&path);
+                let fuse_attr = self.inner.proto_attr_to_fuse(inode, &attr);
                 reply.entry(&ATTR_TTL, &fuse_attr, GENERATION);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -754,7 +704,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, name = %name, mode = mode, flags = flags, "create");
 
-        let path = match self.inodes.build_child_path(parent, name) {
+        let path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -762,28 +712,26 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        // O_EXCL check
         let exclusive = (flags & libc::O_EXCL) != 0;
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let result = self
-            .runtime
-            .block_on(async move { rpc.create(&path_owned, mode, exclusive).await });
+            .inner
+            .handle
+            .block_on(async move { backend.create(&path_owned, mode, exclusive).await });
 
         match result {
             Ok(attr) => {
-                // Invalidate parent directory cache
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
 
-                let inode = self.inodes.get_or_create(&path);
-                let fh = self.alloc_fh();
+                let inode = self.inner.inodes.get_or_create(&path);
+                let fh = self.inner.alloc_fh();
 
-                // Register file handle
                 {
-                    let mut fh_table = self.fh_table.write().unwrap();
+                    let mut fh_table = self.inner.fh_table.write().unwrap();
                     fh_table.insert(
                         fh,
                         FileHandle {
@@ -795,11 +743,11 @@ impl Filesystem for WorkspaceFuse {
                     );
                 }
 
-                let fuse_attr = self.proto_attr_to_fuse(inode, &attr);
+                let fuse_attr = self.inner.proto_attr_to_fuse(inode, &attr);
                 reply.created(&ATTR_TTL, &fuse_attr, GENERATION, fh, 0);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -815,7 +763,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, name = %name, "unlink");
 
-        let path = match self.inodes.build_child_path(parent, name) {
+        let path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -823,27 +771,27 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let result = self
-            .runtime
-            .block_on(async move { rpc.remove_file(&path_owned).await });
+            .inner
+            .handle
+            .block_on(async move { backend.unlink(&path_owned).await });
 
         match result {
             Ok(()) => {
-                // Cleanup
-                self.inodes.remove_by_path(&path);
-                self.meta_cache.invalidate(&path);
-                self.read_cache.invalidate_file(&path);
+                self.inner.inodes.remove_by_path(&path);
+                self.inner.meta_cache.invalidate(&path);
+                self.inner.read_cache.invalidate_file(&path);
 
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
 
                 reply.ok();
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -859,7 +807,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, name = %name, "rmdir");
 
-        let path = match self.inodes.build_child_path(parent, name) {
+        let path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -867,28 +815,28 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let result = self
-            .runtime
-            .block_on(async move { rpc.remove_dir(&path_owned).await });
+            .inner
+            .handle
+            .block_on(async move { backend.rmdir(&path_owned).await });
 
         match result {
             Ok(()) => {
-                // Cleanup
-                self.inodes.remove_by_path(&path);
-                self.meta_cache.invalidate_tree(&path);
-                self.dir_cache.invalidate_tree(&path);
-                self.read_cache.invalidate_file(&path);
+                self.inner.inodes.remove_by_path(&path);
+                self.inner.meta_cache.invalidate_tree(&path);
+                self.inner.dir_cache.invalidate_tree(&path);
+                self.inner.read_cache.invalidate_file(&path);
 
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
 
                 reply.ok();
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -926,7 +874,7 @@ impl Filesystem for WorkspaceFuse {
             "rename"
         );
 
-        let old_path = match self.inodes.build_child_path(parent, name) {
+        let old_path = match self.inner.inodes.build_child_path(parent, name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -934,7 +882,7 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let new_path = match self.inodes.build_child_path(newparent, newname) {
+        let new_path = match self.inner.inodes.build_child_path(newparent, newname) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -942,51 +890,46 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let proto_flags = if flags & 1 != 0 {
+            FsRenameFlags::Noreplace
+        } else if flags & 2 != 0 {
+            FsRenameFlags::Exchange
+        } else {
+            FsRenameFlags::None
+        };
+
+        let backend = self.inner.backend.clone();
         let old_path_owned = old_path.clone();
         let new_path_owned = new_path.clone();
-
-        // Convert FUSE flags to proto flags
-        // RENAME_NOREPLACE = 1 (libc::RENAME_NOREPLACE)
-        // RENAME_EXCHANGE = 2 (libc::RENAME_EXCHANGE)
-        let proto_flags = if flags & 1 != 0 {
-            workspace_proto::FsRenameFlags::Noreplace
-        } else if flags & 2 != 0 {
-            workspace_proto::FsRenameFlags::Exchange
-        } else {
-            workspace_proto::FsRenameFlags::None
-        };
-
-        let result = self.runtime.block_on(async move {
-            rpc.rename_with_flags(&old_path_owned, &new_path_owned, proto_flags)
+        let result = self.inner.handle.block_on(async move {
+            backend
+                .rename(&old_path_owned, &new_path_owned, proto_flags)
                 .await
         });
 
         match result {
             Ok(()) => {
-                // Update inode mapping
-                self.inodes.rename_tree(&old_path, &new_path);
+                self.inner.inodes.rename_tree(&old_path, &new_path);
 
-                // Invalidate caches
-                self.meta_cache.invalidate_tree(&old_path);
-                self.meta_cache.invalidate_tree(&new_path);
-                self.dir_cache.invalidate_tree(&old_path);
-                self.dir_cache.invalidate_tree(&new_path);
-                self.read_cache.invalidate_file(&old_path);
+                self.inner.meta_cache.invalidate_tree(&old_path);
+                self.inner.meta_cache.invalidate_tree(&new_path);
+                self.inner.dir_cache.invalidate_tree(&old_path);
+                self.inner.dir_cache.invalidate_tree(&new_path);
+                self.inner.read_cache.invalidate_file(&old_path);
 
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
                 if parent != newparent {
-                    if let Some(newparent_path) = self.inodes.get_path(newparent) {
-                        self.dir_cache.invalidate(&newparent_path);
+                    if let Some(newparent_path) = self.inner.inodes.get_path(newparent) {
+                        self.inner.dir_cache.invalidate(&newparent_path);
                     }
                 }
 
                 reply.ok();
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -1016,7 +959,7 @@ impl Filesystem for WorkspaceFuse {
 
         debug!(parent = parent, link_name = %link_name, target = %target, "symlink");
 
-        let link_path = match self.inodes.build_child_path(parent, link_name) {
+        let link_path = match self.inner.inodes.build_child_path(parent, link_name) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -1024,26 +967,26 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let link_path_owned = link_path.clone();
         let target_owned = target.to_string();
         let result = self
-            .runtime
-            .block_on(async move { rpc.symlink(&link_path_owned, &target_owned).await });
+            .inner
+            .handle
+            .block_on(async move { backend.symlink(&link_path_owned, &target_owned).await });
 
         match result {
             Ok(attr) => {
-                // Invalidate parent directory cache
-                if let Some(parent_path) = self.inodes.get_path(parent) {
-                    self.dir_cache.invalidate(&parent_path);
+                if let Some(parent_path) = self.inner.inodes.get_path(parent) {
+                    self.inner.dir_cache.invalidate(&parent_path);
                 }
 
-                let inode = self.inodes.get_or_create(&link_path);
-                let fuse_attr = self.proto_attr_to_fuse(inode, &attr);
+                let inode = self.inner.inodes.get_or_create(&link_path);
+                let fuse_attr = self.inner.proto_attr_to_fuse(inode, &attr);
                 reply.entry(&ATTR_TTL, &fuse_attr, GENERATION);
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -1051,7 +994,7 @@ impl Filesystem for WorkspaceFuse {
     fn readlink(&mut self, _req: &Request<'_>, ino: u64, reply: fuser::ReplyData) {
         debug!(ino = ino, "readlink");
 
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -1059,18 +1002,19 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        let rpc = self.rpc.clone();
+        let backend = self.inner.backend.clone();
         let path_owned = path.clone();
         let result = self
-            .runtime
-            .block_on(async move { rpc.read_link(&path_owned).await });
+            .inner
+            .handle
+            .block_on(async move { backend.readlink(&path_owned).await });
 
         match result {
             Ok(target) => {
                 reply.data(target.as_bytes());
             }
-            Err(status) => {
-                reply.error(self.status_to_errno(&status));
+            Err(e) => {
+                reply.error(e.to_errno());
             }
         }
     }
@@ -1078,8 +1022,7 @@ impl Filesystem for WorkspaceFuse {
     fn open(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         debug!(ino = ino, flags = flags, "open");
 
-        // Get path for this inode
-        let path = match self.inodes.get_path(ino) {
+        let path = match self.inner.inodes.get_path(ino) {
             Some(p) => p,
             None => {
                 reply.error(ENOENT);
@@ -1087,10 +1030,9 @@ impl Filesystem for WorkspaceFuse {
             }
         };
 
-        // Allocate a file handle and register it
-        let fh = self.alloc_fh();
+        let fh = self.inner.alloc_fh();
         {
-            let mut fh_table = self.fh_table.write().unwrap();
+            let mut fh_table = self.inner.fh_table.write().unwrap();
             fh_table.insert(
                 fh,
                 FileHandle {
@@ -1116,20 +1058,17 @@ impl Filesystem for WorkspaceFuse {
     ) {
         debug!(ino = ino, fh = fh, "release");
 
-        // Remove file handle and check if we need to invalidate caches
         let file_handle = {
-            let mut fh_table = self.fh_table.write().unwrap();
+            let mut fh_table = self.inner.fh_table.write().unwrap();
             fh_table.remove(&fh)
         };
 
         if let Some(handle) = file_handle {
-            // If file was written, invalidate metadata cache (size may have changed)
             if handle.has_written {
-                self.meta_cache.invalidate(&handle.path);
+                self.inner.meta_cache.invalidate(&handle.path);
             }
-            // Clean up readahead state for this file
             {
-                let mut readahead = self.readahead_state.write().unwrap();
+                let mut readahead = self.inner.readahead_state.write().unwrap();
                 readahead.remove(&handle.path);
             }
         }
@@ -1139,7 +1078,7 @@ impl Filesystem for WorkspaceFuse {
 
     fn opendir(&mut self, _req: &Request<'_>, ino: u64, flags: i32, reply: ReplyOpen) {
         debug!(ino = ino, flags = flags, "opendir");
-        let fh = self.alloc_fh();
+        let fh = self.inner.alloc_fh();
         reply.opened(fh, 0);
     }
 
@@ -1159,7 +1098,7 @@ impl Filesystem for WorkspaceFuse {
         debug!(ino = ino, "statfs");
 
         // Check cache first
-        if let Some(stat) = self.statfs_cache.get() {
+        if let Some(stat) = self.inner.statfs_cache.get() {
             reply.statfs(
                 stat.blocks,
                 stat.bfree,
@@ -1173,14 +1112,16 @@ impl Filesystem for WorkspaceFuse {
             return;
         }
 
-        // Fetch from server
-        let rpc = self.rpc.clone();
-        let result = self.runtime.block_on(async move { rpc.stat_fs().await });
+        // Fetch from backend
+        let backend = self.inner.backend.clone();
+        let result = self
+            .inner
+            .handle
+            .block_on(async move { backend.statfs().await });
 
         match result {
             Ok(stat) => {
-                // Cache the result
-                self.statfs_cache.insert(stat);
+                self.inner.statfs_cache.insert(stat);
                 reply.statfs(
                     stat.blocks,
                     stat.bfree,
@@ -1192,8 +1133,8 @@ impl Filesystem for WorkspaceFuse {
                     stat.frsize,
                 );
             }
-            Err(status) => {
-                warn!("statfs failed: {}", status.message());
+            Err(e) => {
+                warn!("statfs failed: {}", e);
                 // Return default values on error
                 reply.statfs(
                     1024 * 1024 * 100, // blocks
@@ -1264,5 +1205,19 @@ impl Filesystem for WorkspaceFuse {
 
     fn removexattr(&mut self, _req: &Request<'_>, _ino: u64, _name: &OsStr, reply: ReplyEmpty) {
         reply.error(ENOSYS);
+    }
+}
+
+/// Convert `TimeOrNow` to a protobuf `Timestamp`.
+fn time_or_now_to_timestamp(t: TimeOrNow) -> prost_types::Timestamp {
+    let d = match t {
+        TimeOrNow::SpecificTime(st) => st.duration_since(UNIX_EPOCH).unwrap_or_default(),
+        TimeOrNow::Now => SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default(),
+    };
+    prost_types::Timestamp {
+        seconds: d.as_secs() as i64,
+        nanos: d.subsec_nanos() as i32,
     }
 }

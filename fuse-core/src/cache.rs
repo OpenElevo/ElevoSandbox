@@ -8,7 +8,7 @@ use std::time::Duration;
 use moka::sync::Cache;
 use workspace_proto::{FsFileAttr, FsFileType, FsStatFsResponse};
 
-use crate::rpc::DirEntry;
+use crate::backend::FuseDirEntry;
 
 /// Default statfs cache TTL (30 seconds)
 const STATFS_CACHE_TTL: Duration = Duration::from_secs(30);
@@ -51,10 +51,6 @@ impl MetadataCache {
     }
 
     /// Invalidate all entries under a directory
-    ///
-    /// Note: moka doesn't support prefix invalidation directly, so we need to
-    /// iterate through all entries. For large caches this could be expensive,
-    /// but it ensures correctness.
     pub fn invalidate_tree(&self, dir_path: &str) {
         // Invalidate the directory itself
         self.cache.invalidate(dir_path);
@@ -66,7 +62,6 @@ impl MetadataCache {
             format!("{}/", dir_path)
         };
 
-        // Collect keys to invalidate (can't invalidate while iterating)
         let keys_to_invalidate: Vec<String> = self
             .cache
             .iter()
@@ -84,11 +79,16 @@ impl MetadataCache {
             self.cache.invalidate(&key);
         }
     }
+
+    /// Invalidate all entries
+    pub fn invalidate_all(&self) {
+        self.cache.invalidate_all();
+    }
 }
 
 /// Directory entry cache
 pub struct DirCache {
-    cache: Cache<String, Arc<Vec<DirEntry>>>,
+    cache: Cache<String, Arc<Vec<FuseDirEntry>>>,
 }
 
 impl DirCache {
@@ -103,12 +103,12 @@ impl DirCache {
     }
 
     /// Get cached directory entries
-    pub fn get(&self, path: &str) -> Option<Arc<Vec<DirEntry>>> {
+    pub fn get(&self, path: &str) -> Option<Arc<Vec<FuseDirEntry>>> {
         self.cache.get(path)
     }
 
     /// Cache directory entries
-    pub fn insert(&self, path: &str, entries: Vec<DirEntry>) {
+    pub fn insert(&self, path: &str, entries: Vec<FuseDirEntry>) {
         self.cache.insert(path.to_string(), Arc::new(entries));
     }
 
@@ -118,9 +118,6 @@ impl DirCache {
     }
 
     /// Invalidate all directories under a path
-    ///
-    /// Note: moka doesn't support prefix invalidation directly, so we need to
-    /// iterate through all entries.
     pub fn invalidate_tree(&self, path: &str) {
         // Invalidate the directory itself
         self.cache.invalidate(path);
@@ -132,7 +129,6 @@ impl DirCache {
             format!("{}/", path)
         };
 
-        // Collect keys to invalidate
         let keys_to_invalidate: Vec<String> = self
             .cache
             .iter()
@@ -149,6 +145,11 @@ impl DirCache {
         for key in keys_to_invalidate {
             self.cache.invalidate(&key);
         }
+    }
+
+    /// Invalidate all entries
+    pub fn invalidate_all(&self) {
+        self.cache.invalidate_all();
     }
 }
 
@@ -218,7 +219,6 @@ impl ReadCache {
 
     /// Invalidate all blocks for a file
     pub fn invalidate_file(&self, path: &str) {
-        // Collect keys to invalidate
         let keys_to_invalidate: Vec<ReadCacheKey> = self
             .cache
             .iter()
@@ -235,6 +235,11 @@ impl ReadCache {
         for key in keys_to_invalidate {
             self.cache.invalidate(&key);
         }
+    }
+
+    /// Invalidate all blocks
+    pub fn invalidate_all(&self) {
+        self.cache.invalidate_all();
     }
 
     /// Calculate block index for an offset
@@ -292,13 +297,13 @@ impl Default for StatfsCache {
     }
 }
 
-/// Convert FsFileType to libc file type
+/// Convert FsFileType to fuser FileType
 pub fn fs_file_type_to_fuse(ft: FsFileType) -> fuser::FileType {
     match ft {
         FsFileType::File => fuser::FileType::RegularFile,
         FsFileType::Directory => fuser::FileType::Directory,
         FsFileType::Symlink => fuser::FileType::Symlink,
-        FsFileType::Unspecified => fuser::FileType::RegularFile, // Default to regular file
+        FsFileType::Unspecified => fuser::FileType::RegularFile,
     }
 }
 
@@ -344,7 +349,7 @@ mod tests {
         let cache = DirCache::new(Duration::from_secs(60));
 
         let entries = vec![
-            DirEntry {
+            FuseDirEntry {
                 name: "file1.txt".to_string(),
                 attr: Some(FsFileAttr {
                     file_type: FsFileType::File.into(),
@@ -360,7 +365,7 @@ mod tests {
                     blocks: 1,
                 }),
             },
-            DirEntry {
+            FuseDirEntry {
                 name: "dir1".to_string(),
                 attr: Some(FsFileAttr {
                     file_type: FsFileType::Directory.into(),

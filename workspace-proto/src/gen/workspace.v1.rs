@@ -5,3 +5,6 @@ include!("main_services.rs");
 
 // Agent service (server only, client disabled due to Connect RPC naming conflict)
 include!("agent_services.rs");
+
+// Client storage service (server only, client disabled due to Connect RPC naming conflict)
+include!("client_storage_services.rs");

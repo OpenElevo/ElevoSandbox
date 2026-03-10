@@ -6,7 +6,7 @@ use prost_types::Timestamp;
 use tonic::{Request, Response, Status};
 use tracing::debug;
 
-use crate::domain::workspace::CreateWorkspaceParams;
+use crate::domain::workspace::{CreateWorkspaceParams, StorageType};
 use crate::error::Error;
 use crate::proto::{
     workspace_service_server::WorkspaceService, CopyFileRequest, CopyFileResponse,
@@ -14,19 +14,32 @@ use crate::proto::{
     DeleteWorkspaceRequest, DeleteWorkspaceResponse, FileInfo as ProtoFileInfo, GetFileInfoRequest,
     GetFileInfoResponse, GetWorkspaceRequest, GetWorkspaceResponse, ListFilesRequest,
     ListFilesResponse, ListWorkspacesRequest, ListWorkspacesResponse, MkdirRequest, MkdirResponse,
-    MoveFileRequest, MoveFileResponse, ReadFileRequest, ReadFileResponse, Workspace as ProtoWorkspace,
-    WriteFileRequest, WriteFileResponse,
+    MoveFileRequest, MoveFileResponse, ReadFileRequest, ReadFileResponse,
+    RegisterNfsTransportRequest, RegisterNfsTransportResponse, UnregisterNfsTransportRequest,
+    UnregisterNfsTransportResponse, Workspace as ProtoWorkspace, WriteFileRequest,
+    WriteFileResponse,
 };
+use crate::service::remote_storage::RemoteStorageService;
 use crate::service::workspace::WorkspaceService as WorkspaceServiceImpl;
 
 /// Convert domain Error to gRPC Status
 fn error_to_status(err: Error) -> Status {
     match &err {
-        Error::WorkspaceNotFound(_) => Status::not_found(err.to_string()),
-        Error::WorkspaceHasActiveSandboxes => Status::failed_precondition(err.to_string()),
-        Error::InvalidParameter(_) | Error::InvalidRequest(_) => {
-            Status::invalid_argument(err.to_string())
+        Error::WorkspaceNotFound(_)
+        | Error::FileNotFound(_)
+        | Error::SandboxNotFound(_)
+        | Error::ProcessNotFound(_)
+        | Error::PtyNotFound(_)
+        | Error::TemplateNotFound(_) => Status::not_found(err.to_string()),
+        Error::WorkspaceHasActiveSandboxes | Error::FileAlreadyExists(_) => {
+            Status::already_exists(err.to_string())
         }
+        Error::InvalidParameter(_)
+        | Error::InvalidRequest(_)
+        | Error::InvalidPath(_)
+        | Error::IsADirectory(_)
+        | Error::NotADirectory(_)
+        | Error::DirectoryNotEmpty(_) => Status::invalid_argument(err.to_string()),
         Error::PermissionDenied(_) | Error::PathNotAllowed(_) => {
             Status::permission_denied(err.to_string())
         }
@@ -36,6 +49,7 @@ fn error_to_status(err: Error) -> Status {
 
 /// Convert domain Workspace to proto Workspace
 fn workspace_to_proto(ws: crate::domain::workspace::Workspace) -> ProtoWorkspace {
+    let storage_config = serde_json::to_string(&ws.storage_config).unwrap_or_default();
     ProtoWorkspace {
         id: ws.id,
         name: ws.name,
@@ -49,6 +63,8 @@ fn workspace_to_proto(ws: crate::domain::workspace::Workspace) -> ProtoWorkspace
             seconds: ws.updated_at.timestamp(),
             nanos: ws.updated_at.timestamp_subsec_nanos() as i32,
         }),
+        storage_type: ws.storage_type.as_str().to_string(),
+        storage_config,
     }
 }
 
@@ -69,11 +85,18 @@ fn file_info_to_proto(info: crate::service::workspace::FileInfo) -> ProtoFileInf
 /// gRPC WorkspaceService implementation
 pub struct GrpcWorkspaceService {
     service: Arc<WorkspaceServiceImpl>,
+    remote_storage_service: Arc<RemoteStorageService>,
 }
 
 impl GrpcWorkspaceService {
-    pub fn new(service: Arc<WorkspaceServiceImpl>) -> Self {
-        Self { service }
+    pub fn new(
+        service: Arc<WorkspaceServiceImpl>,
+        remote_storage_service: Arc<RemoteStorageService>,
+    ) -> Self {
+        Self {
+            service,
+            remote_storage_service,
+        }
     }
 }
 
@@ -86,8 +109,20 @@ impl WorkspaceService for GrpcWorkspaceService {
         let req = request.into_inner();
         debug!(name = ?req.name, "create_workspace");
 
+        let storage_type = match req.storage_type.as_deref() {
+            Some("remote") => Some(StorageType::Remote),
+            Some("managed") | None => None,
+            Some(other) => {
+                return Err(Status::invalid_argument(format!(
+                    "invalid storage_type: '{}', must be 'managed' or 'remote'",
+                    other
+                )));
+            }
+        };
+
         let params = CreateWorkspaceParams {
             name: req.name,
+            storage_type,
             metadata: if req.metadata.is_empty() {
                 None
             } else {
@@ -282,6 +317,61 @@ impl WorkspaceService for GrpcWorkspaceService {
 
         Ok(Response::new(GetFileInfoResponse {
             file: Some(file_info_to_proto(file)),
+        }))
+    }
+
+    async fn register_nfs_transport(
+        &self,
+        request: Request<RegisterNfsTransportRequest>,
+    ) -> Result<Response<RegisterNfsTransportResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            workspace_id = %req.workspace_id,
+            nfs_url = %req.nfs_url,
+            "register_nfs_transport"
+        );
+
+        self.remote_storage_service
+            .register_nfs_transport(&req.workspace_id, &req.nfs_url)
+            .await
+            .map_err(error_to_status)?;
+
+        // Fetch updated workspace to return
+        let workspace = self
+            .service
+            .get(&req.workspace_id)
+            .await
+            .map_err(error_to_status)?;
+
+        Ok(Response::new(RegisterNfsTransportResponse {
+            workspace: Some(workspace_to_proto(workspace)),
+        }))
+    }
+
+    async fn unregister_nfs_transport(
+        &self,
+        request: Request<UnregisterNfsTransportRequest>,
+    ) -> Result<Response<UnregisterNfsTransportResponse>, Status> {
+        let req = request.into_inner();
+        debug!(
+            workspace_id = %req.workspace_id,
+            "unregister_nfs_transport"
+        );
+
+        self.remote_storage_service
+            .unregister_nfs_transport(&req.workspace_id)
+            .await
+            .map_err(error_to_status)?;
+
+        // Fetch updated workspace to return
+        let workspace = self
+            .service
+            .get(&req.workspace_id)
+            .await
+            .map_err(error_to_status)?;
+
+        Ok(Response::new(UnregisterNfsTransportResponse {
+            workspace: Some(workspace_to_proto(workspace)),
         }))
     }
 }

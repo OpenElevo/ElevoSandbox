@@ -1982,6 +1982,12 @@ pub struct Workspace {
     /// Last update timestamp
     #[prost(message, optional, tag = "6")]
     pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Storage type: "managed" or "remote"
+    #[prost(string, tag = "7")]
+    pub storage_type: ::prost::alloc::string::String,
+    /// Storage configuration (JSON string, meaningful for remote workspaces)
+    #[prost(string, tag = "8")]
+    pub storage_config: ::prost::alloc::string::String,
 }
 /// File information
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2014,6 +2020,9 @@ pub struct CreateWorkspaceRequest {
         ::prost::alloc::string::String,
         ::prost::alloc::string::String,
     >,
+    /// Storage type: "managed" (default) or "remote" (Client-provided storage)
+    #[prost(string, optional, tag = "3")]
+    pub storage_type: ::core::option::Option<::prost::alloc::string::String>,
 }
 /// Create workspace response
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2186,6 +2195,32 @@ pub struct GetFileInfoRequest {
 pub struct GetFileInfoResponse {
     #[prost(message, optional, tag = "1")]
     pub file: ::core::option::Option<FileInfo>,
+}
+/// Register NFS transport request
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterNfsTransportRequest {
+    #[prost(string, tag = "1")]
+    pub workspace_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub nfs_url: ::prost::alloc::string::String,
+}
+/// Register NFS transport response
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterNfsTransportResponse {
+    #[prost(message, optional, tag = "1")]
+    pub workspace: ::core::option::Option<Workspace>,
+}
+/// Unregister NFS transport request
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnregisterNfsTransportRequest {
+    #[prost(string, tag = "1")]
+    pub workspace_id: ::prost::alloc::string::String,
+}
+/// Unregister NFS transport response
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnregisterNfsTransportResponse {
+    #[prost(message, optional, tag = "1")]
+    pub workspace: ::core::option::Option<Workspace>,
 }
 /// Generated client implementations.
 pub mod workspace_service_client {
@@ -2577,6 +2612,66 @@ pub mod workspace_service_client {
                 .insert(GrpcMethod::new("workspace.v1.WorkspaceService", "GetFileInfo"));
             self.inner.unary(req, path, codec).await
         }
+        /// Register NFS transport (switch remote workspace from gRPC to NFS)
+        pub async fn register_nfs_transport(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RegisterNfsTransportRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterNfsTransportResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/workspace.v1.WorkspaceService/RegisterNfsTransport",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "workspace.v1.WorkspaceService",
+                        "RegisterNfsTransport",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Unregister NFS transport (switch back to gRPC)
+        pub async fn unregister_nfs_transport(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnregisterNfsTransportRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnregisterNfsTransportResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/workspace.v1.WorkspaceService/UnregisterNfsTransport",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new(
+                        "workspace.v1.WorkspaceService",
+                        "UnregisterNfsTransport",
+                    ),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -2676,6 +2771,22 @@ pub mod workspace_service_server {
             request: tonic::Request<super::GetFileInfoRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetFileInfoResponse>,
+            tonic::Status,
+        >;
+        /// Register NFS transport (switch remote workspace from gRPC to NFS)
+        async fn register_nfs_transport(
+            &self,
+            request: tonic::Request<super::RegisterNfsTransportRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterNfsTransportResponse>,
+            tonic::Status,
+        >;
+        /// Unregister NFS transport (switch back to gRPC)
+        async fn unregister_nfs_transport(
+            &self,
+            request: tonic::Request<super::UnregisterNfsTransportRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnregisterNfsTransportResponse>,
             tonic::Status,
         >;
     }
@@ -3285,6 +3396,104 @@ pub mod workspace_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetFileInfoSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/workspace.v1.WorkspaceService/RegisterNfsTransport" => {
+                    #[allow(non_camel_case_types)]
+                    struct RegisterNfsTransportSvc<T: WorkspaceService>(pub Arc<T>);
+                    impl<
+                        T: WorkspaceService,
+                    > tonic::server::UnaryService<super::RegisterNfsTransportRequest>
+                    for RegisterNfsTransportSvc<T> {
+                        type Response = super::RegisterNfsTransportResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RegisterNfsTransportRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as WorkspaceService>::register_nfs_transport(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = RegisterNfsTransportSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/workspace.v1.WorkspaceService/UnregisterNfsTransport" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnregisterNfsTransportSvc<T: WorkspaceService>(pub Arc<T>);
+                    impl<
+                        T: WorkspaceService,
+                    > tonic::server::UnaryService<super::UnregisterNfsTransportRequest>
+                    for UnregisterNfsTransportSvc<T> {
+                        type Response = super::UnregisterNfsTransportResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnregisterNfsTransportRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as WorkspaceService>::unregister_nfs_transport(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UnregisterNfsTransportSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

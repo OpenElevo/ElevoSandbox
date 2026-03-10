@@ -6,7 +6,9 @@ use chrono::{DateTime, Utc};
 use sqlx::{FromRow, SqlitePool};
 use uuid::Uuid;
 
-use crate::domain::workspace::{CreateWorkspaceParams, Workspace};
+use crate::domain::workspace::{
+    CreateWorkspaceParams, RemoteStorageConfig, StorageType, Workspace,
+};
 use crate::error::{Error, Result};
 
 /// Database row for workspace
@@ -15,6 +17,8 @@ struct WorkspaceRow {
     id: String,
     name: Option<String>,
     nfs_url: Option<String>,
+    storage_type: String,
+    storage_config: String,
     metadata: String,
     created_at: String,
     updated_at: String,
@@ -26,6 +30,23 @@ impl TryFrom<WorkspaceRow> for Workspace {
     fn try_from(row: WorkspaceRow) -> Result<Self> {
         let metadata: HashMap<String, String> = serde_json::from_str(&row.metadata)
             .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
+
+        let storage_type = StorageType::from_str(&row.storage_type)
+            .map_err(|e| Error::Internal(format!("Failed to parse storage_type: {}", e)))?;
+
+        let storage_config: RemoteStorageConfig = if row.storage_config.is_empty()
+            || row.storage_config == "{}"
+        {
+            RemoteStorageConfig::default()
+        } else {
+            serde_json::from_str(&row.storage_config).map_err(|e| {
+                Error::Internal(format!("Failed to parse storage_config: {}", e))
+            })?
+        };
+
+        if let Err(e) = storage_config.validate() {
+            return Err(Error::Internal(format!("Invalid storage_config: {}", e)));
+        }
 
         let created_at = DateTime::parse_from_rfc3339(&row.created_at)
             .map_err(|e| Error::Internal(format!("Failed to parse created_at: {}", e)))?
@@ -39,6 +60,8 @@ impl TryFrom<WorkspaceRow> for Workspace {
             id: row.id,
             name: row.name,
             nfs_url: row.nfs_url,
+            storage_type,
+            storage_config,
             metadata,
             created_at,
             updated_at,
@@ -64,14 +87,24 @@ impl WorkspaceRepository {
         let metadata = serde_json::to_string(&params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
 
+        let storage_type = params.storage_type.unwrap_or(StorageType::Managed);
+        let storage_config = if storage_type == StorageType::Remote {
+            serde_json::to_string(&RemoteStorageConfig::default())
+                .map_err(|e| Error::Internal(e.to_string()))?
+        } else {
+            "{}".to_string()
+        };
+
         sqlx::query(
             r#"
-            INSERT INTO workspaces (id, name, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO workspaces (id, name, storage_type, storage_config, metadata, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&id)
         .bind(&params.name)
+        .bind(storage_type.as_str())
+        .bind(&storage_config)
         .bind(&metadata)
         .bind(now.to_rfc3339())
         .bind(now.to_rfc3339())
@@ -85,7 +118,7 @@ impl WorkspaceRepository {
     pub async fn get(&self, id: &str) -> Result<Workspace> {
         let row: WorkspaceRow = sqlx::query_as(
             r#"
-            SELECT id, name, nfs_url, metadata, created_at, updated_at
+            SELECT id, name, nfs_url, storage_type, storage_config, metadata, created_at, updated_at
             FROM workspaces
             WHERE id = ?
             "#,
@@ -102,7 +135,7 @@ impl WorkspaceRepository {
     pub async fn list(&self) -> Result<Vec<Workspace>> {
         let rows: Vec<WorkspaceRow> = sqlx::query_as(
             r#"
-            SELECT id, name, nfs_url, metadata, created_at, updated_at
+            SELECT id, name, nfs_url, storage_type, storage_config, metadata, created_at, updated_at
             FROM workspaces
             ORDER BY created_at DESC
             "#,
@@ -149,6 +182,65 @@ impl WorkspaceRepository {
         }
 
         Ok(())
+    }
+
+    /// Update the storage_config JSON for a workspace
+    pub async fn update_storage_config(
+        &self,
+        id: &str,
+        config: &RemoteStorageConfig,
+    ) -> Result<()> {
+        let config_json = serde_json::to_string(config)
+            .map_err(|e| Error::Internal(format!("Failed to serialize storage_config: {}", e)))?;
+        let now = Utc::now();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE workspaces
+            SET storage_config = ?, updated_at = ?
+            WHERE id = ?
+            "#,
+        )
+        .bind(&config_json)
+        .bind(now.to_rfc3339())
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::WorkspaceNotFound(id.to_string()));
+        }
+
+        Ok(())
+    }
+
+    /// Count the number of remote workspaces
+    pub async fn count_remote(&self) -> Result<i64> {
+        let (count,): (i64,) = sqlx::query_as(
+            r#"
+            SELECT COUNT(*) FROM workspaces WHERE storage_type = 'remote'
+            "#,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count)
+    }
+
+    /// List all remote workspaces (storage_type='remote')
+    pub async fn list_remote(&self) -> Result<Vec<Workspace>> {
+        let rows: Vec<WorkspaceRow> = sqlx::query_as(
+            r#"
+            SELECT id, name, nfs_url, storage_type, storage_config, metadata, created_at, updated_at
+            FROM workspaces
+            WHERE storage_type = 'remote'
+            ORDER BY created_at DESC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(|r| r.try_into()).collect()
     }
 
     /// Check if a workspace has any sandboxes
@@ -207,6 +299,7 @@ mod tests {
 
         let params = CreateWorkspaceParams {
             name: Some("test-workspace".to_string()),
+            storage_type: None,
             metadata: None,
         };
 
@@ -231,10 +324,12 @@ mod tests {
 
         let params1 = CreateWorkspaceParams {
             name: Some("workspace1".to_string()),
+            storage_type: None,
             metadata: None,
         };
         let params2 = CreateWorkspaceParams {
             name: Some("workspace2".to_string()),
+            storage_type: None,
             metadata: None,
         };
 
@@ -256,6 +351,7 @@ mod tests {
 
         let params = CreateWorkspaceParams {
             name: Some("test".to_string()),
+            storage_type: None,
             metadata: None,
         };
 
@@ -285,6 +381,7 @@ mod tests {
 
         let params = CreateWorkspaceParams {
             name: None,
+            storage_type: None,
             metadata: None,
         };
 

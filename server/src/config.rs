@@ -111,6 +111,50 @@ pub struct Config {
     /// Storage backend configuration
     #[serde(skip)]
     pub storage: StorageConfig,
+
+    // ── Remote Storage Configuration ──
+
+    /// Maximum number of remote workspaces per server
+    #[serde(default = "default_max_remote_workspaces")]
+    pub max_remote_workspaces: usize,
+
+    /// Timeout for individual remote storage operations (seconds)
+    #[serde(default = "default_remote_op_timeout_secs")]
+    pub remote_op_timeout_secs: u64,
+
+    /// Heartbeat interval for remote storage connections (seconds)
+    #[serde(default = "default_remote_heartbeat_interval_secs")]
+    pub remote_heartbeat_interval_secs: u64,
+
+    /// Heartbeat timeout for remote storage connections (seconds)
+    #[serde(default = "default_remote_heartbeat_timeout_secs")]
+    pub remote_heartbeat_timeout_secs: u64,
+
+    /// Timeout for data stream transfer completion (seconds).
+    /// Should be longer than remote_op_timeout_secs since data transfers
+    /// involve streaming potentially large files.
+    #[serde(default = "default_remote_transfer_timeout_secs")]
+    pub remote_transfer_timeout_secs: u64,
+
+    /// Threshold (bytes) above which file data uses independent data stream
+    #[serde(default = "default_remote_data_stream_threshold")]
+    pub remote_data_stream_threshold: usize,
+
+    /// Max concurrent in-flight requests per remote workspace
+    #[serde(default = "default_remote_max_concurrent_requests")]
+    pub remote_max_concurrent_requests: usize,
+
+    /// CIDR allowlist for NFS transport registration (empty = deny all)
+    #[serde(default)]
+    pub nfs_allowed_cidrs: Vec<String>,
+
+    /// FUSE entry timeout for remote workspace mounts (seconds)
+    #[serde(default = "default_fuse_entry_timeout_secs")]
+    pub fuse_entry_timeout_secs: u64,
+
+    /// FUSE attr timeout for remote workspace mounts (seconds)
+    #[serde(default = "default_fuse_attr_timeout_secs")]
+    pub fuse_attr_timeout_secs: u64,
 }
 
 /// Storage backend configuration
@@ -234,6 +278,42 @@ fn default_fs_api_enabled() -> bool {
     true
 }
 
+fn default_max_remote_workspaces() -> usize {
+    200
+}
+
+fn default_remote_op_timeout_secs() -> u64 {
+    30
+}
+
+fn default_remote_heartbeat_interval_secs() -> u64 {
+    15
+}
+
+fn default_remote_heartbeat_timeout_secs() -> u64 {
+    45
+}
+
+fn default_remote_transfer_timeout_secs() -> u64 {
+    300 // 5 minutes — data transfers can involve large files
+}
+
+fn default_remote_data_stream_threshold() -> usize {
+    65536 // 64KB
+}
+
+fn default_remote_max_concurrent_requests() -> usize {
+    128
+}
+
+fn default_fuse_entry_timeout_secs() -> u64 {
+    1
+}
+
+fn default_fuse_attr_timeout_secs() -> u64 {
+    1
+}
+
 impl Config {
     /// Load configuration from environment variables
     pub fn load() -> anyhow::Result<Self> {
@@ -321,6 +401,60 @@ impl Config {
         }
         if let Ok(val) = std::env::var("WORKSPACE_FS_API_ENABLED") {
             config.fs_api_enabled = val.to_lowercase() == "true" || val == "1";
+        }
+
+        // Remote storage configuration
+        if let Ok(val) = std::env::var("WORKSPACE_MAX_REMOTE_WORKSPACES") {
+            if let Ok(n) = val.parse() {
+                config.max_remote_workspaces = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_OP_TIMEOUT_SECS") {
+            if let Ok(n) = val.parse() {
+                config.remote_op_timeout_secs = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_HEARTBEAT_INTERVAL_SECS") {
+            if let Ok(n) = val.parse() {
+                config.remote_heartbeat_interval_secs = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_HEARTBEAT_TIMEOUT_SECS") {
+            if let Ok(n) = val.parse() {
+                config.remote_heartbeat_timeout_secs = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_TRANSFER_TIMEOUT_SECS") {
+            if let Ok(n) = val.parse() {
+                config.remote_transfer_timeout_secs = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_DATA_STREAM_THRESHOLD") {
+            if let Ok(n) = val.parse() {
+                config.remote_data_stream_threshold = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_REMOTE_MAX_CONCURRENT_REQUESTS") {
+            if let Ok(n) = val.parse() {
+                config.remote_max_concurrent_requests = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_NFS_ALLOWED_CIDRS") {
+            config.nfs_allowed_cidrs = val
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_FUSE_ENTRY_TIMEOUT_SECS") {
+            if let Ok(n) = val.parse() {
+                config.fuse_entry_timeout_secs = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_FUSE_ATTR_TIMEOUT_SECS") {
+            if let Ok(n) = val.parse() {
+                config.fuse_attr_timeout_secs = n;
+            }
         }
 
         // Build StorageConfig from environment variables
@@ -447,6 +581,16 @@ impl Default for Config {
             fs_api_enabled: default_fs_api_enabled(),
             fs_api_token: None,
             storage: StorageConfig::default(),
+            max_remote_workspaces: default_max_remote_workspaces(),
+            remote_op_timeout_secs: default_remote_op_timeout_secs(),
+            remote_heartbeat_interval_secs: default_remote_heartbeat_interval_secs(),
+            remote_heartbeat_timeout_secs: default_remote_heartbeat_timeout_secs(),
+            remote_transfer_timeout_secs: default_remote_transfer_timeout_secs(),
+            remote_data_stream_threshold: default_remote_data_stream_threshold(),
+            remote_max_concurrent_requests: default_remote_max_concurrent_requests(),
+            nfs_allowed_cidrs: Vec::new(),
+            fuse_entry_timeout_secs: default_fuse_entry_timeout_secs(),
+            fuse_attr_timeout_secs: default_fuse_attr_timeout_secs(),
         }
     }
 }

@@ -2,19 +2,19 @@
 //!
 //! Mounts remote Elevo Workspaces as local FUSE filesystems.
 
-mod cache;
 mod cli;
-mod fuse_fs;
-mod inode;
 mod rpc;
+mod rpc_backend;
 
 use std::process::Command as StdCommand;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cli::{Cli, Command, MountArgs, UmountArgs};
-use fuse_fs::WorkspaceFuse;
+use fuse_core::filesystem::{FuseFilesystemWrapper, WorkspaceFuse};
 use fuser::MountOption;
 use rpc::FileSystemRpcClient;
+use rpc_backend::RpcFuseBackend;
 use tracing::{error, info, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -112,16 +112,18 @@ fn mount(args: MountArgs) -> Result<()> {
         mount_options.push(MountOption::RO);
     }
 
-    // Create the FUSE filesystem
+    // Create the FUSE filesystem using fuse-core with RPC backend
     let read_cache_size_bytes = args.read_cache_size * 1024 * 1024;
-    let fs = WorkspaceFuse::new(
+    let backend = RpcFuseBackend::new(rpc);
+    let fuse = Arc::new(WorkspaceFuse::new(
         args.workspace,
-        runtime,
-        rpc,
+        runtime.handle().clone(),
+        backend,
         std::time::Duration::from_secs(args.cache_ttl),
         args.block_size,
         read_cache_size_bytes,
-    );
+    ));
+    let fs = FuseFilesystemWrapper::new(fuse);
 
     info!("Starting FUSE filesystem");
 
@@ -131,9 +133,6 @@ fn mount(args: MountArgs) -> Result<()> {
         fuser::mount2(fs, &args.target, &mount_options)
             .with_context(|| format!("Failed to mount at {:?}", args.target))?;
     } else {
-        // Daemonize
-        // Note: proper daemonization would require fork(), which is complex
-        // For now, we recommend using --foreground with systemd or similar
         error!("Background mode not implemented. Use --foreground with a process manager.");
         return Err(anyhow::anyhow!(
             "Background mode not implemented. Use --foreground"
