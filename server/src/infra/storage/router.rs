@@ -274,12 +274,7 @@ impl StorageBackend for StorageRouter {
         backend.rename_noreplace(workspace_id, src, dst).await
     }
 
-    async fn rename_exchange(
-        &self,
-        workspace_id: &str,
-        src: &str,
-        dst: &str,
-    ) -> StorageResult<()> {
+    async fn rename_exchange(&self, workspace_id: &str, src: &str, dst: &str) -> StorageResult<()> {
         let backend = self.resolve(workspace_id);
         let lock = self.get_lock(workspace_id);
         let _guard = match &lock {

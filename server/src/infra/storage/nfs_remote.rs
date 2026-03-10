@@ -54,7 +54,9 @@ fn parse_nfs_url(url: &str) -> Result<NfsUrl, NfsRemoteMountError> {
                 .parse()
                 .map_err(|_| NfsRemoteMountError::InvalidUrl(format!("invalid port: {}", p)))?;
             if port == 0 {
-                return Err(NfsRemoteMountError::InvalidUrl("port 0 is not allowed".into()));
+                return Err(NfsRemoteMountError::InvalidUrl(
+                    "port 0 is not allowed".into(),
+                ));
             }
             (h.to_string(), port)
         } else {
@@ -136,9 +138,9 @@ impl RemoteNfsMountManager {
         // Using any() instead of all() to support dual-stack hosts (e.g., hosts
         // with both private and public IPs where only the private range is allowed).
         if !self.allowed_cidrs.is_empty() {
-            let any_allowed = addrs.iter().any(|ip| {
-                self.allowed_cidrs.iter().any(|cidr| cidr.contains(ip))
-            });
+            let any_allowed = addrs
+                .iter()
+                .any(|ip| self.allowed_cidrs.iter().any(|cidr| cidr.contains(ip)));
             if !any_allowed {
                 return Err(NfsRemoteMountError::HostNotAllowed {
                     host: parsed.host.clone(),
@@ -311,11 +313,7 @@ impl RemoteNfsMountManager {
     }
 
     /// Atomically move a mount from one path to another using `mount --move`.
-    pub async fn mount_move(
-        &self,
-        from: &Path,
-        to: &Path,
-    ) -> Result<(), NfsRemoteMountError> {
+    pub async fn mount_move(&self, from: &Path, to: &Path) -> Result<(), NfsRemoteMountError> {
         let output = Command::new("mount")
             .args([
                 "--move",

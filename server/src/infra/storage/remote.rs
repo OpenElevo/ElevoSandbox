@@ -485,12 +485,9 @@ impl RemoteStorageBackend {
 
         if let Ok(ref resp) = result {
             if let Some(storage_operation_response::Result::Error(ref e)) = resp.result {
-                let code = StorageErrorCode::try_from(e.code)
-                    .unwrap_or(StorageErrorCode::Unspecified);
-                crate::infra::metrics::increment_remote_op_error(
-                    op_name,
-                    &format!("{:?}", code),
-                );
+                let code =
+                    StorageErrorCode::try_from(e.code).unwrap_or(StorageErrorCode::Unspecified);
+                crate::infra::metrics::increment_remote_op_error(op_name, &format!("{:?}", code));
             }
         }
 
@@ -541,11 +538,7 @@ impl RemoteStorageBackend {
 
     /// Write file via data stream: stores the data, sends StartDataTransfer
     /// to the Client, and waits for the Client to complete the WriteFileStream RPC.
-    async fn write_file_via_data_stream(
-        &self,
-        path: &str,
-        content: &[u8],
-    ) -> StorageResult<()> {
+    async fn write_file_via_data_stream(&self, path: &str, content: &[u8]) -> StorageResult<()> {
         self.ensure_connected().await?;
 
         let transfer_id = Uuid::new_v4().to_string();
@@ -684,22 +677,16 @@ impl RemoteStorageBackend {
         // Wait for transfer completion with transfer_timeout
         match tokio::time::timeout(self.transfer_timeout, rx).await {
             Ok(Ok(DataTransferResult::ReadComplete(data))) => Ok(data),
-            Ok(Ok(DataTransferResult::Failed(reason))) => {
-                Err(StorageError::Internal(format!(
-                    "read data transfer failed: {}",
-                    reason
-                )))
-            }
-            Ok(Ok(DataTransferResult::WriteComplete)) => {
-                Err(StorageError::Internal(
-                    "unexpected WriteComplete for read transfer".to_string(),
-                ))
-            }
-            Ok(Err(_)) => {
-                Err(StorageError::Internal(
-                    "transfer channel closed unexpectedly".to_string(),
-                ))
-            }
+            Ok(Ok(DataTransferResult::Failed(reason))) => Err(StorageError::Internal(format!(
+                "read data transfer failed: {}",
+                reason
+            ))),
+            Ok(Ok(DataTransferResult::WriteComplete)) => Err(StorageError::Internal(
+                "unexpected WriteComplete for read transfer".to_string(),
+            )),
+            Ok(Err(_)) => Err(StorageError::Internal(
+                "transfer channel closed unexpectedly".to_string(),
+            )),
             Err(_) => {
                 self.pending_transfers.remove(&transfer_id);
                 Err(StorageError::Internal(format!(
@@ -721,9 +708,7 @@ fn proto_error_to_storage(err: &StorageOperationError) -> StorageError {
         StorageErrorCode::IsADirectory => StorageError::IsADirectory(err.message.clone()),
         StorageErrorCode::NotADirectory => StorageError::NotADirectory(err.message.clone()),
         StorageErrorCode::NotAFile => StorageError::NotAFile(err.message.clone()),
-        StorageErrorCode::DirectoryNotEmpty => {
-            StorageError::DirectoryNotEmpty(err.message.clone())
-        }
+        StorageErrorCode::DirectoryNotEmpty => StorageError::DirectoryNotEmpty(err.message.clone()),
         StorageErrorCode::PermissionDenied => StorageError::PermissionDenied(err.message.clone()),
         StorageErrorCode::PathTraversalDenied => {
             StorageError::PathTraversalDenied(err.message.clone())
@@ -752,15 +737,18 @@ fn proto_stat_to_domain(s: &FileStatData) -> FileStat {
         mode: s.mode,
         uid: s.uid,
         gid: s.gid,
-        modified_at: s.modified_at.as_ref().map(|t| {
-            DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()
-        }),
-        accessed_at: s.accessed_at.as_ref().map(|t| {
-            DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()
-        }),
-        created_at: s.created_at.as_ref().map(|t| {
-            DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()
-        }),
+        modified_at: s
+            .modified_at
+            .as_ref()
+            .map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()),
+        accessed_at: s
+            .accessed_at
+            .as_ref()
+            .map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()),
+        created_at: s
+            .created_at
+            .as_ref()
+            .map(|t| DateTime::from_timestamp(t.seconds, t.nanos as u32).unwrap_or_default()),
     }
 }
 
@@ -941,9 +929,11 @@ impl StorageBackend for RemoteStorageBackend {
 
     async fn exists(&self, _workspace_id: &str, path: &str) -> StorageResult<bool> {
         let resp = self
-            .send_request(storage_operation_request::Operation::Exists(ExistsRequest {
-                path: path.to_string(),
-            }))
+            .send_request(storage_operation_request::Operation::Exists(
+                ExistsRequest {
+                    path: path.to_string(),
+                },
+            ))
             .await?;
 
         match extract_success(resp)? {
@@ -1000,11 +990,13 @@ impl StorageBackend for RemoteStorageBackend {
 
     async fn rename(&self, _workspace_id: &str, src: &str, dst: &str) -> StorageResult<()> {
         let resp = self
-            .send_request(storage_operation_request::Operation::Rename(RenameRequest {
-                src: src.to_string(),
-                dst: dst.to_string(),
-                flags: 0, // normal rename
-            }))
+            .send_request(storage_operation_request::Operation::Rename(
+                RenameRequest {
+                    src: src.to_string(),
+                    dst: dst.to_string(),
+                    flags: 0, // normal rename
+                },
+            ))
             .await?;
 
         extract_empty(resp)
@@ -1017,11 +1009,13 @@ impl StorageBackend for RemoteStorageBackend {
         dst: &str,
     ) -> StorageResult<()> {
         let resp = self
-            .send_request(storage_operation_request::Operation::Rename(RenameRequest {
-                src: src.to_string(),
-                dst: dst.to_string(),
-                flags: 1, // noreplace
-            }))
+            .send_request(storage_operation_request::Operation::Rename(
+                RenameRequest {
+                    src: src.to_string(),
+                    dst: dst.to_string(),
+                    flags: 1, // noreplace
+                },
+            ))
             .await?;
 
         extract_empty(resp)
@@ -1034,11 +1028,13 @@ impl StorageBackend for RemoteStorageBackend {
         dst: &str,
     ) -> StorageResult<()> {
         let resp = self
-            .send_request(storage_operation_request::Operation::Rename(RenameRequest {
-                src: src.to_string(),
-                dst: dst.to_string(),
-                flags: 2, // exchange
-            }))
+            .send_request(storage_operation_request::Operation::Rename(
+                RenameRequest {
+                    src: src.to_string(),
+                    dst: dst.to_string(),
+                    flags: 2, // exchange
+                },
+            ))
             .await?;
 
         extract_empty(resp)

@@ -57,7 +57,8 @@ impl NfsRemoteMountMonitor {
 
         for ws in &workspaces {
             // Only check workspaces using NFS transport (not in the middle of a switch)
-            if ws.storage_config.transport != RemoteTransport::Nfs || ws.storage_config.is_switching()
+            if ws.storage_config.transport != RemoteTransport::Nfs
+                || ws.storage_config.is_switching()
             {
                 continue;
             }

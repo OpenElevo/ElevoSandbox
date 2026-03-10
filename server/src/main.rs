@@ -29,15 +29,15 @@ use api::grpc::{
 use config::StorageConfig;
 use infra::agent_pool::AgentConnPool;
 use infra::docker::DockerManager;
+use infra::fuse::mount::FuseMountManager;
 use infra::metrics;
 use infra::nfs::{NfsManager, NfsMode};
 use infra::sqlite::SandboxRepository;
 use infra::storage::lease::SqliteLeaseManager;
 use infra::storage::local::LocalStorageBackend;
-use infra::fuse::mount::FuseMountManager;
+use infra::storage::nfs_remote::RemoteNfsMountManager;
 use infra::storage::remote::RemoteStoragePool;
 use infra::storage::router::StorageRouter;
-use infra::storage::nfs_remote::RemoteNfsMountManager;
 use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonitor};
 use infra::storage::StorageBackend;
 use infra::workspace_repository::WorkspaceRepository;
@@ -371,11 +371,11 @@ async fn main() -> anyhow::Result<()> {
     let process_grpc = GrpcProcessService::new(state.process_service.clone());
     let pty_grpc = GrpcPtyService::new(state.pty_service.clone(), agent_pool.clone());
 
-    let client_storage_grpc_server =
-        ClientStorageServiceServer::new(client_storage_service);
+    let client_storage_grpc_server = ClientStorageServiceServer::new(client_storage_service);
 
     let grpc_router = if config.fs_api_enabled {
-        let fs_service = FileSystemServiceImpl::new(storage_router.clone() as Arc<dyn StorageBackend>);
+        let fs_service =
+            FileSystemServiceImpl::new(storage_router.clone() as Arc<dyn StorageBackend>);
         if let Some(ref token) = config.fs_api_token {
             info!("FileSystemService enabled with token authentication");
             let auth_interceptor = AuthInterceptor::new(token.clone());

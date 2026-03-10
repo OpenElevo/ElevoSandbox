@@ -65,11 +65,7 @@ impl RemoteStorageService {
     /// 7. mount --move temp → final path
     /// 8. Replace StorageRouter backend with LocalStorageBackend
     /// 9. Update DB: transport=nfs, clear switching fields
-    pub async fn register_nfs_transport(
-        &self,
-        workspace_id: &str,
-        nfs_url: &str,
-    ) -> Result<()> {
+    pub async fn register_nfs_transport(&self, workspace_id: &str, nfs_url: &str) -> Result<()> {
         // Step 1: Validate
         let workspace = self.workspace_repository.get(workspace_id).await?;
         if !workspace.is_remote() {
@@ -181,10 +177,7 @@ impl RemoteStorageService {
         self.fuse_manager.umount(workspace_id).await;
 
         // Step 7: mount --move temp → final path
-        let final_path = self
-            .nfs_remote
-            .workspace_dir()
-            .join(workspace_id);
+        let final_path = self.nfs_remote.workspace_dir().join(workspace_id);
         if let Err(e) = self.nfs_remote.mount_move(&temp_mount, &final_path).await {
             error!(
                 workspace_id = %workspace_id,
@@ -270,9 +263,7 @@ impl RemoteStorageService {
             .storage_router
             .write_lock(workspace_id, CHANNEL_SWITCH_LOCK_TIMEOUT)
             .await
-            .map_err(|e| {
-                Error::Internal(format!("channel switch lock timeout: {}", e))
-            })?;
+            .map_err(|e| Error::Internal(format!("channel switch lock timeout: {}", e)))?;
 
         // Unmount NFS
         if let Err(e) = self.nfs_remote.umount(workspace_id).await {

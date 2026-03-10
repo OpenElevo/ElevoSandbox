@@ -116,12 +116,7 @@ impl fuse_core::backend::FuseBackend for RpcFuseBackend {
             .map_err(status_to_fuse_error)
     }
 
-    async fn rename(
-        &self,
-        old_path: &str,
-        new_path: &str,
-        flags: FsRenameFlags,
-    ) -> FuseResult<()> {
+    async fn rename(&self, old_path: &str, new_path: &str, flags: FsRenameFlags) -> FuseResult<()> {
         self.rpc
             .rename_with_flags(old_path, new_path, flags)
             .await
@@ -129,17 +124,11 @@ impl fuse_core::backend::FuseBackend for RpcFuseBackend {
     }
 
     async fn readdir(&self, path: &str) -> FuseResult<Vec<FuseDirEntry>> {
-        self.rpc
-            .list_dir(path)
-            .await
-            .map_err(status_to_fuse_error)
+        self.rpc.list_dir(path).await.map_err(status_to_fuse_error)
     }
 
     async fn readlink(&self, path: &str) -> FuseResult<String> {
-        self.rpc
-            .read_link(path)
-            .await
-            .map_err(status_to_fuse_error)
+        self.rpc.read_link(path).await.map_err(status_to_fuse_error)
     }
 
     async fn symlink(&self, link_path: &str, target: &str) -> FuseResult<FsFileAttr> {

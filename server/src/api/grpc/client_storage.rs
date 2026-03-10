@@ -20,10 +20,10 @@ use crate::infra::storage::router::StorageRouter;
 use crate::infra::storage::StorageBackend;
 use crate::infra::workspace_repository::WorkspaceRepository;
 use crate::proto::{
-    client_message, client_storage_service_server::ClientStorageService,
-    read_file_stream_request, server_storage_message, write_file_stream_response, ClientMessage,
-    ReadFileStreamRequest, ReadFileStreamResponse, ServerStorageMessage, StorageHandshakeAck,
-    StoragePing, WriteFileStreamDone, WriteFileStreamRequest, WriteFileStreamResponse,
+    client_message, client_storage_service_server::ClientStorageService, read_file_stream_request,
+    server_storage_message, write_file_stream_response, ClientMessage, ReadFileStreamRequest,
+    ReadFileStreamResponse, ServerStorageMessage, StorageHandshakeAck, StoragePing,
+    WriteFileStreamDone, WriteFileStreamRequest, WriteFileStreamResponse,
 };
 
 /// gRPC ClientStorageService implementation
@@ -98,8 +98,7 @@ fn verify_token(config: &Config, token: &str) -> bool {
 
 #[tonic::async_trait]
 impl ClientStorageService for ClientStorageServiceImpl {
-    type ConnectStream =
-        Pin<Box<dyn Stream<Item = Result<ServerStorageMessage, Status>> + Send>>;
+    type ConnectStream = Pin<Box<dyn Stream<Item = Result<ServerStorageMessage, Status>> + Send>>;
 
     async fn connect(
         &self,
@@ -229,10 +228,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
             backend.bind(ctrl_tx.clone()).await;
 
             // Register backend in StorageRouter
-            storage_router.register(
-                &workspace_id,
-                backend.clone() as Arc<dyn StorageBackend>,
-            );
+            storage_router.register(&workspace_id, backend.clone() as Arc<dyn StorageBackend>);
 
             // Send handshake acknowledgment
             let _ = out_tx_clone
@@ -258,7 +254,10 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 fuse_manager.purge_all_caches(&workspace_id);
             }
             // Mount FUSE if not already mounted
-            if let Err(e) = fuse_manager.mount_if_not_exists(&workspace_id, backend.clone()).await {
+            if let Err(e) = fuse_manager
+                .mount_if_not_exists(&workspace_id, backend.clone())
+                .await
+            {
                 warn!(
                     workspace_id = %workspace_id,
                     error = %e,
@@ -279,12 +278,10 @@ impl ClientStorageService for ClientStorageServiceImpl {
             });
 
             // ── Step 7: Start heartbeat task with timeout detection ──
-            let heartbeat_interval = std::time::Duration::from_secs(
-                config.remote_heartbeat_interval_secs,
-            );
-            let heartbeat_timeout = std::time::Duration::from_secs(
-                config.remote_heartbeat_timeout_secs,
-            );
+            let heartbeat_interval =
+                std::time::Duration::from_secs(config.remote_heartbeat_interval_secs);
+            let heartbeat_timeout =
+                std::time::Duration::from_secs(config.remote_heartbeat_timeout_secs);
             // Use monotonic Instant to track last activity (immune to clock skew)
             // Store elapsed millis from a fixed reference point as AtomicU64
             let reference_instant = std::time::Instant::now();
@@ -311,11 +308,9 @@ impl ClientStorageService for ClientStorageServiceImpl {
                     }
 
                     let ping = ServerStorageMessage {
-                        message: Some(server_storage_message::Message::Ping(
-                            StoragePing {
-                                timestamp: now_ms,
-                            },
-                        )),
+                        message: Some(server_storage_message::Message::Ping(StoragePing {
+                            timestamp: now_ms,
+                        })),
                     };
                     if out_tx_hb.send(ping).await.is_err() {
                         debug!(workspace_id = %ws_id_hb, "Heartbeat task ended (send failed)");
@@ -355,11 +350,8 @@ impl ClientStorageService for ClientStorageServiceImpl {
                             if notification.full_purge {
                                 fuse_manager.purge_all_caches(&workspace_id);
                             } else {
-                                let paths: Vec<String> = notification
-                                    .events
-                                    .iter()
-                                    .map(|e| e.path.clone())
-                                    .collect();
+                                let paths: Vec<String> =
+                                    notification.events.iter().map(|e| e.path.clone()).collect();
                                 if !paths.is_empty() {
                                     fuse_manager.invalidate_paths(&workspace_id, &paths);
                                 }
@@ -379,10 +371,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
                                 reason = %dtf.reason,
                                 "Data transfer failed"
                             );
-                            backend.handle_data_transfer_failed(
-                                &dtf.transfer_id,
-                                &dtf.reason,
-                            );
+                            backend.handle_data_transfer_failed(&dtf.transfer_id, &dtf.reason);
                         }
                         Some(client_message::Message::Handshake(_)) => {
                             warn!(
@@ -453,11 +442,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
         let bytes_read = data.len() as u64;
 
         // 4. Record data transfer metrics
-        crate::infra::metrics::record_data_transfer_bytes(
-            &header.workspace_id,
-            "read",
-            bytes_read,
-        );
+        crate::infra::metrics::record_data_transfer_bytes(&header.workspace_id, "read", bytes_read);
 
         // 5. Complete the transfer
         backend.complete_read_transfer(&header.transfer_id, data);
@@ -533,11 +518,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
             }
 
             // 5. Record metrics and complete the transfer
-            crate::infra::metrics::record_data_transfer_bytes(
-                &workspace_id,
-                "write",
-                total_bytes,
-            );
+            crate::infra::metrics::record_data_transfer_bytes(&workspace_id, "write", total_bytes);
             backend_clone.complete_write_transfer(&transfer_id);
             backend_clone.remove_write_data(&transfer_id);
         });

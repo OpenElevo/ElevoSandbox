@@ -119,9 +119,13 @@ impl FuseMountManager {
         let mount_point = self.workspace_dir.join(workspace_id);
 
         // Create mount point directory
-        tokio::fs::create_dir_all(&mount_point)
-            .await
-            .map_err(|e| format!("failed to create mount point {}: {}", mount_point.display(), e))?;
+        tokio::fs::create_dir_all(&mount_point).await.map_err(|e| {
+            format!(
+                "failed to create mount point {}: {}",
+                mount_point.display(),
+                e
+            )
+        })?;
 
         // Build the FUSE filesystem
         let fuse_backend = ServerFuseBackend::new(workspace_id.to_string(), backend);
@@ -249,9 +253,7 @@ impl FuseMountManager {
     /// Get mount point path for a workspace.
     #[allow(dead_code)]
     pub fn mount_point(&self, workspace_id: &str) -> Option<PathBuf> {
-        self.mounts
-            .get(workspace_id)
-            .map(|e| e.mount_point.clone())
+        self.mounts.get(workspace_id).map(|e| e.mount_point.clone())
     }
 
     /// Get all mounted workspace IDs.

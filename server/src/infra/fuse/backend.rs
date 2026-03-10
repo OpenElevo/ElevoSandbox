@@ -44,9 +44,7 @@ fn storage_to_fuse_error(err: StorageError) -> FuseError {
         StorageError::PermissionDenied(msg) => FuseError::PermissionDenied(msg),
         StorageError::PathTraversalDenied(msg) => FuseError::PathTraversalDenied(msg),
         StorageError::NotSupported(msg) => FuseError::NotSupported(msg),
-        StorageError::Io { path, source } => {
-            FuseError::IoError(format!("{}: {}", path, source))
-        }
+        StorageError::Io { path, source } => FuseError::IoError(format!("{}: {}", path, source)),
         StorageError::Internal(msg) => FuseError::Internal(msg),
     }
 }
@@ -272,12 +270,7 @@ impl fuse_core::backend::FuseBackend for ServerFuseBackend {
             .map_err(storage_to_fuse_error)
     }
 
-    async fn rename(
-        &self,
-        old_path: &str,
-        new_path: &str,
-        flags: FsRenameFlags,
-    ) -> FuseResult<()> {
+    async fn rename(&self, old_path: &str, new_path: &str, flags: FsRenameFlags) -> FuseResult<()> {
         match flags {
             FsRenameFlags::None => {
                 self.backend

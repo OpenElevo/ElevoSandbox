@@ -73,13 +73,13 @@ impl RecoveryService {
             return;
         }
 
-        info!(
-            "Recovering {} remote workspace(s)",
-            workspaces.len()
-        );
+        info!("Recovering {} remote workspace(s)", workspaces.len());
 
         for workspace in &workspaces {
-            if let Err(e) = self.recover_workspace(&workspace.id, &workspace.storage_config).await {
+            if let Err(e) = self
+                .recover_workspace(&workspace.id, &workspace.storage_config)
+                .await
+            {
                 error!(
                     workspace_id = %workspace.id,
                     error = %e,
@@ -221,7 +221,10 @@ impl RecoveryService {
                         workspace_id = %workspace_id,
                         "Temp NFS mount still present, attempting to complete switch"
                     );
-                    match self.complete_nfs_switch(workspace_id, config, &temp_path).await {
+                    match self
+                        .complete_nfs_switch(workspace_id, config, &temp_path)
+                        .await
+                    {
                         Ok(()) => return Ok(()),
                         Err(e) => {
                             warn!(

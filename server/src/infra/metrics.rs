@@ -156,10 +156,7 @@ pub fn init_metrics() -> PrometheusHandle {
         names::CHANNEL_SWITCH_DURATION,
         "Duration of channel switch operations in seconds"
     );
-    describe_counter!(
-        names::CHANNEL_SWITCH_ERRORS,
-        "Total channel switch errors"
-    );
+    describe_counter!(names::CHANNEL_SWITCH_ERRORS, "Total channel switch errors");
 
     handle
 }

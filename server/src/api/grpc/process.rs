@@ -37,12 +37,8 @@ fn error_to_status(err: Error) -> Status {
 /// Convert domain ProcessEvent to proto ProcessEvent
 fn event_to_proto(event: DomainProcessEvent) -> ProtoProcessEvent {
     let event = match event {
-        DomainProcessEvent::Stdout { data } => {
-            process_event::Event::Stdout(StdoutEvent { data })
-        }
-        DomainProcessEvent::Stderr { data } => {
-            process_event::Event::Stderr(StderrEvent { data })
-        }
+        DomainProcessEvent::Stdout { data } => process_event::Event::Stdout(StdoutEvent { data }),
+        DomainProcessEvent::Stderr { data } => process_event::Event::Stderr(StderrEvent { data }),
         DomainProcessEvent::Exit { code } => process_event::Event::Exit(ExitEvent { code }),
         DomainProcessEvent::Error { message } => {
             process_event::Event::Error(ErrorEvent { message })

@@ -103,7 +103,12 @@ impl PtyService for GrpcPtyService {
         );
 
         self.service
-            .resize(&req.sandbox_id, &req.pty_id, req.cols as u16, req.rows as u16)
+            .resize(
+                &req.sandbox_id,
+                &req.pty_id,
+                req.cols as u16,
+                req.rows as u16,
+            )
             .await
             .map_err(error_to_status)?;
 
@@ -147,10 +152,7 @@ impl PtyService for GrpcPtyService {
             let (sandbox_id, pty_id) = match first_msg {
                 Some(Ok(msg)) => match msg.request {
                     Some(pty_stream_request::Request::Init(init)) => {
-                        debug!(
-                            "PTY stream init for {}:{}",
-                            init.sandbox_id, init.pty_id
-                        );
+                        debug!("PTY stream init for {}:{}", init.sandbox_id, init.pty_id);
                         (init.sandbox_id, init.pty_id)
                     }
                     _ => {
@@ -217,7 +219,12 @@ impl PtyService for GrpcPtyService {
                         }
                         Some(pty_stream_request::Request::Resize(resize)) => {
                             if let Err(e) = service
-                                .resize(&sandbox_id, &pty_id, resize.cols as u16, resize.rows as u16)
+                                .resize(
+                                    &sandbox_id,
+                                    &pty_id,
+                                    resize.cols as u16,
+                                    resize.rows as u16,
+                                )
                                 .await
                             {
                                 warn!("Failed to resize PTY: {}", e);

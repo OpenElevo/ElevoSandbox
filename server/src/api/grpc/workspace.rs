@@ -130,11 +130,7 @@ impl WorkspaceService for GrpcWorkspaceService {
             },
         };
 
-        let workspace = self
-            .service
-            .create(params)
-            .await
-            .map_err(error_to_status)?;
+        let workspace = self.service.create(params).await.map_err(error_to_status)?;
 
         Ok(Response::new(CreateWorkspaceResponse {
             workspace: Some(workspace_to_proto(workspace)),
@@ -148,11 +144,7 @@ impl WorkspaceService for GrpcWorkspaceService {
         let req = request.into_inner();
         debug!(id = %req.id, "get_workspace");
 
-        let workspace = self
-            .service
-            .get(&req.id)
-            .await
-            .map_err(error_to_status)?;
+        let workspace = self.service.get(&req.id).await.map_err(error_to_status)?;
 
         Ok(Response::new(GetWorkspaceResponse {
             workspace: Some(workspace_to_proto(workspace)),

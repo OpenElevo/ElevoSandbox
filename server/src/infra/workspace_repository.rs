@@ -39,9 +39,8 @@ impl TryFrom<WorkspaceRow> for Workspace {
         {
             RemoteStorageConfig::default()
         } else {
-            serde_json::from_str(&row.storage_config).map_err(|e| {
-                Error::Internal(format!("Failed to parse storage_config: {}", e))
-            })?
+            serde_json::from_str(&row.storage_config)
+                .map_err(|e| Error::Internal(format!("Failed to parse storage_config: {}", e)))?
         };
 
         if let Err(e) = storage_config.validate() {

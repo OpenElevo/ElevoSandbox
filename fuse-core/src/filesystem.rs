@@ -420,9 +420,7 @@ impl<B: FuseBackend> Filesystem for FuseFilesystemWrapper<B> {
                     backend.read(&path_owned, block_start, fetch_size).await
                 }) {
                     Ok(data) => {
-                        self.inner
-                            .read_cache
-                            .insert(&path, block_idx, data.clone());
+                        self.inner.read_cache.insert(&path, block_idx, data.clone());
                         Arc::new(data)
                     }
                     Err(e) => {

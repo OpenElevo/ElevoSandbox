@@ -113,7 +113,6 @@ pub struct Config {
     pub storage: StorageConfig,
 
     // ── Remote Storage Configuration ──
-
     /// Maximum number of remote workspaces per server
     #[serde(default = "default_max_remote_workspaces")]
     pub max_remote_workspaces: usize,

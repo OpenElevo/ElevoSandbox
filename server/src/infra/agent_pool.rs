@@ -469,11 +469,7 @@ impl AgentConnPool {
     }
 
     /// Subscribe to PTY output
-    pub fn subscribe_pty(
-        &self,
-        sandbox_id: &str,
-        pty_id: &str,
-    ) -> mpsc::Receiver<PtyOutputEvent> {
+    pub fn subscribe_pty(&self, sandbox_id: &str, pty_id: &str) -> mpsc::Receiver<PtyOutputEvent> {
         let (tx, rx) = mpsc::channel(256);
         let key = (sandbox_id.to_string(), pty_id.to_string());
         self.pty_subscribers.insert(key, tx);

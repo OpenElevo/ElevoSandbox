@@ -64,12 +64,7 @@ pub trait FuseBackend: Send + Sync + 'static {
     async fn rmdir(&self, path: &str) -> FuseResult<()>;
 
     /// Rename a file or directory
-    async fn rename(
-        &self,
-        old_path: &str,
-        new_path: &str,
-        flags: FsRenameFlags,
-    ) -> FuseResult<()>;
+    async fn rename(&self, old_path: &str, new_path: &str, flags: FsRenameFlags) -> FuseResult<()>;
 
     /// List directory entries
     async fn readdir(&self, path: &str) -> FuseResult<Vec<FuseDirEntry>>;

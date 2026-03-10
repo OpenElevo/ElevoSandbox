@@ -70,11 +70,7 @@ impl FuseMountMonitor {
         // Remount if the backend is connected
         if let Some(backend) = self.remote_pool.get_backend(workspace_id) {
             if backend.is_connected() {
-                if let Err(e) = self
-                    .fuse_manager
-                    .mount(workspace_id, backend)
-                    .await
-                {
+                if let Err(e) = self.fuse_manager.mount(workspace_id, backend).await {
                     error!(
                         workspace_id = %workspace_id,
                         error = %e,

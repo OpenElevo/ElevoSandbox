@@ -7,7 +7,7 @@ use tonic::{Request, Response, Status};
 use tracing::debug;
 
 use crate::domain::sandbox::{
-    CreateSandboxParams, SandboxState as DomainSandboxState, Sandbox as DomainSandbox,
+    CreateSandboxParams, Sandbox as DomainSandbox, SandboxState as DomainSandboxState,
 };
 use crate::error::Error;
 use crate::proto::{

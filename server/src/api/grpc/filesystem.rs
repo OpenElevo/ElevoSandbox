@@ -756,9 +756,9 @@ impl FileSystemService for FileSystemServiceImpl {
         }
 
         // Read file
-        let data = tokio::fs::read(&file_path).await.map_err(|e| {
-            Status::internal(format!("Failed to read binary: {}", e))
-        })?;
+        let data = tokio::fs::read(&file_path)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to read binary: {}", e)))?;
 
         debug!(
             path = %file_path.display(),
