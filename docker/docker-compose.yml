@@ -23,7 +23,7 @@ services:
       - WORKSPACE_BASE_IMAGE=workspace-base:latest
       - WORKSPACE_AGENT_TIMEOUT=30
       # Agent connection address - use host.docker.internal for cross-container communication
-      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:9090
+      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:${GRPC_PORT:-9090}
       # Extra hosts for sandbox containers to resolve host.docker.internal
       - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
     volumes:

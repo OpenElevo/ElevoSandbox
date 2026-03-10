@@ -38,7 +38,7 @@ services:
 
       # Agent
       - WORKSPACE_AGENT_TIMEOUT=${AGENT_TIMEOUT:-60}
-      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:9090
+      - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:${GRPC_PORT:-9090}
       - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
 
       # Sandbox lifecycle

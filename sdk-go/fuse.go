@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -270,8 +271,14 @@ func NewFuseMount(opts FuseMountOptions) *FuseMount {
 		blockSize = 131072
 	}
 
+	// workspace-fuse binary requires a URL with scheme (e.g. http://host:port)
+	server := opts.Server
+	if !strings.Contains(server, "://") {
+		server = "http://" + server
+	}
+
 	return &FuseMount{
-		server:        opts.Server,
+		server:        server,
 		workspaceID:   opts.WorkspaceID,
 		token:         opts.Token,
 		mountPoint:    opts.MountPoint,
@@ -355,15 +362,32 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		args = append(args, "--debug")
 	}
 
-	// Start the FUSE process
+	// Place a sentinel file in the mount point directory. When the FUSE
+	// filesystem mounts over the directory, the sentinel disappears — this
+	// is a reliable signal that the mount is active.
+	sentinelPath := filepath.Join(m.mountPoint, ".fuse_mount_sentinel")
+	if err := os.WriteFile(sentinelPath, []byte("pending"), 0644); err != nil {
+		m.cleanup()
+		return "", fmt.Errorf("failed to create mount sentinel: %w", err)
+	}
+
+	// Start the FUSE process, capturing stderr for error reporting
 	m.cmd = exec.Command(m.binaryPath, args...)
 	m.cmd.Stdout = nil
-	m.cmd.Stderr = nil
+	var stderrBuf strings.Builder
+	m.cmd.Stderr = &stderrBuf
 
 	if err := m.cmd.Start(); err != nil {
+		os.Remove(sentinelPath)
 		m.cleanup()
 		return "", fmt.Errorf("failed to start workspace-fuse: %w", err)
 	}
+
+	// Monitor process exit in background so we can detect early failures
+	procDone := make(chan error, 1)
+	go func() {
+		procDone <- m.cmd.Wait()
+	}()
 
 	// Wait for mount to be ready
 	timeout := 30 * time.Second
@@ -373,14 +397,20 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 
 	startTime := time.Now()
 	for time.Since(startTime) < timeout {
-		// Check if process died
-		if m.cmd.ProcessState != nil {
+		// Check if process died early
+		select {
+		case err := <-procDone:
 			m.cleanup()
-			return "", fmt.Errorf("workspace-fuse exited unexpectedly")
+			errMsg := strings.TrimSpace(stderrBuf.String())
+			if errMsg != "" {
+				return "", fmt.Errorf("workspace-fuse exited: %s", errMsg)
+			}
+			return "", fmt.Errorf("workspace-fuse exited unexpectedly: %v", err)
+		default:
 		}
 
-		// Check if mount is ready
-		if _, err := os.ReadDir(m.mountPoint); err == nil {
+		// Sentinel gone = FUSE filesystem has mounted over the directory
+		if _, err := os.Stat(sentinelPath); os.IsNotExist(err) {
 			m.mounted = true
 			return m.mountPoint, nil
 		}
@@ -393,8 +423,13 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Timeout
+	// Timeout — clean up sentinel and report
+	os.Remove(sentinelPath)
 	m.cleanup()
+	errMsg := strings.TrimSpace(stderrBuf.String())
+	if errMsg != "" {
+		return "", fmt.Errorf("timeout waiting for mount: %s", errMsg)
+	}
 	return "", fmt.Errorf("timeout waiting for mount to be ready")
 }
 
