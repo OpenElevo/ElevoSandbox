@@ -24,7 +24,7 @@ pub struct Config {
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 
-    /// Database URL (SQLite)
+    /// Database URL (PostgreSQL)
     #[serde(default = "default_database_url")]
     pub database_url: String,
 
@@ -225,7 +225,7 @@ fn default_grpc_port() -> u16 {
 }
 
 fn default_database_url() -> String {
-    "sqlite:data/workspace.db?mode=rwc".to_string()
+    "postgres://elevo:elevo@localhost:5432/elevo".to_string()
 }
 
 fn default_docker_socket() -> String {
