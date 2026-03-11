@@ -1,17 +1,41 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: elevo-postgres
+    environment:
+      POSTGRES_USER: elevo
+      POSTGRES_PASSWORD: elevo
+      POSTGRES_DB: elevo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - workspace-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U elevo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   workspace-server:
     build:
       context: ..
       dockerfile: docker/Dockerfile.server
     container_name: workspace-server
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "8080:8080"  # HTTP API
       - "9090:9090"  # gRPC for agents
     environment:
       - RUST_LOG=info,workspace_server=debug
-      - WORKSPACE_DATABASE_URL=sqlite:/data/workspace.db?mode=rwc
+      - WORKSPACE_DATABASE_URL=postgres://elevo:elevo@postgres:5432/elevo
       - WORKSPACE_DOCKER_SOCKET=/var/run/docker.sock
       # Path inside the server container where workspaces are stored
       - WORKSPACE_WORKSPACE_DIR=/data/workspaces
@@ -29,7 +53,7 @@ services:
     volumes:
       # Mount Docker socket to control host's Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock
-      # Persistent data (database, etc.)
+      # Persistent data
       - workspace-data:/data
       # Workspace directories - MUST be a bind mount to a host path
       # so that sandbox containers can also mount from the same host path
@@ -48,6 +72,8 @@ services:
 
 volumes:
   workspace-data:
+    driver: local
+  pg_data:
     driver: local
 
 networks:
