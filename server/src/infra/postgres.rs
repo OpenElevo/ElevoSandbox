@@ -1,9 +1,9 @@
-//! SQLite database layer
+//! PostgreSQL database layer
 
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use sqlx::{sqlite::SqlitePoolOptions, FromRow, SqlitePool};
+use sqlx::{postgres::PgPoolOptions, FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
@@ -12,18 +12,18 @@ use crate::error::{Error, Result};
 /// Database row for sandbox
 #[derive(Debug, FromRow)]
 struct SandboxRow {
-    id: String,
-    workspace_id: Option<String>,
+    id: uuid::Uuid,
+    workspace_id: Option<uuid::Uuid>,
     name: Option<String>,
     template: String,
     state: String,
     container_id: Option<String>,
-    env: String,
-    metadata: String,
+    env: serde_json::Value,
+    metadata: serde_json::Value,
     timeout: i64,
     error_message: Option<String>,
-    created_at: String,
-    updated_at: String,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl TryFrom<SandboxRow> for Sandbox {
@@ -33,25 +33,19 @@ impl TryFrom<SandboxRow> for Sandbox {
         let state = SandboxState::from_str(&row.state)
             .ok_or_else(|| Error::Internal(format!("Invalid sandbox state: {}", row.state)))?;
 
-        let env: HashMap<String, String> = serde_json::from_str(&row.env)
+        let env: HashMap<String, String> = serde_json::from_value(row.env)
             .map_err(|e| Error::Internal(format!("Failed to parse env: {}", e)))?;
 
-        let metadata: HashMap<String, String> = serde_json::from_str(&row.metadata)
+        let metadata: HashMap<String, String> = serde_json::from_value(row.metadata)
             .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
 
-        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
-            .map_err(|e| Error::Internal(format!("Failed to parse created_at: {}", e)))?
-            .with_timezone(&Utc);
-
-        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
-            .map_err(|e| Error::Internal(format!("Failed to parse updated_at: {}", e)))?
-            .with_timezone(&Utc);
-
-        // workspace_id is required for new sandboxes, but may be empty for legacy data
-        let workspace_id = row.workspace_id.unwrap_or_default();
+        let workspace_id = row
+            .workspace_id
+            .map(|id| id.to_string())
+            .unwrap_or_default();
 
         Ok(Sandbox {
-            id: row.id,
+            id: row.id.to_string(),
             workspace_id,
             name: row.name,
             template: row.template,
@@ -59,8 +53,8 @@ impl TryFrom<SandboxRow> for Sandbox {
             container_id: row.container_id,
             env,
             metadata,
-            created_at,
-            updated_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
             timeout: row.timeout as u64,
             error_message: row.error_message,
         })
@@ -69,34 +63,20 @@ impl TryFrom<SandboxRow> for Sandbox {
 
 /// Sandbox repository for database operations
 pub struct SandboxRepository {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl SandboxRepository {
     /// Create a new repository with the given pool
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     /// Initialize the database connection pool
-    pub async fn init(database_url: &str) -> anyhow::Result<SqlitePool> {
-        // Ensure parent directory exists
-        if let Some(path) = database_url.strip_prefix("sqlite:") {
-            if let Some(path) = path.split('?').next() {
-                if let Some(parent) = std::path::Path::new(path).parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-            }
-        }
-
-        let pool = SqlitePoolOptions::new()
+    pub async fn init(database_url: &str) -> anyhow::Result<PgPool> {
+        let pool = PgPoolOptions::new()
             .max_connections(10)
             .connect(database_url)
-            .await?;
-
-        // Enable WAL mode for better concurrent performance
-        sqlx::query("PRAGMA journal_mode = WAL")
-            .execute(&pool)
             .await?;
 
         // Run migrations
@@ -106,53 +86,58 @@ impl SandboxRepository {
     }
 
     /// Get the pool reference
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &PgPool {
         &self.pool
     }
 
     /// Create a new sandbox
     pub async fn create(&self, params: CreateSandboxParams) -> Result<Sandbox> {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4();
         let now = Utc::now();
         let template = params.template.unwrap_or_else(|| "default".to_string());
-        let env = serde_json::to_string(&params.env.unwrap_or_default())
+        let env = serde_json::to_value(&params.env.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let metadata = serde_json::to_string(&params.metadata.unwrap_or_default())
+        let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
         let timeout = params.timeout.unwrap_or(0) as i64;
+        let workspace_id = Uuid::parse_str(&params.workspace_id)
+            .map_err(|e| Error::Internal(format!("Invalid workspace_id: {}", e)))?;
 
         sqlx::query(
             r#"
             INSERT INTO sandboxes (id, workspace_id, name, template, state, env, metadata, timeout, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
-        .bind(&id)
-        .bind(&params.workspace_id)
+        .bind(id)
+        .bind(workspace_id)
         .bind(&params.name)
         .bind(&template)
         .bind(SandboxState::Starting.as_str())
         .bind(&env)
         .bind(&metadata)
         .bind(timeout)
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
+        .bind(now)
+        .bind(now)
         .execute(&self.pool)
         .await?;
 
-        self.get(&id).await
+        self.get(&id.to_string()).await
     }
 
     /// Get a sandbox by ID
     pub async fn get(&self, id: &str) -> Result<Sandbox> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
+
         let row: SandboxRow = sqlx::query_as(
             r#"
             SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
-            WHERE id = ?
+            WHERE id = $1
             "#,
         )
-        .bind(id)
+        .bind(uuid)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| Error::SandboxNotFound(id.to_string()))?;
@@ -168,7 +153,7 @@ impl SandboxRepository {
                     r#"
                     SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
                     FROM sandboxes
-                    WHERE state = ?
+                    WHERE state = $1
                     ORDER BY created_at DESC
                     "#,
                 )
@@ -199,19 +184,21 @@ impl SandboxRepository {
         state: SandboxState,
         error_message: Option<&str>,
     ) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
         let now = Utc::now();
 
         let result = sqlx::query(
             r#"
             UPDATE sandboxes
-            SET state = ?, error_message = ?, updated_at = ?
-            WHERE id = ?
+            SET state = $1, error_message = $2, updated_at = $3
+            WHERE id = $4
             "#,
         )
         .bind(state.as_str())
         .bind(error_message)
-        .bind(now.to_rfc3339())
-        .bind(id)
+        .bind(now)
+        .bind(uuid)
         .execute(&self.pool)
         .await?;
 
@@ -224,18 +211,20 @@ impl SandboxRepository {
 
     /// Update sandbox container ID
     pub async fn update_container_id(&self, id: &str, container_id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
         let now = Utc::now();
 
         let result = sqlx::query(
             r#"
             UPDATE sandboxes
-            SET container_id = ?, updated_at = ?
-            WHERE id = ?
+            SET container_id = $1, updated_at = $2
+            WHERE id = $3
             "#,
         )
         .bind(container_id)
-        .bind(now.to_rfc3339())
-        .bind(id)
+        .bind(now)
+        .bind(uuid)
         .execute(&self.pool)
         .await?;
 
@@ -248,8 +237,11 @@ impl SandboxRepository {
 
     /// Delete a sandbox
     pub async fn delete(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM sandboxes WHERE id = ?")
-            .bind(id)
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
+
+        let result = sqlx::query("DELETE FROM sandboxes WHERE id = $1")
+            .bind(uuid)
             .execute(&self.pool)
             .await?;
 
@@ -264,7 +256,7 @@ impl SandboxRepository {
     pub async fn count_by_state(&self, state: SandboxState) -> Result<i64> {
         let (count,): (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM sandboxes WHERE state = ?
+            SELECT COUNT(*) FROM sandboxes WHERE state = $1
             "#,
         )
         .bind(state.as_str())
@@ -276,18 +268,15 @@ impl SandboxRepository {
 
     /// Get sandboxes that have exceeded their timeout
     pub async fn get_expired_sandboxes(&self) -> Result<Vec<Sandbox>> {
-        let now = Utc::now();
-
         let rows: Vec<SandboxRow> = sqlx::query_as(
             r#"
             SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
             WHERE state = 'running'
               AND timeout > 0
-              AND datetime(created_at, '+' || timeout || ' seconds') < datetime(?)
+              AND created_at + (timeout * interval '1 second') < now()
             "#,
         )
-        .bind(now.to_rfc3339())
         .fetch_all(&self.pool)
         .await?;
 
@@ -296,15 +285,18 @@ impl SandboxRepository {
 
     /// List sandboxes by workspace ID
     pub async fn list_by_workspace(&self, workspace_id: &str) -> Result<Vec<Sandbox>> {
+        let uuid = Uuid::parse_str(workspace_id)
+            .map_err(|e| Error::Internal(format!("Invalid workspace_id: {}", e)))?;
+
         let rows: Vec<SandboxRow> = sqlx::query_as(
             r#"
             SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
-            WHERE workspace_id = ?
+            WHERE workspace_id = $1
             ORDER BY created_at DESC
             "#,
         )
-        .bind(workspace_id)
+        .bind(uuid)
         .fetch_all(&self.pool)
         .await?;
 
@@ -316,41 +308,25 @@ impl SandboxRepository {
 mod tests {
     use super::*;
 
-    async fn create_test_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("Failed to create test pool");
-
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
-
-        pool
-    }
-
     // Helper to create a test workspace
-    async fn create_test_workspace(pool: &SqlitePool) -> String {
-        let workspace_id = Uuid::new_v4().to_string();
+    async fn create_test_workspace(pool: &PgPool) -> String {
+        let workspace_id = Uuid::new_v4();
         let now = Utc::now();
         sqlx::query(
-            r#"INSERT INTO workspaces (id, name, metadata, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)"#,
+            r#"INSERT INTO workspaces (id, name, metadata, created_at, updated_at) VALUES ($1, $2, '{}', $3, $4)"#,
         )
-        .bind(&workspace_id)
+        .bind(workspace_id)
         .bind("test-workspace")
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
+        .bind(now)
+        .bind(now)
         .execute(pool)
         .await
         .expect("Failed to create test workspace");
-        workspace_id
+        workspace_id.to_string()
     }
 
-    #[tokio::test]
-    async fn test_create_and_get_sandbox() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_create_and_get_sandbox(pool: PgPool) {
         let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
@@ -375,9 +351,8 @@ mod tests {
         assert_eq!(fetched.name, sandbox.name);
     }
 
-    #[tokio::test]
-    async fn test_update_state() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_update_state(pool: PgPool) {
         let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
@@ -400,9 +375,8 @@ mod tests {
         assert_eq!(fetched.state, SandboxState::Running);
     }
 
-    #[tokio::test]
-    async fn test_list_sandboxes() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_list_sandboxes(pool: PgPool) {
         let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 
@@ -455,9 +429,8 @@ mod tests {
         assert_eq!(running.len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_delete_sandbox() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_delete_sandbox(pool: PgPool) {
         let workspace_id = create_test_workspace(&pool).await;
         let repo = SandboxRepository::new(pool);
 

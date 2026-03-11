@@ -5,6 +5,6 @@ pub mod docker;
 pub mod fuse;
 pub mod metrics;
 pub mod nfs;
-pub mod sqlite;
+pub mod postgres;
 pub mod storage;
 pub mod workspace_repository;
