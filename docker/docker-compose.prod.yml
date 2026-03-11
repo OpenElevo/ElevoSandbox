@@ -9,10 +9,45 @@
 #   curl http://localhost:8080/api/v1/health
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: elevo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-elevo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-elevo}
+      POSTGRES_DB: ${POSTGRES_DB:-elevo}
+    volumes:
+      - elevo-pg-data:/var/lib/postgresql/data
+    networks:
+      - elevo-workspace-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-elevo}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+
   workspace-server:
     image: ${ELEVO_IMAGE}:${ELEVO_VERSION:-latest}
     container_name: elevo-workspace-server
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "${HTTP_PORT:-8080}:8080"
       - "${GRPC_PORT:-9090}:9090"
@@ -20,7 +55,7 @@ services:
       - RUST_LOG=${RUST_LOG:-info,workspace_server=info}
 
       # Database
-      - WORKSPACE_DATABASE_URL=sqlite:/data/workspace.db?mode=rwc
+      - WORKSPACE_DATABASE_URL=postgres://${POSTGRES_USER:-elevo}:${POSTGRES_PASSWORD:-elevo}@postgres:5432/${POSTGRES_DB:-elevo}
 
       # Docker
       - WORKSPACE_DOCKER_SOCKET=/var/run/docker.sock
@@ -82,6 +117,8 @@ services:
 
 volumes:
   elevo-workspace-data:
+    driver: local
+  elevo-pg-data:
     driver: local
 
 networks:
