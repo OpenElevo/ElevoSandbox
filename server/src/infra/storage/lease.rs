@@ -1,10 +1,8 @@
 //! Workspace lease-based concurrency control
 //!
-//! Provides single-instance workspace locking via SQLite. When a server instance
+//! Provides single-instance workspace locking via PostgreSQL. When a server instance
 //! acquires a lease on a workspace, no other server instance may modify it until
 //! the lease expires or is released.
-//!
-//! The distributed (PostgreSQL) version is deferred to the HA design doc.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -12,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 use tokio::sync::RwLock;
 use tracing::{debug, warn};
 
@@ -75,39 +73,20 @@ pub enum LeaseError {
     Database(#[from] sqlx::Error),
 }
 
-/// SQLite-based workspace lease manager (single-instance)
-pub struct SqliteLeaseManager {
-    pool: SqlitePool,
+/// PostgreSQL-based workspace lease manager
+pub struct PgLeaseManager {
+    pool: PgPool,
     lease_duration: Duration,
 }
 
-impl SqliteLeaseManager {
-    /// Create a new SQLite lease manager and ensure the table exists.
-    pub async fn new(pool: SqlitePool) -> Result<Self, sqlx::Error> {
-        let manager = Self {
+impl PgLeaseManager {
+    /// Create a new PostgreSQL lease manager.
+    /// Table is created by migration, no runtime DDL needed.
+    pub fn new(pool: PgPool) -> Self {
+        Self {
             pool,
             lease_duration: Duration::from_secs(DEFAULT_LEASE_DURATION_SECS as u64),
-        };
-        manager.create_table().await?;
-        Ok(manager)
-    }
-
-    /// Create the workspace_leases table if it doesn't exist
-    async fn create_table(&self) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS workspace_leases (
-                workspace_id TEXT PRIMARY KEY,
-                holder_id    TEXT NOT NULL,
-                acquired_at  TEXT NOT NULL,
-                expires_at   TEXT NOT NULL,
-                renewed_at   TEXT NOT NULL
-            )
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-        Ok(())
+        }
     }
 
     /// Compute the expiration time from now based on configured lease duration
@@ -117,7 +96,7 @@ impl SqliteLeaseManager {
 }
 
 #[async_trait]
-impl WorkspaceLeaseManager for SqliteLeaseManager {
+impl WorkspaceLeaseManager for PgLeaseManager {
     async fn acquire(
         &self,
         workspace_id: &str,
@@ -125,32 +104,27 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
     ) -> Result<WorkspaceLease, LeaseError> {
         let now = Utc::now();
         let expires_at = self.compute_expires_at();
-        let now_str = now.to_rfc3339();
-        let expires_str = expires_at.to_rfc3339();
 
-        // INSERT-first strategy: attempt to insert, handling conflict atomically.
-        // Uses INSERT OR IGNORE to avoid errors on UNIQUE constraint violation,
-        // then conditionally UPDATE if the row is expired or held by the same holder.
         let mut tx = self.pool.begin().await?;
 
         // Try to insert a new lease (ignored if workspace_id already exists)
         let insert_result = sqlx::query(
             r#"
-            INSERT OR IGNORE INTO workspace_leases
+            INSERT INTO workspace_leases
                 (workspace_id, holder_id, acquired_at, expires_at, renewed_at)
-            VALUES (?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (workspace_id) DO NOTHING
             "#,
         )
         .bind(workspace_id)
         .bind(holder_id)
-        .bind(&now_str)
-        .bind(&expires_str)
-        .bind(&now_str)
+        .bind(now)
+        .bind(expires_at)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
 
         if insert_result.rows_affected() == 1 {
-            // New lease inserted successfully
             tx.commit().await?;
             debug!(
                 "Lease acquired for workspace '{}' by '{}'",
@@ -169,18 +143,18 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         let updated = sqlx::query(
             r#"
             UPDATE workspace_leases
-            SET holder_id = ?, acquired_at = ?, expires_at = ?, renewed_at = ?
-            WHERE workspace_id = ?
-              AND (holder_id = ? OR expires_at < ?)
+            SET holder_id = $1, acquired_at = $2, expires_at = $3, renewed_at = $4
+            WHERE workspace_id = $5
+              AND (holder_id = $6 OR expires_at < $7)
             "#,
         )
         .bind(holder_id)
-        .bind(&now_str)
-        .bind(&expires_str)
-        .bind(&now_str)
+        .bind(now)
+        .bind(expires_at)
+        .bind(now)
         .bind(workspace_id)
         .bind(holder_id)
-        .bind(&now_str)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
 
@@ -199,19 +173,15 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
             });
         }
 
-        // Lease is active and held by another holder — fetch details for error message
-        let (existing_holder, existing_expires_str): (String, String) = sqlx::query_as(
-            "SELECT holder_id, expires_at FROM workspace_leases WHERE workspace_id = ?",
+        // Lease is active and held by another holder
+        let (existing_holder, existing_expires): (String, DateTime<Utc>) = sqlx::query_as(
+            "SELECT holder_id, expires_at FROM workspace_leases WHERE workspace_id = $1",
         )
         .bind(workspace_id)
         .fetch_one(&mut *tx)
         .await?;
 
         tx.commit().await?;
-
-        let existing_expires: DateTime<Utc> = existing_expires_str
-            .parse()
-            .map_err(|e| LeaseError::Database(sqlx::Error::Protocol(format!("{}", e))))?;
 
         Err(LeaseError::AlreadyHeld {
             workspace_id: workspace_id.to_string(),
@@ -229,7 +199,7 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         let expires_at = self.compute_expires_at();
 
         let result = sqlx::query_as::<_, (String,)>(
-            "SELECT holder_id FROM workspace_leases WHERE workspace_id = ?",
+            "SELECT holder_id FROM workspace_leases WHERE workspace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -248,27 +218,22 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
         sqlx::query(
             r#"
             UPDATE workspace_leases
-            SET expires_at = ?, renewed_at = ?
-            WHERE workspace_id = ? AND holder_id = ?
+            SET expires_at = $1, renewed_at = $2
+            WHERE workspace_id = $3 AND holder_id = $4
             "#,
         )
-        .bind(expires_at.to_rfc3339())
-        .bind(now.to_rfc3339())
+        .bind(expires_at)
+        .bind(now)
         .bind(workspace_id)
         .bind(holder_id)
         .execute(&self.pool)
         .await?;
 
-        // Fetch the updated lease
-        let (acquired_str,): (String,) =
-            sqlx::query_as("SELECT acquired_at FROM workspace_leases WHERE workspace_id = ?")
+        let (acquired_at,): (DateTime<Utc>,) =
+            sqlx::query_as("SELECT acquired_at FROM workspace_leases WHERE workspace_id = $1")
                 .bind(workspace_id)
                 .fetch_one(&self.pool)
                 .await?;
-
-        let acquired_at: DateTime<Utc> = acquired_str
-            .parse()
-            .map_err(|e| LeaseError::Database(sqlx::Error::Protocol(format!("{}", e))))?;
 
         Ok(WorkspaceLease {
             workspace_id: workspace_id.to_string(),
@@ -281,7 +246,7 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
 
     async fn release(&self, workspace_id: &str, holder_id: &str) -> Result<(), LeaseError> {
         let result = sqlx::query_as::<_, (String,)>(
-            "SELECT holder_id FROM workspace_leases WHERE workspace_id = ?",
+            "SELECT holder_id FROM workspace_leases WHERE workspace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -297,7 +262,7 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
             });
         }
 
-        sqlx::query("DELETE FROM workspace_leases WHERE workspace_id = ? AND holder_id = ?")
+        sqlx::query("DELETE FROM workspace_leases WHERE workspace_id = $1 AND holder_id = $2")
             .bind(workspace_id)
             .bind(holder_id)
             .execute(&self.pool)
@@ -312,26 +277,16 @@ impl WorkspaceLeaseManager for SqliteLeaseManager {
     }
 
     async fn check(&self, workspace_id: &str) -> Result<Option<WorkspaceLease>, LeaseError> {
-        let row = sqlx::query_as::<_, (String, String, String, String)>(
-            "SELECT holder_id, acquired_at, expires_at, renewed_at FROM workspace_leases WHERE workspace_id = ?",
+        let row = sqlx::query_as::<_, (String, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>)>(
+            "SELECT holder_id, acquired_at, expires_at, renewed_at FROM workspace_leases WHERE workspace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
         .await?;
 
-        let Some((holder_id, acquired_str, expires_str, renewed_str)) = row else {
+        let Some((holder_id, acquired_at, expires_at, renewed_at)) = row else {
             return Ok(None);
         };
-
-        let acquired_at: DateTime<Utc> = acquired_str
-            .parse()
-            .map_err(|e| LeaseError::Database(sqlx::Error::Protocol(format!("{}", e))))?;
-        let expires_at: DateTime<Utc> = expires_str
-            .parse()
-            .map_err(|e| LeaseError::Database(sqlx::Error::Protocol(format!("{}", e))))?;
-        let renewed_at: DateTime<Utc> = renewed_str
-            .parse()
-            .map_err(|e| LeaseError::Database(sqlx::Error::Protocol(format!("{}", e))))?;
 
         // Check if expired
         if expires_at < Utc::now() {
@@ -413,86 +368,65 @@ impl LeaseRenewalTask {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
-
-    async fn create_pool() -> SqlitePool {
-        SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .unwrap()
-    }
 
     /// Helper: manually expire a lease by setting expires_at to past time
-    async fn expire_lease(pool: &SqlitePool, workspace_id: &str) {
-        let past = (Utc::now() - chrono::Duration::seconds(10)).to_rfc3339();
-        sqlx::query("UPDATE workspace_leases SET expires_at = ? WHERE workspace_id = ?")
-            .bind(&past)
+    async fn expire_lease(pool: &PgPool, workspace_id: &str) {
+        let past = Utc::now() - chrono::Duration::seconds(10);
+        sqlx::query("UPDATE workspace_leases SET expires_at = $1 WHERE workspace_id = $2")
+            .bind(past)
             .bind(workspace_id)
             .execute(pool)
             .await
             .unwrap();
     }
 
-    #[tokio::test]
-    async fn test_acquire_and_check() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_acquire_and_check(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
-        // Acquire lease
         let lease = mgr.acquire("ws1", "server-1").await.unwrap();
         assert_eq!(lease.workspace_id, "ws1");
         assert_eq!(lease.holder_id, "server-1");
 
-        // Check should return it
         let checked = mgr.check("ws1").await.unwrap();
         assert!(checked.is_some());
         assert_eq!(checked.unwrap().holder_id, "server-1");
     }
 
-    #[tokio::test]
-    async fn test_acquire_already_held() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_acquire_already_held(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
 
-        // Another holder should fail
         let err = mgr.acquire("ws1", "server-2").await.unwrap_err();
         assert!(matches!(err, LeaseError::AlreadyHeld { .. }));
     }
 
-    #[tokio::test]
-    async fn test_acquire_same_holder_re_acquire() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_acquire_same_holder_re_acquire(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
 
-        // Same holder should succeed (re-acquire)
         let lease = mgr.acquire("ws1", "server-1").await.unwrap();
         assert_eq!(lease.holder_id, "server-1");
     }
 
-    #[tokio::test]
-    async fn test_acquire_expired_lease() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool.clone()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_acquire_expired_lease(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool.clone());
 
         mgr.acquire("ws1", "server-1").await.unwrap();
-
-        // Manually expire the lease
         expire_lease(&pool, "ws1").await;
 
-        // Another holder should now be able to acquire
         let lease = mgr.acquire("ws1", "server-2").await.unwrap();
         assert_eq!(lease.holder_id, "server-2");
     }
 
-    #[tokio::test]
-    async fn test_renew() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_renew(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
 
@@ -501,10 +435,9 @@ mod tests {
         assert!(renewed.expires_at > Utc::now());
     }
 
-    #[tokio::test]
-    async fn test_renew_wrong_holder() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_renew_wrong_holder(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
 
@@ -512,23 +445,20 @@ mod tests {
         assert!(matches!(err, LeaseError::HolderMismatch { .. }));
     }
 
-    #[tokio::test]
-    async fn test_release() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_release(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
         mgr.release("ws1", "server-1").await.unwrap();
 
-        // Check should return None
         let checked = mgr.check("ws1").await.unwrap();
         assert!(checked.is_none());
     }
 
-    #[tokio::test]
-    async fn test_release_wrong_holder() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_release_wrong_holder(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         mgr.acquire("ws1", "server-1").await.unwrap();
 
@@ -536,23 +466,19 @@ mod tests {
         assert!(matches!(err, LeaseError::HolderMismatch { .. }));
     }
 
-    #[tokio::test]
-    async fn test_check_nonexistent() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_check_nonexistent(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool);
 
         let checked = mgr.check("ws_not_exist").await.unwrap();
         assert!(checked.is_none());
     }
 
-    #[tokio::test]
-    async fn test_check_expired_returns_none() {
-        let pool = create_pool().await;
-        let mgr = SqliteLeaseManager::new(pool.clone()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_check_expired_returns_none(pool: PgPool) {
+        let mgr = PgLeaseManager::new(pool.clone());
 
         mgr.acquire("ws1", "server-1").await.unwrap();
-
-        // Manually expire the lease
         expire_lease(&pool, "ws1").await;
 
         let checked = mgr.check("ws1").await.unwrap();
