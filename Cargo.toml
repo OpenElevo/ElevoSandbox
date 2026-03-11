@@ -61,6 +61,13 @@ async-trait = "0.1"
 bytes = "1.9"
 dashmap = "6.1"
 
+# Auth & Security
+jsonwebtoken = "9"
+tower_governor = "0.4"
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+
 # PTY (for agent)
 portable-pty = "0.8"
 
