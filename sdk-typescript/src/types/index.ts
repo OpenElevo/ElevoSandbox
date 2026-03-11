@@ -18,6 +18,10 @@ export interface Workspace {
   createdAt: string;
   /** Last update timestamp */
   updatedAt: string;
+  /** Storage type: "managed" or "remote" */
+  storageType: StorageType;
+  /** Storage configuration (JSON string, meaningful for remote workspaces) */
+  storageConfig?: string;
 }
 
 /**
@@ -28,12 +32,14 @@ export interface CreateWorkspaceParams {
   name?: string;
   /** Custom metadata */
   metadata?: Record<string, string>;
+  /** Storage type: "managed" (default) or "remote" (Client-provided storage) */
+  storageType?: StorageType;
 }
 
 /**
  * Sandbox state
  */
-export type SandboxState = 'starting' | 'running' | 'stopping' | 'stopped' | 'error';
+export type SandboxState = 'unknown' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed';
 
 /**
  * Sandbox resource
@@ -59,7 +65,7 @@ export interface Sandbox {
   updatedAt: string;
   /** Timeout in seconds */
   timeout?: number;
-  /** Error message if state is error */
+  /** Error message if state is failed */
   errorMessage?: string;
 }
 
@@ -150,6 +156,31 @@ export interface PtyHandle {
   onData(callback: (data: Uint8Array) => void): void;
   /** Event handler for close */
   onClose(callback: () => void): void;
+}
+
+/**
+ * Storage type for workspace storage
+ */
+export type StorageType = 'managed' | 'remote';
+
+/**
+ * Configuration for StorageProvider
+ */
+export interface StorageProviderConfig {
+  /** Local directory to share */
+  localDir: string;
+  /** Workspace ID to share with */
+  workspaceId: string;
+  /** Authentication token */
+  token: string;
+  /** Max concurrent operation workers (default: 64) */
+  workerPoolSize?: number;
+  /** Response buffer size (default: 256) */
+  responseBufferSize?: number;
+  /** Max concurrent data stream transfers (default: 8) */
+  maxConcurrentDataStreams?: number;
+  /** Operation timeout in milliseconds (default: 10000) */
+  operationTimeoutMs?: number;
 }
 
 /**

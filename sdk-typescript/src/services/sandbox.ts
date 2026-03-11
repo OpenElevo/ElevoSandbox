@@ -5,15 +5,26 @@
 import * as grpc from '@grpc/grpc-js';
 import { Sandbox, CreateSandboxParams, SandboxState } from '../types';
 import { SandboxServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError } from '../errors';
+import { convertGrpcError, isNotFound, WorkspaceError } from '../errors';
 
 // Proto SandboxState enum values
 const SANDBOX_STATE_MAP: Record<string, SandboxState> = {
+  'SANDBOX_STATE_UNSPECIFIED': 'unknown',
   'SANDBOX_STATE_STARTING': 'starting',
   'SANDBOX_STATE_RUNNING': 'running',
   'SANDBOX_STATE_STOPPING': 'stopping',
   'SANDBOX_STATE_STOPPED': 'stopped',
-  'SANDBOX_STATE_ERROR': 'error',
+  'SANDBOX_STATE_ERROR': 'failed',
+};
+
+// SDK SandboxState to proto enum string
+const SANDBOX_STATE_TO_PROTO: Record<SandboxState, string> = {
+  'unknown': 'SANDBOX_STATE_UNSPECIFIED',
+  'starting': 'SANDBOX_STATE_STARTING',
+  'running': 'SANDBOX_STATE_RUNNING',
+  'stopping': 'SANDBOX_STATE_STOPPING',
+  'stopped': 'SANDBOX_STATE_STOPPED',
+  'failed': 'SANDBOX_STATE_ERROR',
 };
 
 /**
@@ -106,6 +117,24 @@ export class SandboxService {
   }
 
   /**
+   * List sandboxes filtered by state
+   */
+  async listWithFilter(state: SandboxState): Promise<Sandbox[]> {
+    try {
+      const protoState = SANDBOX_STATE_TO_PROTO[state];
+      const response = await promisifyUnary(
+        this.client,
+        this.client.listSandboxes,
+        { state: protoState },
+        this.metadata()
+      );
+      return (response.sandboxes || []).map((s: any) => this.transformSandbox(s));
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
+  }
+
+  /**
    * Check if a sandbox exists
    */
   async exists(id: string): Promise<boolean> {
@@ -113,12 +142,55 @@ export class SandboxService {
       await this.get(id);
       return true;
     } catch (error) {
-      if ((error as any).code === 'NOT_FOUND') {
+      if (isNotFound(error)) {
         return false;
       }
       throw error;
     }
   }
+
+  /**
+   * Wait for a sandbox to reach a specific state.
+   * Polls at 100ms intervals. Use AbortSignal for timeout control.
+   */
+  async waitForState(
+    id: string,
+    targetState: SandboxState,
+    signal?: AbortSignal
+  ): Promise<Sandbox> {
+    const POLL_INTERVAL_MS = 100;
+
+    while (true) {
+      if (signal?.aborted) {
+        throw new WorkspaceError('Operation cancelled', 499);
+      }
+
+      const sandbox = await this.get(id);
+
+      if (sandbox.state === targetState) {
+        return sandbox;
+      }
+
+      if (sandbox.state === 'failed') {
+        throw new WorkspaceError(
+          `Sandbox failed: ${sandbox.errorMessage || 'unknown error'}`,
+          500
+        );
+      }
+
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, POLL_INTERVAL_MS);
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            reject(new WorkspaceError('Operation cancelled', 499));
+          }, { once: true });
+        }
+      });
+    }
+  }
+
+  // ==================== Transform Helpers ====================
 
   /**
    * Transform proto Sandbox to SDK Sandbox type
@@ -144,11 +216,11 @@ export class SandboxService {
    */
   private transformState(state: string | number): SandboxState {
     if (typeof state === 'string') {
-      return SANDBOX_STATE_MAP[state] || 'starting';
+      return SANDBOX_STATE_MAP[state] || 'unknown';
     }
     // Handle numeric enum values (proto3 enum: 0=UNSPECIFIED, 1=STARTING, 2=RUNNING, etc.)
-    const stateNames = ['starting', 'starting', 'running', 'stopping', 'stopped', 'error'];
-    return (stateNames[state] as SandboxState) || 'starting';
+    const stateNames: SandboxState[] = ['unknown', 'starting', 'running', 'stopping', 'stopped', 'failed'];
+    return stateNames[state] || 'unknown';
   }
 
   /**

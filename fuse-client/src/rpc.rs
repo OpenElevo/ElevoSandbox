@@ -36,7 +36,13 @@ impl FileSystemRpcClient {
     ) -> Result<Self, tonic::transport::Error> {
         let endpoint = Endpoint::from_shared(server.to_string())?
             .connect_timeout(Duration::from_secs(10))
-            .timeout(Duration::from_secs(60));
+            .timeout(Duration::from_secs(60))
+            .initial_stream_window_size(4 * 1024 * 1024) // 4MB per stream
+            .initial_connection_window_size(16 * 1024 * 1024) // 16MB connection
+            .http2_keep_alive_interval(Duration::from_secs(10))
+            .keep_alive_timeout(Duration::from_secs(5))
+            .keep_alive_while_idle(true)
+            .tcp_nodelay(true);
 
         let channel = endpoint.connect().await?;
         let client = FileSystemServiceClient::new(channel);

@@ -352,6 +352,12 @@ export class FuseMount {
       fs.mkdirSync(this._mountPoint, { recursive: true });
     }
 
+    // Place a sentinel file in the mount point directory. When the FUSE
+    // filesystem mounts over the directory, the sentinel disappears — this
+    // is a reliable signal that the mount is active (matches Go SDK).
+    const sentinelPath = path.join(this._mountPoint, '.fuse_mount_sentinel');
+    fs.writeFileSync(sentinelPath, 'pending');
+
     // Build command arguments
     const args = [
       'mount',
@@ -379,38 +385,62 @@ export class FuseMount {
       args.push('--debug');
     }
 
+    // Collect stderr for error reporting
+    let stderrData = '';
+
     // Start the FUSE process
     try {
       this._process = spawn(this._binaryPath, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (e: any) {
+      try { fs.unlinkSync(sentinelPath); } catch {}
       this._cleanup();
       throw new Error(`Failed to start workspace-fuse: ${e.message}`);
     }
 
-    // Wait for mount to be ready
+    // Collect stderr asynchronously for error reporting
+    this._process.stderr?.on('data', (chunk: Buffer) => {
+      stderrData += chunk.toString();
+    });
+
+    // Wait for mount to be ready: sentinel file disappears when FUSE overlays the directory.
+    // IMPORTANT: Use async fs.promises.access instead of synchronous fs.existsSync.
+    // When the StorageProvider runs in the same Node.js process, a synchronous stat on the
+    // FUSE mount would deadlock: the stat blocks the event loop, but the FUSE operation
+    // needs the StorageProvider (same event loop) to respond. Async operations use libuv
+    // worker threads, keeping the main event loop free for gRPC message processing.
     const startTime = Date.now();
     while (Date.now() - startTime < timeout) {
       // Check if process died
       if (this._process.exitCode !== null) {
-        const stderr = await this._readStream(this._process.stderr);
+        try { fs.unlinkSync(sentinelPath); } catch {}
         this._cleanup();
-        throw new Error(`workspace-fuse exited unexpectedly: ${stderr}`);
+        throw new Error(`workspace-fuse exited unexpectedly: ${stderrData.trim()}`);
       }
 
-      // Check if mount is ready
+      // Sentinel gone = FUSE filesystem has mounted over the directory
+      let sentinelExists = true;
       try {
-        fs.readdirSync(this._mountPoint);
+        await fs.promises.access(sentinelPath);
+      } catch {
+        sentinelExists = false;
+      }
+      if (!sentinelExists) {
         this._mounted = true;
         return this._mountPoint;
-      } catch {
-        await this._sleep(100);
       }
+
+      await this._sleep(100);
     }
 
-    // Timeout
+    // Timeout — clean up sentinel and report
+    try { fs.unlinkSync(sentinelPath); } catch {}
     this._cleanup();
+    const errMsg = stderrData.trim();
+    if (errMsg) {
+      throw new Error(`Timeout waiting for mount: ${errMsg}`);
+    }
     throw new Error(`Timeout waiting for mount to be ready after ${timeout}ms`);
   }
 

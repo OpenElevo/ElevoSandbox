@@ -373,6 +373,17 @@ async fn main() -> anyhow::Result<()> {
 
     let client_storage_grpc_server = ClientStorageServiceServer::new(client_storage_service);
 
+    // Configure tonic server with larger HTTP/2 flow control windows.
+    // Default 65KB windows cause stalls for bidirectional streams and
+    // FUSE file-system RPCs (read_at responses exceed the window).
+    let mut server_builder = Server::builder()
+        .initial_stream_window_size(4 * 1024 * 1024) // 4MB per stream
+        .initial_connection_window_size(16 * 1024 * 1024) // 16MB connection
+        .tcp_nodelay(true)
+        .tcp_keepalive(Some(std::time::Duration::from_secs(60)))
+        .http2_keepalive_interval(Some(std::time::Duration::from_secs(10)))
+        .http2_keepalive_timeout(Some(std::time::Duration::from_secs(5)));
+
     let grpc_router = if config.fs_api_enabled {
         let fs_service =
             FileSystemServiceImpl::new(storage_router.clone() as Arc<dyn StorageBackend>);
@@ -381,7 +392,7 @@ async fn main() -> anyhow::Result<()> {
             let auth_interceptor = AuthInterceptor::new(token.clone());
             let fs_grpc_server =
                 FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
-            Server::builder()
+            server_builder
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
                 .add_service(client_storage_grpc_server)
@@ -392,7 +403,7 @@ async fn main() -> anyhow::Result<()> {
         } else {
             info!("FileSystemService enabled without authentication");
             let fs_grpc_server = FileSystemServiceServer::new(fs_service);
-            Server::builder()
+            server_builder
                 .add_service(agent_grpc_server)
                 .add_service(fs_grpc_server)
                 .add_service(client_storage_grpc_server)
@@ -403,7 +414,7 @@ async fn main() -> anyhow::Result<()> {
         }
     } else {
         info!("FileSystemService disabled");
-        Server::builder()
+        server_builder
             .add_service(agent_grpc_server)
             .add_service(client_storage_grpc_server)
             .add_service(WorkspaceServiceServer::new(workspace_grpc))

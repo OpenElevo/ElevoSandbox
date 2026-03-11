@@ -8,6 +8,9 @@ import { WorkspaceService } from './services/workspace';
 import { SandboxService } from './services/sandbox';
 import { ProcessService } from './services/process';
 import { PtyService } from './services/pty';
+import { FileSystemService } from './services/filesystem';
+import { StorageProvider } from './services/storage-provider';
+import { StorageProviderConfig } from './types';
 
 /**
  * Client options
@@ -31,6 +34,8 @@ export class WorkspaceClient {
   public readonly process: ProcessService;
   /** PTY terminal service */
   public readonly pty: PtyService;
+  /** Low-level filesystem service (FUSE support) */
+  public readonly fs: FileSystemService;
 
   private readonly clients: ReturnType<typeof createClients>;
 
@@ -48,6 +53,17 @@ export class WorkspaceClient {
     this.sandbox = new SandboxService(this.clients.sandbox, options.apiKey);
     this.process = new ProcessService(this.clients.process, options.apiKey);
     this.pty = new PtyService(this.clients.pty, options.apiKey);
+    this.fs = new FileSystemService(this.clients.fileSystem, options.apiKey);
+  }
+
+  /**
+   * Create a new StorageProvider to share a local directory with a workspace.
+   *
+   * @param config - Storage provider configuration
+   * @returns A StorageProvider instance (call .share() to start)
+   */
+  newStorageProvider(config: StorageProviderConfig): StorageProvider {
+    return new StorageProvider(this.clients.clientStorage, config);
   }
 
   /**
@@ -58,6 +74,8 @@ export class WorkspaceClient {
     this.clients.sandbox.close();
     this.clients.process.close();
     this.clients.pty.close();
+    this.clients.clientStorage.close();
+    this.clients.fileSystem.close();
   }
 }
 

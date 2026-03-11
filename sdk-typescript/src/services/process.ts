@@ -5,7 +5,7 @@
 import * as grpc from '@grpc/grpc-js';
 import { CommandResult, RunCommandOptions, ProcessEvent } from '../types';
 import { ProcessServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError } from '../errors';
+import { convertGrpcError, ProcessError } from '../errors';
 
 /**
  * Service for executing commands in sandboxes
@@ -195,6 +195,38 @@ export class ProcessService {
     } catch (error) {
       throw convertGrpcError(error as grpc.ServiceError);
     }
+  }
+
+  /**
+   * Convenience method: run a command and return stdout.
+   * Throws ProcessError if the exit code is non-zero.
+   */
+  async exec(sandboxId: string, command: string, ...args: string[]): Promise<string> {
+    const result = await this.run(sandboxId, command, { args });
+
+    if (result.exitCode !== 0) {
+      throw new ProcessError(
+        sandboxId,
+        command,
+        `exit code ${result.exitCode}: ${result.stderr}`
+      );
+    }
+
+    return result.stdout;
+  }
+
+  /**
+   * Convenience method: run a shell command using bash -c
+   */
+  async shell(
+    sandboxId: string,
+    script: string,
+    env?: Record<string, string>
+  ): Promise<CommandResult> {
+    return this.run(sandboxId, 'bash', {
+      args: ['-c', script],
+      env,
+    });
   }
 
   private parseEvent(data: any): ProcessEvent | null {

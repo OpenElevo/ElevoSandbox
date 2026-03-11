@@ -3,9 +3,9 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { Workspace, CreateWorkspaceParams, FileInfo } from '../types';
+import { Workspace, CreateWorkspaceParams, FileInfo, StorageType } from '../types';
 import { WorkspaceServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError } from '../errors';
+import { convertGrpcError, isNotFound } from '../errors';
 
 /**
  * Service for managing workspaces and file operations
@@ -27,10 +27,17 @@ export class WorkspaceService {
    */
   async create(params: CreateWorkspaceParams = {}): Promise<Workspace> {
     try {
+      const request: any = {
+        name: params.name,
+        metadata: params.metadata || {},
+      };
+      if (params.storageType) {
+        request.storageType = params.storageType;
+      }
       const response = await promisifyUnary(
         this.client,
         this.client.createWorkspace,
-        { name: params.name, metadata: params.metadata || {} },
+        request,
         this.metadata()
       );
       return this.transformWorkspace(response.workspace);
@@ -254,12 +261,64 @@ export class WorkspaceService {
   /**
    * Check if a file or directory exists in workspace
    */
-  async exists(workspaceId: string, path: string): Promise<boolean> {
+  async fileExists(workspaceId: string, path: string): Promise<boolean> {
     try {
       await this.getFileInfo(workspaceId, path);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      if (isNotFound(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check if a workspace exists
+   */
+  async exists(id: string): Promise<boolean> {
+    try {
+      await this.get(id);
+      return true;
+    } catch (error) {
+      if (isNotFound(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  // ==================== NFS Transport ====================
+
+  /**
+   * Switch a remote workspace from gRPC to NFS transport
+   */
+  async registerNfsTransport(workspaceId: string, nfsUrl: string): Promise<void> {
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.registerNfsTransport,
+        { workspaceId, nfsUrl },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
+    }
+  }
+
+  /**
+   * Switch a remote workspace from NFS back to gRPC transport
+   */
+  async unregisterNfsTransport(workspaceId: string): Promise<void> {
+    try {
+      await promisifyUnary(
+        this.client,
+        this.client.unregisterNfsTransport,
+        { workspaceId },
+        this.metadata()
+      );
+    } catch (error) {
+      throw convertGrpcError(error as grpc.ServiceError);
     }
   }
 
@@ -269,6 +328,7 @@ export class WorkspaceService {
    * Transform proto Workspace to SDK Workspace type
    */
   private transformWorkspace(data: any): Workspace {
+    const storageType = (data.storageType || 'managed') as StorageType;
     return {
       id: data.id,
       name: data.name || undefined,
@@ -276,6 +336,8 @@ export class WorkspaceService {
       metadata: data.metadata || {},
       createdAt: this.transformTimestamp(data.createdAt),
       updatedAt: this.transformTimestamp(data.updatedAt),
+      storageType,
+      storageConfig: data.storageConfig || undefined,
     };
   }
 
