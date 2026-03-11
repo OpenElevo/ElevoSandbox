@@ -32,8 +32,8 @@ use infra::docker::DockerManager;
 use infra::fuse::mount::FuseMountManager;
 use infra::metrics;
 use infra::nfs::{NfsManager, NfsMode};
-use infra::sqlite::SandboxRepository;
-use infra::storage::lease::SqliteLeaseManager;
+use infra::postgres::SandboxRepository;
+use infra::storage::lease::PgLeaseManager;
 use infra::storage::local::LocalStorageBackend;
 use infra::storage::nfs_remote::RemoteNfsMountManager;
 use infra::storage::remote::RemoteStoragePool;
@@ -199,11 +199,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize workspace lease manager
-    let lease_manager = Arc::new(
-        SqliteLeaseManager::new(pool)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to initialize lease manager: {}", e))?,
-    );
+    let lease_manager = Arc::new(PgLeaseManager::new(pool));
     let holder_id = format!("server-{}", std::process::id());
     info!("Server holder ID: {}", holder_id);
 

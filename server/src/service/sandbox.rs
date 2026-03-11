@@ -11,7 +11,7 @@ use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
 use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::docker::{CreateContainerOpts, DockerManager};
-use crate::infra::sqlite::SandboxRepository;
+use crate::infra::postgres::SandboxRepository;
 use crate::infra::workspace_repository::WorkspaceRepository;
 use crate::Config;
 

@@ -10,7 +10,7 @@ use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{CommandResult, ProcessEvent};
 use crate::error::{Error, Result};
 use crate::infra::agent_pool::{AgentCommandResponse, AgentConnPool};
-use crate::infra::sqlite::SandboxRepository;
+use crate::infra::postgres::SandboxRepository;
 
 /// Options for running a command
 #[derive(Debug, Clone, Default)]

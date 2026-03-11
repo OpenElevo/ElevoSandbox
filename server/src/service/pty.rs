@@ -9,7 +9,7 @@ use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{PtyInfo, PtyOptions};
 use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
-use crate::infra::sqlite::SandboxRepository;
+use crate::infra::postgres::SandboxRepository;
 
 /// PTY service for managing interactive terminals
 pub struct PtyService {
