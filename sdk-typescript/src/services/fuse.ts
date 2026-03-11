@@ -271,6 +271,12 @@ export interface FuseMountOptions {
   readCacheSize?: number;
   /** Block size for reads (default: 128KB) */
   blockSize?: number;
+  /** Allow other users to access the mount */
+  allowOther?: boolean;
+  /** Allow root to access the mount */
+  allowRoot?: boolean;
+  /** Mount as read-only */
+  readOnly?: boolean;
   /** Enable debug logging */
   debug?: boolean;
 }
@@ -287,6 +293,9 @@ export class FuseMount {
   private readonly cacheTtl: number;
   private readonly readCacheSize: number;
   private readonly blockSize: number;
+  private readonly allowOther: boolean;
+  private readonly allowRoot: boolean;
+  private readonly readOnly: boolean;
   private readonly debug: boolean;
 
   private _tempDir: string | null = null;
@@ -302,6 +311,9 @@ export class FuseMount {
     this.cacheTtl = options.cacheTtl ?? 5;
     this.readCacheSize = options.readCacheSize ?? 256;
     this.blockSize = options.blockSize ?? 131072;
+    this.allowOther = options.allowOther ?? false;
+    this.allowRoot = options.allowRoot ?? false;
+    this.readOnly = options.readOnly ?? false;
     this.debug = options.debug ?? false;
   }
 
@@ -379,6 +391,18 @@ export class FuseMount {
     // Token is optional
     if (this.token) {
       args.push('--token', this.token);
+    }
+
+    if (this.allowOther) {
+      args.push('--allow-other');
+    }
+
+    if (this.allowRoot) {
+      args.push('--allow-root');
+    }
+
+    if (this.readOnly) {
+      args.push('--read-only');
     }
 
     if (this.debug) {
@@ -571,6 +595,9 @@ export class FuseService {
       cacheTtl?: number;
       readCacheSize?: number;
       blockSize?: number;
+      allowOther?: boolean;
+      allowRoot?: boolean;
+      readOnly?: boolean;
       debug?: boolean;
     }
   ): Promise<FuseMount> {
@@ -592,6 +619,9 @@ export class FuseService {
       cacheTtl: options?.cacheTtl,
       readCacheSize: options?.readCacheSize,
       blockSize: options?.blockSize,
+      allowOther: options?.allowOther,
+      allowRoot: options?.allowRoot,
+      readOnly: options?.readOnly,
       debug: options?.debug,
     });
 
