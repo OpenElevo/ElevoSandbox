@@ -36,7 +36,7 @@ prost = "0.13"
 prost-types = "0.13"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
 
 # Docker
 bollard = "0.18"
