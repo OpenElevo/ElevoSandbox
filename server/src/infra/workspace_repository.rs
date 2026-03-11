@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::workspace::{
@@ -14,115 +14,110 @@ use crate::error::{Error, Result};
 /// Database row for workspace
 #[derive(Debug, FromRow)]
 struct WorkspaceRow {
-    id: String,
+    id: uuid::Uuid,
     name: Option<String>,
     nfs_url: Option<String>,
     storage_type: String,
-    storage_config: String,
-    metadata: String,
-    created_at: String,
-    updated_at: String,
+    storage_config: serde_json::Value,
+    metadata: serde_json::Value,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
 }
 
 impl TryFrom<WorkspaceRow> for Workspace {
     type Error = Error;
 
     fn try_from(row: WorkspaceRow) -> Result<Self> {
-        let metadata: HashMap<String, String> = serde_json::from_str(&row.metadata)
+        let metadata: HashMap<String, String> = serde_json::from_value(row.metadata)
             .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
 
         let storage_type = StorageType::from_str(&row.storage_type)
             .map_err(|e| Error::Internal(format!("Failed to parse storage_type: {}", e)))?;
 
-        let storage_config: RemoteStorageConfig = if row.storage_config.is_empty()
-            || row.storage_config == "{}"
-        {
-            RemoteStorageConfig::default()
-        } else {
-            serde_json::from_str(&row.storage_config)
-                .map_err(|e| Error::Internal(format!("Failed to parse storage_config: {}", e)))?
-        };
+        let storage_config: RemoteStorageConfig =
+            if row.storage_config == serde_json::json!({}) {
+                RemoteStorageConfig::default()
+            } else {
+                serde_json::from_value(row.storage_config).map_err(|e| {
+                    Error::Internal(format!("Failed to parse storage_config: {}", e))
+                })?
+            };
 
         if let Err(e) = storage_config.validate() {
             return Err(Error::Internal(format!("Invalid storage_config: {}", e)));
         }
 
-        let created_at = DateTime::parse_from_rfc3339(&row.created_at)
-            .map_err(|e| Error::Internal(format!("Failed to parse created_at: {}", e)))?
-            .with_timezone(&Utc);
-
-        let updated_at = DateTime::parse_from_rfc3339(&row.updated_at)
-            .map_err(|e| Error::Internal(format!("Failed to parse updated_at: {}", e)))?
-            .with_timezone(&Utc);
-
         Ok(Workspace {
-            id: row.id,
+            id: row.id.to_string(),
             name: row.name,
             nfs_url: row.nfs_url,
             storage_type,
             storage_config,
             metadata,
-            created_at,
-            updated_at,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
         })
     }
 }
 
 /// Workspace repository for database operations
 pub struct WorkspaceRepository {
-    pool: SqlitePool,
+    pool: PgPool,
 }
 
 impl WorkspaceRepository {
     /// Create a new repository with the given pool
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
     /// Create a new workspace
     pub async fn create(&self, params: CreateWorkspaceParams) -> Result<Workspace> {
-        let id = Uuid::new_v4().to_string();
+        let id = Uuid::new_v4();
         let now = Utc::now();
-        let metadata = serde_json::to_string(&params.metadata.unwrap_or_default())
+        let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
 
         let storage_type = params.storage_type.unwrap_or(StorageType::Managed);
         let storage_config = if storage_type == StorageType::Remote {
-            serde_json::to_string(&RemoteStorageConfig::default())
+            serde_json::to_value(&RemoteStorageConfig::default())
                 .map_err(|e| Error::Internal(e.to_string()))?
         } else {
-            "{}".to_string()
+            serde_json::json!({})
         };
 
         sqlx::query(
             r#"
             INSERT INTO workspaces (id, name, storage_type, storage_config, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
         )
-        .bind(&id)
+        .bind(id)
         .bind(&params.name)
         .bind(storage_type.as_str())
         .bind(&storage_config)
         .bind(&metadata)
-        .bind(now.to_rfc3339())
-        .bind(now.to_rfc3339())
+        .bind(now)
+        .bind(now)
         .execute(&self.pool)
         .await?;
 
-        self.get(&id).await
+        self.get(&id.to_string()).await
     }
 
     /// Get a workspace by ID
     pub async fn get(&self, id: &str) -> Result<Workspace> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+
         let row: WorkspaceRow = sqlx::query_as(
             r#"
             SELECT id, name, nfs_url, storage_type, storage_config, metadata, created_at, updated_at
             FROM workspaces
-            WHERE id = ?
+            WHERE id = $1
             "#,
         )
-        .bind(id)
+        .bind(uuid)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| Error::WorkspaceNotFound(id.to_string()))?;
@@ -147,18 +142,20 @@ impl WorkspaceRepository {
 
     /// Update workspace NFS URL
     pub async fn update_nfs_url(&self, id: &str, nfs_url: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
         let now = Utc::now();
 
         let result = sqlx::query(
             r#"
             UPDATE workspaces
-            SET nfs_url = ?, updated_at = ?
-            WHERE id = ?
+            SET nfs_url = $1, updated_at = $2
+            WHERE id = $3
             "#,
         )
         .bind(nfs_url)
-        .bind(now.to_rfc3339())
-        .bind(id)
+        .bind(now)
+        .bind(uuid)
         .execute(&self.pool)
         .await?;
 
@@ -171,8 +168,11 @@ impl WorkspaceRepository {
 
     /// Delete a workspace
     pub async fn delete(&self, id: &str) -> Result<()> {
-        let result = sqlx::query("DELETE FROM workspaces WHERE id = ?")
-            .bind(id)
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+
+        let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
+            .bind(uuid)
             .execute(&self.pool)
             .await?;
 
@@ -189,20 +189,22 @@ impl WorkspaceRepository {
         id: &str,
         config: &RemoteStorageConfig,
     ) -> Result<()> {
-        let config_json = serde_json::to_string(config)
+        let uuid = Uuid::parse_str(id)
+            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+        let config_json = serde_json::to_value(config)
             .map_err(|e| Error::Internal(format!("Failed to serialize storage_config: {}", e)))?;
         let now = Utc::now();
 
         let result = sqlx::query(
             r#"
             UPDATE workspaces
-            SET storage_config = ?, updated_at = ?
-            WHERE id = ?
+            SET storage_config = $1, updated_at = $2
+            WHERE id = $3
             "#,
         )
         .bind(&config_json)
-        .bind(now.to_rfc3339())
-        .bind(id)
+        .bind(now)
+        .bind(uuid)
         .execute(&self.pool)
         .await?;
 
@@ -244,12 +246,15 @@ impl WorkspaceRepository {
 
     /// Check if a workspace has any sandboxes
     pub async fn has_sandboxes(&self, workspace_id: &str) -> Result<bool> {
+        let uuid = Uuid::parse_str(workspace_id)
+            .map_err(|_| Error::WorkspaceNotFound(workspace_id.to_string()))?;
+
         let (count,): (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = ?
+            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = $1
             "#,
         )
-        .bind(workspace_id)
+        .bind(uuid)
         .fetch_one(&self.pool)
         .await?;
 
@@ -258,12 +263,15 @@ impl WorkspaceRepository {
 
     /// Count sandboxes for a workspace
     pub async fn count_sandboxes(&self, workspace_id: &str) -> Result<i64> {
+        let uuid = Uuid::parse_str(workspace_id)
+            .map_err(|_| Error::WorkspaceNotFound(workspace_id.to_string()))?;
+
         let (count,): (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = ?
+            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = $1
             "#,
         )
-        .bind(workspace_id)
+        .bind(uuid)
         .fetch_one(&self.pool)
         .await?;
 
@@ -274,26 +282,9 @@ impl WorkspaceRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::sqlite::SqlitePoolOptions;
 
-    async fn create_test_pool() -> SqlitePool {
-        let pool = SqlitePoolOptions::new()
-            .max_connections(1)
-            .connect("sqlite::memory:")
-            .await
-            .expect("Failed to create test pool");
-
-        sqlx::migrate!("./migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
-
-        pool
-    }
-
-    #[tokio::test]
-    async fn test_create_and_get_workspace() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_create_and_get_workspace(pool: PgPool) {
         let repo = WorkspaceRepository::new(pool);
 
         let params = CreateWorkspaceParams {
@@ -316,9 +307,8 @@ mod tests {
         assert_eq!(fetched.name, workspace.name);
     }
 
-    #[tokio::test]
-    async fn test_list_workspaces() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_list_workspaces(pool: PgPool) {
         let repo = WorkspaceRepository::new(pool);
 
         let params1 = CreateWorkspaceParams {
@@ -343,9 +333,8 @@ mod tests {
         assert_eq!(all.len(), 2);
     }
 
-    #[tokio::test]
-    async fn test_update_nfs_url() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_update_nfs_url(pool: PgPool) {
         let repo = WorkspaceRepository::new(pool);
 
         let params = CreateWorkspaceParams {
@@ -373,9 +362,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_delete_workspace() {
-        let pool = create_test_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_delete_workspace(pool: PgPool) {
         let repo = WorkspaceRepository::new(pool);
 
         let params = CreateWorkspaceParams {
