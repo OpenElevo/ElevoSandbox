@@ -13,7 +13,8 @@ use crate::error::{Error, Result};
 #[derive(Debug, FromRow)]
 struct SandboxRow {
     id: uuid::Uuid,
-    workspace_id: Option<uuid::Uuid>,
+    namespace_id: uuid::Uuid,
+    root_path: String,
     name: Option<String>,
     template: String,
     state: String,
@@ -39,14 +40,11 @@ impl TryFrom<SandboxRow> for Sandbox {
         let metadata: HashMap<String, String> = serde_json::from_value(row.metadata)
             .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
 
-        let workspace_id = row
-            .workspace_id
-            .map(|id| id.to_string())
-            .unwrap_or_default();
-
         Ok(Sandbox {
             id: row.id.to_string(),
-            workspace_id,
+            workspace_id: String::new(),
+            namespace_id: Some(row.namespace_id.to_string()),
+            root_path: row.root_path,
             name: row.name,
             template: row.template,
             state,
@@ -100,17 +98,29 @@ impl SandboxRepository {
         let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
         let timeout = params.timeout.unwrap_or(0) as i64;
-        let workspace_id = Uuid::parse_str(&params.workspace_id)
-            .map_err(|e| Error::Internal(format!("Invalid workspace_id: {}", e)))?;
+
+        let namespace_id = match &params.namespace_id {
+            Some(nid) => Uuid::parse_str(nid)
+                .map_err(|e| Error::Internal(format!("Invalid namespace_id: {}", e)))?,
+            None => {
+                return Err(Error::InvalidRequest(
+                    "namespace_id is required".to_string(),
+                ));
+            }
+        };
+
+        // Use a transaction to insert sandbox + mounts atomically
+        let mut tx = self.pool.begin().await?;
 
         sqlx::query(
             r#"
-            INSERT INTO sandboxes (id, workspace_id, name, template, state, env, metadata, timeout, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            INSERT INTO sandboxes (id, namespace_id, root_path, name, template, state, env, metadata, timeout, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
         )
         .bind(id)
-        .bind(workspace_id)
+        .bind(namespace_id)
+        .bind(&params.root_path)
         .bind(&params.name)
         .bind(&template)
         .bind(SandboxState::Starting.as_str())
@@ -119,8 +129,25 @@ impl SandboxRepository {
         .bind(timeout)
         .bind(now)
         .bind(now)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
+
+        // Insert sandbox mounts
+        for mount in &params.mounts {
+            let share_uuid = Uuid::parse_str(&mount.share_id)
+                .map_err(|_| Error::InvalidParameter("Invalid share_id in mount".into()))?;
+            sqlx::query(
+                "INSERT INTO sandbox_mounts (sandbox_id, share_id, mount_path) VALUES ($1, $2, $3)",
+            )
+            .bind(id)
+            .bind(share_uuid)
+            .bind(&mount.mount_path)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::Internal(format!("Failed to insert mount: {}", e)))?;
+        }
+
+        tx.commit().await?;
 
         self.get(&id.to_string()).await
     }
@@ -132,7 +159,7 @@ impl SandboxRepository {
 
         let row: SandboxRow = sqlx::query_as(
             r#"
-            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+            SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
             WHERE id = $1
             "#,
@@ -151,7 +178,7 @@ impl SandboxRepository {
             Some(state) => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+                    SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
                     FROM sandboxes
                     WHERE state = $1
                     ORDER BY created_at DESC
@@ -164,7 +191,7 @@ impl SandboxRepository {
             None => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+                    SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
                     FROM sandboxes
                     ORDER BY created_at DESC
                     "#,
@@ -270,7 +297,7 @@ impl SandboxRepository {
     pub async fn get_expired_sandboxes(&self) -> Result<Vec<Sandbox>> {
         let rows: Vec<SandboxRow> = sqlx::query_as(
             r#"
-            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+            SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
             WHERE state = 'running'
               AND timeout > 0
@@ -283,16 +310,16 @@ impl SandboxRepository {
         rows.into_iter().map(|r| r.try_into()).collect()
     }
 
-    /// List sandboxes by workspace ID
-    pub async fn list_by_workspace(&self, workspace_id: &str) -> Result<Vec<Sandbox>> {
-        let uuid = Uuid::parse_str(workspace_id)
-            .map_err(|e| Error::Internal(format!("Invalid workspace_id: {}", e)))?;
+    /// List sandboxes by namespace ID
+    pub async fn list_by_namespace(&self, namespace_id: &str) -> Result<Vec<Sandbox>> {
+        let uuid = Uuid::parse_str(namespace_id)
+            .map_err(|e| Error::Internal(format!("Invalid namespace_id: {}", e)))?;
 
         let rows: Vec<SandboxRow> = sqlx::query_as(
             r#"
-            SELECT id, workspace_id, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
+            SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
             FROM sandboxes
-            WHERE workspace_id = $1
+            WHERE namespace_id = $1
             ORDER BY created_at DESC
             "#,
         )
@@ -301,6 +328,35 @@ impl SandboxRepository {
         .await?;
 
         rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// Get mounts for a sandbox
+    pub async fn get_mounts(&self, sandbox_id: &str) -> Result<Vec<crate::domain::share::SandboxMount>> {
+        let uuid = Uuid::parse_str(sandbox_id)
+            .map_err(|_| Error::SandboxNotFound(sandbox_id.to_string()))?;
+
+        #[derive(Debug, FromRow)]
+        struct MountRow {
+            sandbox_id: Uuid,
+            share_id: Uuid,
+            mount_path: String,
+        }
+
+        let rows: Vec<MountRow> = sqlx::query_as(
+            "SELECT sandbox_id, share_id, mount_path FROM sandbox_mounts WHERE sandbox_id = $1",
+        )
+        .bind(uuid)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| crate::domain::share::SandboxMount {
+                sandbox_id: r.sandbox_id.to_string(),
+                share_id: r.share_id.to_string(),
+                mount_path: r.mount_path,
+            })
+            .collect())
     }
 }
 
@@ -331,12 +387,15 @@ mod tests {
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id: workspace_id.clone(),
+            workspace_id: Some(workspace_id.clone()),
+            namespace_id: None,
+            root_path: "/".to_string(),
             template: Some("python:3.11".to_string()),
             name: Some("test-sandbox".to_string()),
             env: None,
             metadata: None,
             timeout: Some(3600),
+            mounts: vec![],
         };
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
@@ -357,12 +416,15 @@ mod tests {
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id,
+            workspace_id: Some(workspace_id),
+            namespace_id: None,
+            root_path: "/".to_string(),
             template: None,
             name: None,
             env: None,
             metadata: None,
             timeout: None,
+            mounts: vec![],
         };
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
@@ -382,20 +444,26 @@ mod tests {
 
         // Create two sandboxes
         let params1 = CreateSandboxParams {
-            workspace_id: workspace_id.clone(),
+            workspace_id: Some(workspace_id.clone()),
+            namespace_id: None,
+            root_path: "/".to_string(),
             template: Some("python".to_string()),
             name: Some("sandbox1".to_string()),
             env: None,
             metadata: None,
             timeout: None,
+            mounts: vec![],
         };
         let params2 = CreateSandboxParams {
-            workspace_id,
+            workspace_id: Some(workspace_id),
+            namespace_id: None,
+            root_path: "/".to_string(),
             template: Some("node".to_string()),
             name: Some("sandbox2".to_string()),
             env: None,
             metadata: None,
             timeout: None,
+            mounts: vec![],
         };
 
         repo.create(params1)
@@ -435,12 +503,15 @@ mod tests {
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id,
+            workspace_id: Some(workspace_id),
+            namespace_id: None,
+            root_path: "/".to_string(),
             template: None,
             name: None,
             env: None,
             metadata: None,
             timeout: None,
+            mounts: vec![],
         };
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");

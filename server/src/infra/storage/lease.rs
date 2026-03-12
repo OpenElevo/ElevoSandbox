@@ -110,10 +110,10 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         // Try to insert a new lease (ignored if workspace_id already exists)
         let insert_result = sqlx::query(
             r#"
-            INSERT INTO workspace_leases
-                (workspace_id, holder_id, acquired_at, expires_at, renewed_at)
+            INSERT INTO namespace_leases
+                (namespace_id, holder_id, acquired_at, expires_at, renewed_at)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (workspace_id) DO NOTHING
+            ON CONFLICT (namespace_id) DO NOTHING
             "#,
         )
         .bind(workspace_id)
@@ -142,9 +142,9 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         // Row already exists — try to take over if expired or same holder
         let updated = sqlx::query(
             r#"
-            UPDATE workspace_leases
+            UPDATE namespace_leases
             SET holder_id = $1, acquired_at = $2, expires_at = $3, renewed_at = $4
-            WHERE workspace_id = $5
+            WHERE namespace_id = $5
               AND (holder_id = $6 OR expires_at < $7)
             "#,
         )
@@ -175,7 +175,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
 
         // Lease is active and held by another holder
         let (existing_holder, existing_expires): (String, DateTime<Utc>) = sqlx::query_as(
-            "SELECT holder_id, expires_at FROM workspace_leases WHERE workspace_id = $1",
+            "SELECT holder_id, expires_at FROM namespace_leases WHERE namespace_id = $1",
         )
         .bind(workspace_id)
         .fetch_one(&mut *tx)
@@ -199,7 +199,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         let expires_at = self.compute_expires_at();
 
         let result = sqlx::query_as::<_, (String,)>(
-            "SELECT holder_id FROM workspace_leases WHERE workspace_id = $1",
+            "SELECT holder_id FROM namespace_leases WHERE namespace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -217,9 +217,9 @@ impl WorkspaceLeaseManager for PgLeaseManager {
 
         sqlx::query(
             r#"
-            UPDATE workspace_leases
+            UPDATE namespace_leases
             SET expires_at = $1, renewed_at = $2
-            WHERE workspace_id = $3 AND holder_id = $4
+            WHERE namespace_id = $3 AND holder_id = $4
             "#,
         )
         .bind(expires_at)
@@ -230,7 +230,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         .await?;
 
         let (acquired_at,): (DateTime<Utc>,) =
-            sqlx::query_as("SELECT acquired_at FROM workspace_leases WHERE workspace_id = $1")
+            sqlx::query_as("SELECT acquired_at FROM namespace_leases WHERE namespace_id = $1")
                 .bind(workspace_id)
                 .fetch_one(&self.pool)
                 .await?;
@@ -246,7 +246,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
 
     async fn release(&self, workspace_id: &str, holder_id: &str) -> Result<(), LeaseError> {
         let result = sqlx::query_as::<_, (String,)>(
-            "SELECT holder_id FROM workspace_leases WHERE workspace_id = $1",
+            "SELECT holder_id FROM namespace_leases WHERE namespace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -262,7 +262,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
             });
         }
 
-        sqlx::query("DELETE FROM workspace_leases WHERE workspace_id = $1 AND holder_id = $2")
+        sqlx::query("DELETE FROM namespace_leases WHERE namespace_id = $1 AND holder_id = $2")
             .bind(workspace_id)
             .bind(holder_id)
             .execute(&self.pool)
@@ -278,7 +278,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
 
     async fn check(&self, workspace_id: &str) -> Result<Option<WorkspaceLease>, LeaseError> {
         let row = sqlx::query_as::<_, (String, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>)>(
-            "SELECT holder_id, acquired_at, expires_at, renewed_at FROM workspace_leases WHERE workspace_id = $1",
+            "SELECT holder_id, acquired_at, expires_at, renewed_at FROM namespace_leases WHERE namespace_id = $1",
         )
         .bind(workspace_id)
         .fetch_optional(&self.pool)
@@ -372,7 +372,7 @@ mod tests {
     /// Helper: manually expire a lease by setting expires_at to past time
     async fn expire_lease(pool: &PgPool, workspace_id: &str) {
         let past = Utc::now() - chrono::Duration::seconds(10);
-        sqlx::query("UPDATE workspace_leases SET expires_at = $1 WHERE workspace_id = $2")
+        sqlx::query("UPDATE namespace_leases SET expires_at = $1 WHERE namespace_id = $2")
             .bind(past)
             .bind(workspace_id)
             .execute(pool)
