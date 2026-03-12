@@ -85,9 +85,9 @@ pub async fn login(
         }
     }
 
-    // Verify password
+    // Verify password using constant-time comparison to prevent timing attacks
     let expected = state.auth_config.admin_password.as_deref().unwrap_or("");
-    if login_req.password != expected {
+    if !constant_time_eq::constant_time_eq(login_req.password.as_bytes(), expected.as_bytes()) {
         return (
             StatusCode::UNAUTHORIZED,
             Json(serde_json::json!({

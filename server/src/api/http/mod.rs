@@ -23,7 +23,7 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 
 use axum::{
-    extract::{ConnectInfo, Request},
+    extract::Request,
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
@@ -39,19 +39,46 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
+use crate::domain::auth::AuthContext;
 use crate::AppState;
 
 type GlobalLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>;
 type KeyedIpLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>;
 
+/// State bundle for rate-limiting middlewares: pairs the limiter with the
+/// trusted proxy IP list so that IP extraction uses the correct source.
+struct RateLimitState<L> {
+    limiter: Arc<L>,
+    trusted_proxy_ips: Arc<Vec<String>>,
+}
+
+impl<L> Clone for RateLimitState<L> {
+    fn clone(&self) -> Self {
+        Self {
+            limiter: Arc::clone(&self.limiter),
+            trusted_proxy_ips: Arc::clone(&self.trusted_proxy_ips),
+        }
+    }
+}
+
+/// Extract client IP from request for rate-limiting purposes.
+///
+/// Delegates to the auth module's `extract_client_ip` which honours the
+/// `TRUSTED_PROXY_IPS` allowlist.  Falls back to `UNSPECIFIED` when no IP
+/// can be determined (so the rate-limiter still has a key to work with).
+fn extract_client_ip_for_limiter(request: &Request, trusted_proxy_ips: &[String]) -> IpAddr {
+    auth::extract_client_ip(request, trusted_proxy_ips)
+        .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED))
+}
+
 /// Global per-IP rate limiting middleware
 async fn global_rate_limit(
-    axum::extract::State(limiter): axum::extract::State<Arc<GlobalLimiter>>,
+    axum::extract::State(state): axum::extract::State<RateLimitState<GlobalLimiter>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let ip = extract_client_ip(&request);
-    match limiter.check_key(&ip) {
+    let ip = extract_client_ip_for_limiter(&request, &state.trusted_proxy_ips);
+    match state.limiter.check_key(&ip) {
         Ok(_) => next.run(request).await,
         Err(_) => (
             StatusCode::TOO_MANY_REQUESTS,
@@ -63,57 +90,43 @@ async fn global_rate_limit(
     }
 }
 
-/// Extract client IP from request, falling back to a default.
-fn extract_client_ip(request: &Request) -> IpAddr {
-    // Try X-Forwarded-For header first (for reverse proxies)
-    if let Some(forwarded) = request
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Some(first_ip) = forwarded.split(',').next() {
-            if let Ok(ip) = first_ip.trim().parse::<IpAddr>() {
-                return ip;
-            }
-        }
-    }
-
-    // Try X-Real-IP header
-    if let Some(real_ip) = request
-        .headers()
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-    {
-        if let Ok(ip) = real_ip.trim().parse::<IpAddr>() {
-            return ip;
-        }
-    }
-
-    // Fall back to connection info
-    if let Some(connect_info) = request
-        .extensions()
-        .get::<ConnectInfo<std::net::SocketAddr>>()
-    {
-        return connect_info.0.ip();
-    }
-
-    // Ultimate fallback
-    IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
-}
-
 /// Login-specific rate limiting middleware (per-IP, stricter)
 async fn login_rate_limit(
-    axum::extract::State(limiter): axum::extract::State<Arc<KeyedIpLimiter>>,
+    axum::extract::State(state): axum::extract::State<RateLimitState<KeyedIpLimiter>>,
     request: Request,
     next: Next,
 ) -> Response {
-    let ip = extract_client_ip(&request);
-    match limiter.check_key(&ip) {
+    let ip = extract_client_ip_for_limiter(&request, &state.trusted_proxy_ips);
+    match state.limiter.check_key(&ip) {
         Ok(_) => next.run(request).await,
         Err(_) => (
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({
                 "error": {"code": "RATE_LIMITED", "message": "Too many login attempts, please try again later"}
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Admin-enforcement middleware: requires the request to carry an Admin identity.
+///
+/// Must be applied *after* `auth_middleware` (which populates the `AuthContext` extension).
+/// Returns 403 Forbidden if the authenticated identity is not an admin.
+async fn require_admin_middleware(request: Request, next: Next) -> Response {
+    match request.extensions().get::<AuthContext>() {
+        Some(auth) if auth.is_admin() => next.run(request).await,
+        Some(_) => (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": {"code": "FORBIDDEN", "message": "admin access required"}
+            })),
+        )
+            .into_response(),
+        None => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": {"code": "UNAUTHORIZED", "message": "authentication required"}
             })),
         )
             .into_response(),
@@ -127,22 +140,31 @@ pub fn create_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Shared trusted proxy IPs list, derived from config once at startup.
+    let trusted_proxy_ips = Arc::new(state.config.trusted_proxy_ips.clone());
+
     // Login-specific rate limiter: 10 requests per minute per IP
-    let login_limiter = Arc::new(RateLimiter::dashmap(
-        Quota::per_minute(NonZeroU32::new(10).unwrap()),
-    ));
+    let login_rate_state = RateLimitState {
+        limiter: Arc::new(RateLimiter::dashmap(
+            Quota::per_minute(NonZeroU32::new(10).unwrap()),
+        )),
+        trusted_proxy_ips: trusted_proxy_ips.clone(),
+    };
 
     // Global per-IP rate limiter: configured RPS (default 100)
     let rps = state.config.rate_limit_rps.max(1);
-    let global_limiter = Arc::new(RateLimiter::dashmap(
-        Quota::per_second(NonZeroU32::new(rps).unwrap()),
-    ));
+    let global_rate_state = RateLimitState {
+        limiter: Arc::new(RateLimiter::dashmap(
+            Quota::per_second(NonZeroU32::new(rps).unwrap()),
+        )),
+        trusted_proxy_ips: trusted_proxy_ips.clone(),
+    };
 
     // Login route with its own stricter rate limiter
     let login_route = Router::new()
         .route("/auth/login", post(auth_handler::login))
         .route_layer(middleware::from_fn_with_state(
-            login_limiter,
+            login_rate_state,
             login_rate_limit,
         ));
 
@@ -228,6 +250,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/audit-logs", get(audit_handler::list_audit_logs))
         // Dashboard stats
         .route("/dashboard/stats", get(dashboard_handler::get_stats))
+        // Layers are applied innermost-first (bottom to top in execution order):
+        // 1. auth_middleware runs first to populate AuthContext
+        // 2. require_admin_middleware runs after to enforce admin-only access
+        .layer(axum::middleware::from_fn(require_admin_middleware))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
@@ -239,6 +265,10 @@ pub fn create_router(state: AppState) -> Router {
         // Tenant self-service /me endpoints
         .route("/me", get(me_handler::get_me))
         .route("/me/files", get(me_handler::list_my_files))
+        .route("/me/files/*path", get(me_handler::read_my_file))
+        .route("/me/files/*path", put(me_handler::write_my_file))
+        .route("/me/files/*path", post(me_handler::create_my_file))
+        .route("/me/files/*path", delete(me_handler::delete_my_file))
         .route("/me/sandboxes", get(me_handler::list_my_sandboxes))
         .route("/me/shares", get(me_handler::list_my_shares))
         .route("/me/accessible-shares", get(me_handler::list_my_accessible_shares))
@@ -315,7 +345,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/api/v1", authenticated_routes)
         .nest_service("/admin", spa)
         .layer(middleware::from_fn_with_state(
-            global_limiter,
+            global_rate_state,
             global_rate_limit,
         ))
         .layer(TraceLayer::new_for_http())

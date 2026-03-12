@@ -7,7 +7,7 @@ use uuid::Uuid;
 use crate::domain::share::{
     CreateShareParams, Share, ShareFilter, UpdateShareParams,
 };
-use crate::domain::tenant::Pagination;
+use crate::domain::tenant::{Pagination, PaginatedResult};
 use crate::error::Error;
 
 #[derive(Clone)]
@@ -117,15 +117,16 @@ impl ShareRepository {
         &self,
         filter: ShareFilter,
         pagination: Pagination,
-    ) -> Result<(Vec<Share>, i64), Error> {
-        let page = pagination.page.max(1);
-        let per_page = pagination.page_size.min(100);
+    ) -> Result<PaginatedResult<Share>, Error> {
+        let pagination = pagination.capped();
+        let page = pagination.page;
+        let per_page = pagination.page_size;
         let offset = ((page - 1) * per_page) as i64;
         let limit = per_page as i64;
         let search_pattern = filter.search.as_ref().map(|s| format!("%{}%", s));
 
         // Use parameterized queries that support all filter combinations
-        let count: i64 = sqlx::query_scalar(
+        let total: i64 = sqlx::query_scalar(
             r#"SELECT COUNT(*) FROM shares
                WHERE ($1::uuid IS NULL OR owner_tenant_id = $1)
                  AND ($2::text IS NULL OR visibility = $2)
@@ -155,8 +156,8 @@ impl ShareRepository {
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
-        let shares = rows.into_iter().map(Share::from).collect();
-        Ok((shares, count))
+        let items = rows.into_iter().map(Share::from).collect();
+        Ok(PaginatedResult { items, total, page, page_size: per_page })
     }
 
     pub async fn update_share(

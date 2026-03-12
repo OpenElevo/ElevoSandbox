@@ -1,7 +1,7 @@
 import { Card, Col, Row, Statistic, Table, Typography, Skeleton } from 'antd';
 import { TeamOutlined, ShareAltOutlined, CloudServerOutlined, KeyOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { getDashboardStats } from '@/api/dashboard';
 import { listAuditLogs } from '@/api/audit';
 import { formatRelative } from '@/utils/time';
@@ -61,25 +61,32 @@ export default function Dashboard() {
   return (
     <div>
       <Typography.Title level={4} style={{ marginBottom: 24 }}>仪表盘</Typography.Title>
-      {statsLoading ? <Skeleton active paragraph={{ rows: 2 }} /> : (
-        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-          {statCards.map((card) => (
-            <Col xs={24} sm={12} lg={6} key={card.title}>
-              <Card
-                hoverable
-                onClick={card.onClick}
-                style={{ cursor: 'pointer' }}
-              >
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        {statCards.map((card) => (
+          <Col xs={24} sm={12} lg={6} key={card.title}>
+            <Card
+              hoverable
+              onClick={card.onClick}
+              style={{ cursor: 'pointer' }}
+            >
+              {statsLoading ? (
+                <Skeleton active paragraph={{ rows: 1 }} />
+              ) : (
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <Statistic title={card.title} value={card.value} suffix={card.suffix} />
                   {card.icon}
                 </div>
-              </Card>
-            </Col>
-          ))}
-        </Row>
-      )}
-      <Card title="最近操作">
+              )}
+            </Card>
+          </Col>
+        ))}
+      </Row>
+      <Card
+        title="最近操作"
+        extra={
+          <Link to="/admin/audit">查看全部审计日志 →</Link>
+        }
+      >
         <Table
           dataSource={recentActivity?.logs ?? []}
           columns={activityColumns}

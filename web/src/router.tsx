@@ -9,6 +9,7 @@ import ShareList from '@/pages/shares/ShareList';
 import ShareDetail from '@/pages/shares/ShareDetail';
 import SandboxList from '@/pages/sandboxes/SandboxList';
 import AuditLogList from '@/pages/audit/AuditLogList';
+import NotFound from '@/pages/NotFound';
 
 function RequireAuth() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -45,6 +46,6 @@ export const router = createBrowserRouter([
   },
   {
     path: '*',
-    element: <Navigate to="/admin" replace />,
+    element: <NotFound />,
   },
 ]);

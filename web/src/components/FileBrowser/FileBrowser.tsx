@@ -91,9 +91,9 @@ export default function FileBrowser({ namespaceId, shareId }: FileBrowserProps) 
   return (
     <Row gutter={16}>
       <Col span={8}>
-        <Card size="small" title="Files" style={{ height: 500, overflow: 'auto' }}>
+        <Card size="small" title="文件" style={{ height: 500, overflow: 'auto' }}>
           {treeData.length === 0 ? (
-            <Empty description="Empty directory" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty description="空目录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           ) : (
             <Tree
               showIcon
@@ -115,7 +115,7 @@ export default function FileBrowser({ namespaceId, shareId }: FileBrowserProps) 
           />
         ) : (
           <Card size="small" style={{ height: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography.Text type="secondary">Select a file to preview</Typography.Text>
+            <Typography.Text type="secondary">选择文件预览</Typography.Text>
           </Card>
         )}
       </Col>

@@ -54,13 +54,13 @@ dashmap = { workspace = true }
 
 # Auth & Security
 jsonwebtoken = { workspace = true }
-tower_governor = { workspace = true }
+governor = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+constant_time_eq = "0.3"
 
 # Configuration
-config = { workspace = true }
 dotenvy = { workspace = true }
 
 # NFS server

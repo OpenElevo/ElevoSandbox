@@ -300,6 +300,12 @@ async fn main() -> anyhow::Result<()> {
     // Initialize tenant repository (needed early by ClientStorageService)
     let tenant_repository = TenantRepository::new(pool.clone());
 
+    // Initialize API key usage tracker with background flush (needed by ClientStorageService and gRPC auth)
+    let api_key_usage = Arc::new(service::api_key_usage::ApiKeyUsageTracker::new(
+        tenant_repository.clone(),
+    ));
+    let _api_key_flush_handle = api_key_usage.start_background_flush();
+
     // Create ClientStorageService for remote workspace connections
     let client_storage_service = ClientStorageServiceImpl::new(
         remote_storage_pool.clone(),
@@ -308,6 +314,7 @@ async fn main() -> anyhow::Result<()> {
         tenant_repository.clone(),
         config.clone(),
         fuse_manager.clone(),
+        api_key_usage.clone(),
     );
 
     // Start health monitors for remote workspaces
@@ -350,12 +357,6 @@ async fn main() -> anyhow::Result<()> {
     }
     // Start background trash cleanup
     namespace_service.clone().start_trash_cleanup();
-
-    // Initialize API key usage tracker with background flush
-    let api_key_usage = Arc::new(service::api_key_usage::ApiKeyUsageTracker::new(
-        tenant_repository.clone(),
-    ));
-    let _api_key_flush_handle = api_key_usage.start_background_flush();
 
     // Create application state
     let state = AppState {
@@ -436,6 +437,7 @@ async fn main() -> anyhow::Result<()> {
     let grpc_auth_layer = GrpcAuthLayer::new(
         state.tenant_repository.clone(),
         state.auth_config.clone(),
+        state.api_key_usage.clone(),
     );
     info!("gRPC auth layer enabled (JWT + API Key)");
 

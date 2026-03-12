@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, Descriptions, Tag, Button, Space, Tabs, App, Drawer, Form, Input, Select, Table } from 'antd';
+import { Card, Descriptions, Tag, Button, Space, Tabs, App, Drawer, Form, Input, Select, Table, Alert } from 'antd';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getShare, updateShare, deleteShare, listSharePermissions, grantPermission, updatePermission, revokePermission } from '@/api/shares';
 import { listTenants } from '@/api/tenants';
@@ -8,6 +8,7 @@ import type { SharePermission, PermissionLevel } from '@/types';
 import { formatTime } from '@/utils/time';
 import { PERMISSION_LEVELS, PERMISSION_LABELS } from '@/utils/constants';
 import FileBrowser from '@/components/FileBrowser/FileBrowser';
+import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
 
 export default function ShareDetail() {
   const { id } = useParams<{ id: string }>();
@@ -16,6 +17,7 @@ export default function ShareDetail() {
   const { message, modal } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'permissions';
+  const setBreadcrumbName = useBreadcrumbStore((s) => s.setBreadcrumbName);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm();
@@ -28,10 +30,16 @@ export default function ShareDetail() {
     enabled: !!id,
   });
 
+  useEffect(() => {
+    if (id && share?.name) {
+      setBreadcrumbName(id, share.name);
+    }
+  }, [id, share?.name, setBreadcrumbName]);
+
   const { data: permissions } = useQuery({
     queryKey: ['share-permissions', id],
     queryFn: () => listSharePermissions(id!),
-    enabled: !!id && activeTab === 'permissions',
+    enabled: !!id,
   });
 
   const { data: tenantsData } = useQuery({
@@ -158,8 +166,10 @@ export default function ShareDetail() {
     },
   ];
 
+  // F13: Exclude owner tenant AND tenants that already have a permission entry
+  const permissionedTenantIds = new Set((permissions ?? []).map((p) => p.tenant_id));
   const tenantOptions = (tenantsData?.tenants ?? [])
-    .filter((t) => t.id !== share.owner_tenant_id)
+    .filter((t) => t.id !== share.owner_tenant_id && !permissionedTenantIds.has(t.id))
     .map((t) => ({ label: t.name, value: t.id }));
 
   return (
@@ -200,6 +210,22 @@ export default function ShareDetail() {
         items={[
           { key: 'permissions', label: '权限', children: (
             <div>
+              {/* F22: Public share banner */}
+              {share.visibility === 'public' && (
+                <Alert
+                  type="info"
+                  message="公开 Share：所有活跃租户拥有隐式读取权限"
+                  style={{ marginBottom: 8 }}
+                  showIcon
+                />
+              )}
+              {/* F22: Owner tenant always has full admin permission */}
+              <Alert
+                type="info"
+                message={`所有者 ${share.owner_tenant_name ?? tenantMap.get(share.owner_tenant_id) ?? share.owner_tenant_id} 自动拥有完全管理权限`}
+                style={{ marginBottom: 12 }}
+                showIcon
+              />
               <Button type="primary" size="small" onClick={() => setGrantOpen(true)} style={{ marginBottom: 12 }}>
                 授予权限
               </Button>

@@ -20,7 +20,7 @@ pub async fn get_stats(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -29,7 +29,7 @@ pub async fn get_stats(
     if !auth.is_admin() {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": {"code": "FORBIDDEN", "message": "Admin only"}})),
+            Json(serde_json::json!({"error": {"code": "FORBIDDEN", "message": "权限不足"}})),
         )
             .into_response();
     }
@@ -42,7 +42,7 @@ pub async fn get_stats(
             (SELECT COUNT(*) FROM tenants WHERE is_active = true) AS active_tenants,
             (SELECT COUNT(*) FROM shares) AS total_shares,
             (SELECT COUNT(*) FROM sandboxes WHERE state = 'running') AS running_sandboxes,
-            (SELECT COUNT(*) FROM api_keys WHERE is_active = true) AS active_api_keys
+            (SELECT COUNT(*) FROM api_keys WHERE is_active = true AND (expires_at IS NULL OR expires_at > now())) AS active_api_keys
         "#,
     )
     .fetch_one(&state.pool)
@@ -61,7 +61,7 @@ pub async fn get_stats(
             .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({"error": {"code": "INTERNAL", "message": format!("{}", e)}})),
+            Json(serde_json::json!({"error": {"code": "INTERNAL_ERROR", "message": format!("{}", e)}})),
         )
             .into_response(),
     }

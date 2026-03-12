@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
+use crate::domain::share::Share;
 use crate::error::Error;
 use crate::infra::share_permission_repository::SharePermissionRepository;
 use crate::infra::share_repository::ShareRepository;
@@ -27,6 +28,10 @@ impl PermissionService {
 
     /// Check if the auth context has the required permission on a share.
     ///
+    /// Returns the `Share` that was fetched during the permission check so
+    /// that callers can use it directly, eliminating any TOCTOU window that
+    /// would arise from fetching the share a second time.
+    ///
     /// Rules:
     /// 1. Admin has unlimited access
     /// 2. Owner automatically has admin permission (not stored in DB)
@@ -36,37 +41,37 @@ impl PermissionService {
     pub async fn check_share_permission(
         &self,
         auth: &AuthContext,
-        share_id: &str,
+        share_id: Uuid,
         required: PermissionLevel,
-    ) -> Result<(), Error> {
+    ) -> Result<Share, Error> {
+        let share = self.share_repo.get_share(share_id).await?;
+
         // Admin bypasses all checks
         if auth.is_admin() {
-            return Ok(());
+            return Ok(share);
         }
 
         let tenant_id = auth.tenant_id().ok_or_else(|| {
             Error::InvalidRequest("Authentication required".into())
         })?;
 
-        let share = self.share_repo.get_share(share_id).await?;
-
         // Owner has implicit admin
-        if share.owner_tenant_id == tenant_id.to_string() {
-            return Ok(());
+        if share.owner_tenant_id == tenant_id {
+            return Ok(share);
         }
 
         // Check explicit permission
         let explicit_perm = self
             .permission_repo
-            .get_permission(share_id, &tenant_id.to_string())
+            .get_permission(share_id, tenant_id)
             .await?;
 
         if let Some(perm) = explicit_perm {
             if perm.includes(&required) {
-                return Ok(());
+                return Ok(share);
             }
             // Has permission but insufficient level
-            return Err(Error::InvalidRequest(
+            return Err(Error::PermissionDenied(
                 "Insufficient permission".into(),
             ));
         }
@@ -77,40 +82,36 @@ impl PermissionService {
 
         if is_public && required == PermissionLevel::Read {
             // Public shares grant implicit read to all tenants
-            return Ok(());
+            return Ok(share);
         }
 
         if is_public {
             // Public share but needs more than read
-            Err(Error::InvalidRequest(
+            Err(Error::PermissionDenied(
                 "Insufficient permission".into(),
             ))
         } else {
-            // Private share with no permission — hide existence
-            Err(Error::WorkspaceNotFound(format!(
-                "Share {} not found",
-                share_id
-            )))
+            // Private share with no permission — hide existence with a generic
+            // message that does not reveal whether the share exists at all.
+            Err(Error::WorkspaceNotFound(
+                "Resource not found".into(),
+            ))
         }
     }
 
     /// Check if the auth context is the namespace owner or admin
     pub fn check_namespace_ownership(
         auth: &AuthContext,
-        namespace_id: &str,
+        namespace_id: Uuid,
     ) -> Result<(), Error> {
         if auth.is_admin() {
             return Ok(());
         }
 
-        let uuid = Uuid::parse_str(namespace_id).map_err(|_| {
-            Error::InvalidParameter("Invalid namespace ID".into())
-        })?;
-
-        if auth.is_namespace_owner(&uuid) {
+        if auth.is_namespace_owner(&namespace_id) {
             Ok(())
         } else {
-            Err(Error::InvalidRequest("Namespace access denied".into()))
+            Err(Error::PermissionDenied("Namespace access denied".into()))
         }
     }
 }

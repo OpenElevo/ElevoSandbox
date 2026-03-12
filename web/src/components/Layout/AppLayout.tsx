@@ -3,6 +3,7 @@ import { Layout, Breadcrumb } from 'antd';
 import { Outlet, useLocation, Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
 
 const { Content } = Layout;
 
@@ -14,8 +15,17 @@ const ROUTE_LABELS: Record<string, string> = {
   audit: '审计日志',
 };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_SHORT_RE = /^[0-9a-f-]{8,}$/i;
+
+function isUuidLike(segment: string): boolean {
+  return UUID_RE.test(segment) || (UUID_SHORT_RE.test(segment) && segment.length >= 8);
+}
+
 function useBreadcrumbItems() {
   const location = useLocation();
+  const names = useBreadcrumbStore((s) => s.names);
+
   // Strip /admin prefix and split
   const path = location.pathname.replace(/^\/admin\/?/, '');
   if (!path) return [];
@@ -26,16 +36,23 @@ function useBreadcrumbItems() {
   const items: { title: React.ReactNode }[] = [];
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i];
-    const label = ROUTE_LABELS[segment] || segment;
     const href = '/admin/' + segments.slice(0, i + 1).join('/');
+
+    let label: string;
+    if (ROUTE_LABELS[segment]) {
+      label = ROUTE_LABELS[segment];
+    } else if (isUuidLike(segment) && names[segment]) {
+      label = names[segment];
+    } else if (isUuidLike(segment)) {
+      label = segment.slice(0, 8) + '...';
+    } else {
+      label = segment;
+    }
 
     if (i < segments.length - 1) {
       items.push({ title: <Link to={href}>{label}</Link> });
     } else {
-      // Last segment is current page, not clickable
-      // For detail pages (UUID-like), show truncated ID
-      const isUuid = /^[0-9a-f-]{8,}$/i.test(segment);
-      items.push({ title: isUuid ? segment.slice(0, 8) + '...' : label });
+      items.push({ title: label });
     }
   }
   return items;

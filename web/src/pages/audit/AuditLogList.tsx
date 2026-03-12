@@ -20,6 +20,7 @@ export default function AuditLogList() {
   const navigate = useNavigate();
   const [actionFilter, setActionFilter] = useState<string[]>([]);
   const [actorTypeFilter, setActorTypeFilter] = useState<string>();
+  const [actorTenantFilter, setActorTenantFilter] = useState<string>();
   const [resourceTypeFilter, setResourceTypeFilter] = useState<string>();
   const [timeRange, setTimeRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
   const [page, setPage] = useState(1);
@@ -31,17 +32,20 @@ export default function AuditLogList() {
     queryFn: () => listTenants({ page_size: 200 }),
   });
 
+  const tenantOptions = (tenantsData?.tenants ?? []).map((t) => ({ label: t.name, value: t.id }));
+
   const filter = useMemo<AuditFilter>(() => {
     const f: AuditFilter = { page, page_size: pageSize };
     if (actionFilter.length > 0) f.action = actionFilter;
     if (actorTypeFilter) f.actor_type = actorTypeFilter;
+    if (actorTypeFilter === 'tenant' && actorTenantFilter) f.actor_id = actorTenantFilter;
     if (resourceTypeFilter) f.resource_type = resourceTypeFilter;
     if (timeRange) {
       f.from = timeRange[0].toISOString();
       f.to = timeRange[1].toISOString();
     }
     return f;
-  }, [actionFilter, actorTypeFilter, resourceTypeFilter, timeRange, page, pageSize]);
+  }, [actionFilter, actorTypeFilter, actorTenantFilter, resourceTypeFilter, timeRange, page, pageSize]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['audit-logs', filter],
@@ -101,12 +105,23 @@ export default function AuditLogList() {
           placeholder="操作者类型"
           allowClear
           value={actorTypeFilter}
-          onChange={(v) => { setActorTypeFilter(v); setPage(1); }}
+          onChange={(v) => { setActorTypeFilter(v); setActorTenantFilter(undefined); setPage(1); }}
           style={{ width: 130 }}
           options={[
             { label: '管理员', value: 'admin' },
             { label: '租户', value: 'tenant' },
           ]}
+        />
+        <Select
+          placeholder="执行者（租户）"
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          disabled={actorTypeFilter !== 'tenant'}
+          value={actorTenantFilter}
+          onChange={(v) => { setActorTenantFilter(v); setPage(1); }}
+          style={{ width: 180 }}
+          options={tenantOptions}
         />
         <Select
           placeholder="资源类型"

@@ -17,6 +17,7 @@ use rmcp::{
     tool, tool_handler, tool_router, ServerHandler,
 };
 use tracing::{error, info};
+use uuid::Uuid;
 
 use super::common::{format_command_result, run_command};
 use super::types::*;
@@ -69,19 +70,23 @@ impl FullMcpHandler {
     )]
     async fn sandbox_create(&self, Parameters(params): Parameters<SandboxCreateParams>) -> String {
         info!(
-            "MCP[full]: sandbox_create called for workspace {}",
+            "MCP[full]: sandbox_create called for namespace {}",
             params.workspace_id
         );
 
+        let namespace_id = match Uuid::parse_str(&params.workspace_id) {
+            Ok(u) => u,
+            Err(_) => return "Error: Invalid workspace/namespace ID (must be a UUID)".to_string(),
+        };
+
         let create_params = CreateSandboxParams {
-            workspace_id: Some(params.workspace_id.clone()),
-            namespace_id: Some(params.workspace_id),
+            namespace_id,
             root_path: "/".to_string(),
             template: params.template,
             name: params.name,
             env: params.env,
             metadata: params.metadata,
-            timeout: params.timeout,
+            timeout: params.timeout.map(|t| t as i32),
             mounts: vec![],
         };
 
@@ -107,7 +112,12 @@ impl FullMcpHandler {
     async fn sandbox_get(&self, Parameters(params): Parameters<SandboxGetParams>) -> String {
         info!("MCP[full]: sandbox_get called for {}", params.sandbox_id);
 
-        match self.state.sandbox_service.get(&params.sandbox_id).await {
+        let sandbox_uuid = match Uuid::parse_str(&params.sandbox_id) {
+            Ok(u) => u,
+            Err(_) => return "Error: Invalid sandbox ID (must be a UUID)".to_string(),
+        };
+
+        match self.state.sandbox_service.get(sandbox_uuid).await {
             Ok(sandbox) => {
                 let response = serde_json::json!({
                     "id": sandbox.id,
@@ -170,11 +180,16 @@ impl FullMcpHandler {
     async fn sandbox_delete(&self, Parameters(params): Parameters<SandboxDeleteParams>) -> String {
         info!("MCP[full]: sandbox_delete called for {}", params.sandbox_id);
 
+        let sandbox_uuid = match Uuid::parse_str(&params.sandbox_id) {
+            Ok(u) => u,
+            Err(_) => return "Error: Invalid sandbox ID (must be a UUID)".to_string(),
+        };
+
         let force = params.force.unwrap_or(false);
         match self
             .state
             .sandbox_service
-            .delete(&params.sandbox_id, force)
+            .delete(sandbox_uuid, force)
             .await
         {
             Ok(_) => format!("Sandbox {} deleted successfully", params.sandbox_id),

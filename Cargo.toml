@@ -63,7 +63,7 @@ dashmap = "6.1"
 
 # Auth & Security
 jsonwebtoken = "9"
-tower_governor = "0.4"
+governor = { version = "0.8", features = ["dashmap"] }
 sha2 = "0.10"
 rand = "0.8"
 hex = "0.4"

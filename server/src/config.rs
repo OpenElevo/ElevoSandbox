@@ -102,12 +102,6 @@ pub struct Config {
     #[serde(default = "default_fs_api_enabled")]
     pub fs_api_enabled: bool,
 
-    /// FileSystem API token for gRPC authentication
-    /// If set, FUSE clients must provide this token to access FileSystemService
-    /// If not set, FileSystemService is accessible without authentication
-    #[serde(default)]
-    pub fs_api_token: Option<String>,
-
     /// Storage backend configuration
     #[serde(skip)]
     pub storage: StorageConfig,
@@ -171,6 +165,15 @@ pub struct Config {
     /// Global rate limit: requests per second per IP
     #[serde(default = "default_rate_limit_rps")]
     pub rate_limit_rps: u32,
+
+    /// Trusted proxy IPs (comma-separated).
+    ///
+    /// When set, X-Forwarded-For and X-Real-IP headers are only honoured when
+    /// the direct TCP connection originates from one of these IPs.  When empty
+    /// (the default), the legacy behaviour of always trusting XFF is preserved
+    /// for backward compatibility.
+    #[serde(default)]
+    pub trusted_proxy_ips: Vec<String>,
 
     /// Namespace trash retention period in days
     #[serde(default = "default_namespace_trash_retention_days")]
@@ -428,9 +431,6 @@ impl Config {
         if let Ok(val) = std::env::var("WORKSPACE_MCP_PROFILE") {
             config.mcp_profile = val;
         }
-        if let Ok(val) = std::env::var("WORKSPACE_FS_API_TOKEN") {
-            config.fs_api_token = Some(val);
-        }
         if let Ok(val) = std::env::var("WORKSPACE_FS_API_ENABLED") {
             config.fs_api_enabled = val.to_lowercase() == "true" || val == "1";
         }
@@ -506,9 +506,37 @@ impl Config {
                 config.rate_limit_rps = n;
             }
         }
+        if let Ok(val) = std::env::var("TRUSTED_PROXY_IPS") {
+            config.trusted_proxy_ips = val
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+        }
         if let Ok(val) = std::env::var("NAMESPACE_TRASH_RETENTION_DAYS") {
             if let Ok(n) = val.parse() {
                 config.namespace_trash_retention_days = n;
+            }
+        }
+
+        // Validate auth configuration
+        if config.admin_password.is_some() {
+            // Production mode: JWT_SECRET is mandatory and must be ≥32 bytes
+            match &config.jwt_secret {
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "JWT_SECRET must be set when ADMIN_PASSWORD is configured. \
+                         Set JWT_SECRET to a random string of ≥32 bytes."
+                    ));
+                }
+                Some(secret) if secret.len() < 32 => {
+                    return Err(anyhow::anyhow!(
+                        "JWT_SECRET is too short ({} bytes). \
+                         JWT_SECRET must be at least 32 bytes for production security.",
+                        secret.len()
+                    ));
+                }
+                _ => {}
             }
         }
 
@@ -659,7 +687,6 @@ impl Default for Config {
             mcp_path: default_mcp_path(),
             mcp_profile: default_mcp_profile(),
             fs_api_enabled: default_fs_api_enabled(),
-            fs_api_token: None,
             storage: StorageConfig::default(),
             max_remote_workspaces: default_max_remote_workspaces(),
             remote_op_timeout_secs: default_remote_op_timeout_secs(),
@@ -675,6 +702,7 @@ impl Default for Config {
             jwt_secret: None,
             jwt_expiration_hours: default_jwt_expiration_hours(),
             rate_limit_rps: default_rate_limit_rps(),
+            trusted_proxy_ips: Vec::new(),
             namespace_trash_retention_days: default_namespace_trash_retention_days(),
         }
     }

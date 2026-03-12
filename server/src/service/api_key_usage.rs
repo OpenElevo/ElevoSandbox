@@ -16,8 +16,9 @@ use crate::infra::tenant_repository::TenantRepository;
 /// Minimum interval between DB writes for the same key
 const FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 
-/// Background flush interval
-const BACKGROUND_FLUSH_INTERVAL: Duration = Duration::from_secs(30);
+/// Background flush interval — must match FLUSH_INTERVAL so dirty entries are
+/// only written after their per-key cooldown has expired.
+const BACKGROUND_FLUSH_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Entry tracking per-key usage state
 struct UsageEntry {

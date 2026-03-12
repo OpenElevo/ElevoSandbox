@@ -2,13 +2,14 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::workspace::StorageType;
 
 /// Tenant entity (also serves as Namespace, 1:1 relationship)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tenant {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
     pub description: String,
     pub is_active: bool,
@@ -21,8 +22,8 @@ pub struct Tenant {
 /// API Key entity (token_hash is never exposed outside infra layer)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
-    pub id: String,
-    pub tenant_id: String,
+    pub id: Uuid,
+    pub tenant_id: Uuid,
     pub name: String,
     pub token_prefix: String,
     pub is_active: bool,
@@ -117,9 +118,25 @@ impl Default for Pagination {
     }
 }
 
+/// Maximum allowed page_size to prevent oversized queries
+pub const MAX_PAGE_SIZE: u32 = 100;
+
 impl Pagination {
     pub fn offset(&self) -> u32 {
-        (self.page.saturating_sub(1)) * self.page_size
+        (self.page.saturating_sub(1)) * self.effective_page_size()
+    }
+
+    /// Return the effective page_size, capped at MAX_PAGE_SIZE
+    pub fn effective_page_size(&self) -> u32 {
+        self.page_size.min(MAX_PAGE_SIZE)
+    }
+
+    /// Return a new Pagination with page_size capped at MAX_PAGE_SIZE
+    pub fn capped(self) -> Self {
+        Self {
+            page: self.page.max(1),
+            page_size: self.effective_page_size(),
+        }
     }
 }
 

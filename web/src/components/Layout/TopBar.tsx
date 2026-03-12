@@ -32,11 +32,16 @@ export default function TopBar({ collapsed, onToggle }: TopBarProps) {
       justifyContent: 'space-between',
       borderBottom: '1px solid #f0f0f0',
     }}>
-      <Button
-        type="text"
-        icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-        onClick={onToggle}
-      />
+      <Space align="center">
+        <Button
+          type="text"
+          icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          onClick={onToggle}
+        />
+        <Typography.Text strong style={{ fontSize: 16, color: '#1677ff' }}>
+          Elevo Admin
+        </Typography.Text>
+      </Space>
       <Space>
         <Typography.Text type="secondary">管理员</Typography.Text>
         <Button

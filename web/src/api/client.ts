@@ -37,6 +37,7 @@ client.interceptors.response.use(
     if (status === 401) {
       localStorage.removeItem('token');
       if (window.location.pathname !== '/admin/login') {
+        message.error('登录已过期，请重新登录');
         window.location.href = '/admin/login?redirect=' + encodeURIComponent(window.location.pathname);
       }
     } else if (status === 403) {

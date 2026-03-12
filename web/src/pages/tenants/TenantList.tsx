@@ -1,12 +1,181 @@
-import { useState, useMemo } from 'react';
-import { Table, Button, Input, Space, Tag, Typography, Drawer, Form, Select, App, Modal, Checkbox } from 'antd';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { useState, useMemo, useRef } from 'react';
+import {
+  Table, Button, Input, Space, Tag, Typography, Drawer, Form, Select,
+  App, Modal, Checkbox, DatePicker, Radio, Alert,
+} from 'antd';
+import { PlusOutlined, SearchOutlined, CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import dayjs from 'dayjs';
 import { listTenants, createTenant, activateTenant, deactivateTenant, deleteTenant } from '@/api/tenants';
 import type { Tenant, CreateTenantParams } from '@/types';
 import { formatTime } from '@/utils/time';
 import { useDebounce } from '@/hooks/useDebounce';
+
+// ─── Token display modal with copy button ──────────────────────────────────────
+
+interface TokenModalData {
+  key: string;
+  token: string;
+}
+
+interface TokenDisplayModalProps {
+  data: TokenModalData | null;
+  acked: boolean;
+  onAckedChange: (v: boolean) => void;
+  onClose: () => void;
+}
+
+function TokenDisplayModal({ data, acked, onAckedChange, onClose }: TokenDisplayModalProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!data) return;
+    navigator.clipboard.writeText(data.token).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <Modal
+      title="API Key 已创建"
+      open={!!data}
+      onOk={onClose}
+      onCancel={onClose}
+      maskClosable={false}
+      keyboard={false}
+      okButtonProps={{ disabled: !acked }}
+      cancelButtonProps={{ style: { display: 'none' } }}
+    >
+      <Alert
+        type="warning"
+        message="API Key 创建成功"
+        description="请立即复制并妥善保存以下 Token，此 Token 仅展示一次，关闭后无法再查看。"
+        showIcon
+        style={{ marginBottom: 12 }}
+      />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <Input
+          readOnly
+          value={data?.token ?? ''}
+          onClick={(e) => (e.target as HTMLInputElement).select()}
+          style={{ fontFamily: 'monospace' }}
+        />
+        <Button
+          icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+          onClick={handleCopy}
+          type={copied ? 'primary' : 'default'}
+        >
+          {copied ? '已复制 ✓' : '复制'}
+        </Button>
+      </div>
+      <Checkbox checked={acked} onChange={(e) => onAckedChange(e.target.checked)}>
+        我已安全保存此 Token
+      </Checkbox>
+    </Modal>
+  );
+}
+
+// ─── Delete handler with 3-case logic ─────────────────────────────────────────
+
+function useDeleteTenant(queryClient: ReturnType<typeof useQueryClient>, message: ReturnType<typeof App.useApp>['message'], modal: ReturnType<typeof App.useApp>['modal']) {
+  const handleDelete = async (tenant: Tenant) => {
+    // First attempt: try deleting without force to probe state
+    try {
+      await deleteTenant(tenant.id, false);
+      queryClient.invalidateQueries({ queryKey: ['tenants'] });
+      message.success('租户已删除');
+      return;
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number; data?: { error?: { code?: string; message?: string } } } };
+      const status = error.response?.status;
+      const code = error.response?.data?.error?.code;
+      const msg = error.response?.data?.error?.message;
+
+      if (status !== 409) {
+        message.error(msg || '删除租户失败');
+        return;
+      }
+
+      // Case 1: has active shares or sandboxes → hard block
+      if (code === 'HAS_ACTIVE_SHARES' || code === 'HAS_ACTIVE_SANDBOXES') {
+        Modal.error({
+          title: '无法删除租户',
+          content: msg || '该租户仍有活跃的 Share 或 Sandbox，请先清理后再删除。',
+        });
+        return;
+      }
+
+      // Case 2: has active API keys → warning, require name confirm, force=true
+      if (code === 'HAS_ACTIVE_API_KEYS') {
+        let inputName = '';
+        modal.confirm({
+          title: `删除租户「${tenant.name}」？`,
+          content: (
+            <div>
+              <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
+                {msg || `该租户有活跃 API Key，删除后这些 Key 将永久失效。`}
+              </Typography.Text>
+              <Typography.Text type="danger" style={{ display: 'block', marginBottom: 8 }}>
+                此操作不可逆，请谨慎操作。
+              </Typography.Text>
+              <Input
+                placeholder="请输入租户名称确认"
+                onChange={(e) => { inputName = e.target.value; }}
+              />
+            </div>
+          ),
+          okText: '确认删除',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: async () => {
+            if (inputName !== tenant.name) {
+              message.error('名称不匹配');
+              throw new Error('mismatch');
+            }
+            await deleteTenant(tenant.id, true);
+            queryClient.invalidateQueries({ queryKey: ['tenants'] });
+            message.success('租户已删除');
+          },
+        });
+        return;
+      }
+
+      // Case 3: other 409 / clean tenant — normal confirmation
+      let inputName = '';
+      modal.confirm({
+        title: `删除租户「${tenant.name}」？`,
+        content: (
+          <div>
+            <Typography.Text type="danger">此操作不可逆，请谨慎操作。</Typography.Text>
+            <Input
+              placeholder="请输入租户名称确认"
+              style={{ marginTop: 8 }}
+              onChange={(e) => { inputName = e.target.value; }}
+            />
+          </div>
+        ),
+        okText: '删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          if (inputName !== tenant.name) {
+            message.error('名称不匹配');
+            throw new Error('mismatch');
+          }
+          await deleteTenant(tenant.id, true);
+          queryClient.invalidateQueries({ queryKey: ['tenants'] });
+          message.success('租户已删除');
+        },
+      });
+    }
+  };
+
+  return handleDelete;
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
 
 export default function TenantList() {
   const navigate = useNavigate();
@@ -14,12 +183,19 @@ export default function TenantList() {
   const { message, modal } = App.useApp();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>();
+  const [storageFilter, setStorageFilter] = useState<string>();
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm();
-  const [tokenModal, setTokenModal] = useState<{ key: string; token: string } | null>(null);
+  const [createApiKey, setCreateApiKey] = useState(false);
+  const [storageType, setStorageType] = useState<'local' | 'remote'>('local');
+  const [tokenModal, setTokenModal] = useState<TokenModalData | null>(null);
   const [tokenAcked, setTokenAcked] = useState(false);
+
+  // We need a ref to track the "createApiKey" checkbox value inside Form.Item
+  const createApiKeyRef = useRef(false);
+  createApiKeyRef.current = createApiKey;
 
   const debouncedSearch = useDebounce(search);
 
@@ -28,8 +204,9 @@ export default function TenantList() {
     if (debouncedSearch) p.search = debouncedSearch;
     if (statusFilter === 'active') p.is_active = true;
     if (statusFilter === 'inactive') p.is_active = false;
+    if (storageFilter) p.storage_type = storageFilter;
     return p;
-  }, [debouncedSearch, statusFilter, page, pageSize]);
+  }, [debouncedSearch, statusFilter, storageFilter, page, pageSize]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['tenants', queryParams],
@@ -42,6 +219,8 @@ export default function TenantList() {
       queryClient.invalidateQueries({ queryKey: ['tenants'] });
       setDrawerOpen(false);
       form.resetFields();
+      setCreateApiKey(false);
+      setStorageType('local');
       message.success('租户已创建');
       if (result.api_key) {
         setTokenAcked(false);
@@ -53,10 +232,28 @@ export default function TenantList() {
 
   const handleCreate = () => {
     form.validateFields().then((values) => {
-      const params: CreateTenantParams = { name: values.name, description: values.description };
-      if (values.api_key_name) {
-        params.initial_api_key = { name: values.api_key_name };
+      const params: CreateTenantParams = {
+        name: values.name,
+        description: values.description,
+        storage_type: values.storage_type,
+      };
+
+      if (values.storage_type === 'remote' && values.storage_config_json) {
+        try {
+          params.storage_config = JSON.parse(values.storage_config_json);
+        } catch {
+          message.error('存储配置 JSON 格式无效');
+          return;
+        }
       }
+
+      if (createApiKeyRef.current && values.api_key_name) {
+        params.initial_api_key = { name: values.api_key_name };
+        if (values.api_key_expires_at) {
+          params.initial_api_key.expires_at = (values.api_key_expires_at as ReturnType<typeof dayjs>).toISOString();
+        }
+      }
+
       createMutation.mutate(params);
     });
   };
@@ -74,53 +271,45 @@ export default function TenantList() {
     });
   };
 
-  const handleDelete = (tenant: Tenant) => {
-    let inputName = '';
-    modal.confirm({
-      title: `删除租户「${tenant.name}」？`,
-      content: (
-        <div>
-          <Typography.Text type="danger">此操作不可逆，请谨慎操作。</Typography.Text>
-          <Input
-            placeholder="请输入租户名称确认"
-            style={{ marginTop: 8 }}
-            onChange={(e) => { inputName = e.target.value; }}
-          />
-        </div>
-      ),
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        if (inputName !== tenant.name) {
-          message.error('名称不匹配');
-          throw new Error('mismatch');
-        }
-        await deleteTenant(tenant.id, true);
-        queryClient.invalidateQueries({ queryKey: ['tenants'] });
-        message.success('租户已删除');
-      },
-    });
-  };
+  const handleDelete = useDeleteTenant(queryClient, message, modal);
 
   const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name',
+    {
+      title: '名称', dataIndex: 'name', key: 'name',
       render: (name: string, r: Tenant) => (
         <a onClick={() => navigate(`/admin/tenants/${r.id}`)}>{name}</a>
       ),
     },
-    { title: '状态', dataIndex: 'is_active', key: 'status', width: 100,
+    {
+      title: '描述', dataIndex: 'description', key: 'description', width: 200,
+      render: (desc: string) => {
+        if (!desc) return '-';
+        return desc.length > 50
+          ? <span title={desc}>{desc.slice(0, 50)}...</span>
+          : desc;
+      },
+    },
+    {
+      title: '存储类型', dataIndex: 'storage_type', key: 'storage_type', width: 80,
+      render: (v: string) => (v === 'remote' ? '远程' : '托管'),
+    },
+    {
+      title: '状态', dataIndex: 'is_active', key: 'status', width: 100,
       render: (active: boolean) => (
         <Tag color={active ? 'green' : 'default'}>{active ? '活跃' : '已停用'}</Tag>
       ),
     },
     { title: '共享数', dataIndex: 'share_count', key: 'shares', width: 80 },
     { title: 'API Key', dataIndex: 'active_api_key_count', key: 'keys', width: 90 },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
-      render: (v: string) => formatTime(v) },
-    { title: '操作', key: 'actions', width: 200,
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
+      render: (v: string) => formatTime(v),
+    },
+    {
+      title: '操作', key: 'actions', width: 220,
       render: (_: unknown, record: Tenant) => (
         <Space size="small">
+          <Button size="small" type="link" onClick={() => navigate(`/admin/tenants/${record.id}`)}>查看</Button>
           <Button size="small" onClick={() => handleToggleStatus(record)}>
             {record.is_active ? '停用' : '启用'}
           </Button>
@@ -138,7 +327,7 @@ export default function TenantList() {
           创建租户
         </Button>
       </div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Input
           placeholder="搜索名称或 ID"
           prefix={<SearchOutlined />}
@@ -158,6 +347,18 @@ export default function TenantList() {
             { label: '已停用', value: 'inactive' },
           ]}
         />
+        <Select
+          placeholder="存储类型"
+          allowClear
+          value={storageFilter}
+          onChange={(v) => { setStorageFilter(v); setPage(1); }}
+          style={{ width: 120 }}
+          options={[
+            { label: '全部', value: undefined },
+            { label: '托管', value: 'local' },
+            { label: '远程', value: 'remote' },
+          ].filter((o) => o.value !== undefined)}
+        />
       </Space>
       <Table
         dataSource={data?.tenants ?? []}
@@ -170,51 +371,108 @@ export default function TenantList() {
           showSizeChanger: true, showTotal: (t) => `共 ${t} 个租户`,
         }}
       />
+
+      {/* ── Create Tenant Drawer ── */}
       <Drawer
         title="创建租户"
         open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-        width={480}
+        onClose={() => {
+          setDrawerOpen(false);
+          form.resetFields();
+          setCreateApiKey(false);
+          setStorageType('local');
+        }}
+        width={520}
         extra={
           <Button type="primary" onClick={handleCreate} loading={createMutation.isPending}>
             创建
           </Button>
         }
       >
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ storage_type: 'local' }}
+        >
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入租户名称' }]}>
             <Input placeholder="租户名称" />
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} placeholder="可选描述" />
           </Form.Item>
-          <Form.Item name="api_key_name" label="初始 API Key 名称">
-            <Input placeholder="例如 default（留空则不创建）" />
+
+          {/* Storage type */}
+          <Form.Item name="storage_type" label="存储类型">
+            <Radio.Group onChange={(e) => setStorageType(e.target.value)}>
+              <Radio value="local">托管</Radio>
+              <Radio value="remote">远程</Radio>
+            </Radio.Group>
           </Form.Item>
+
+          {/* Remote storage config — shown only when "远程" is selected */}
+          {storageType === 'remote' && (
+            <Form.Item
+              name="storage_config_json"
+              label="远程存储配置（JSON）"
+              rules={[
+                { required: true, message: '请输入存储配置' },
+                {
+                  validator: (_, value) => {
+                    if (!value) return Promise.resolve();
+                    try { JSON.parse(value); return Promise.resolve(); }
+                    catch { return Promise.reject(new Error('无效的 JSON 格式')); }
+                  },
+                },
+              ]}
+            >
+              <Input.TextArea rows={5} placeholder='{"type": "s3", "bucket": "my-bucket", ...}' style={{ fontFamily: 'monospace' }} />
+            </Form.Item>
+          )}
+
+          {/* API Key creation checkbox + conditional fields */}
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Checkbox
+              checked={createApiKey}
+              onChange={(e) => setCreateApiKey(e.target.checked)}
+            >
+              同时创建第一个 API Key
+            </Checkbox>
+          </Form.Item>
+
+          {createApiKey && (
+            <>
+              <Form.Item
+                name="api_key_name"
+                label="Key 名称"
+                style={{ marginTop: 12 }}
+                rules={[{ required: true, message: '请输入 Key 名称' }]}
+              >
+                <Input placeholder="例如 default" />
+              </Form.Item>
+              <Form.Item
+                name="api_key_expires_at"
+                label="过期时间"
+                extra="不填写则永不过期"
+              >
+                <DatePicker
+                  showTime
+                  placeholder="留空则永不过期"
+                  disabledDate={(current) => current && current.isBefore(dayjs(), 'day')}
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Drawer>
-      <Modal
-        title="API Key 已创建"
-        open={!!tokenModal}
-        onOk={() => setTokenModal(null)}
-        onCancel={() => setTokenModal(null)}
-        maskClosable={false}
-        keyboard={false}
-        okButtonProps={{ disabled: !tokenAcked }}
-        cancelButtonProps={{ style: { display: 'none' } }}
-      >
-        <Typography.Paragraph>
-          Key <strong>{tokenModal?.key}</strong> 已创建。请立即复制 Token，关闭后将无法再次查看。
-        </Typography.Paragraph>
-        <Input.TextArea value={tokenModal?.token} readOnly rows={2} />
-        <Checkbox
-          checked={tokenAcked}
-          onChange={(e) => setTokenAcked(e.target.checked)}
-          style={{ marginTop: 12 }}
-        >
-          我已安全保存此 Token
-        </Checkbox>
-      </Modal>
+
+      {/* ── Token display modal ── */}
+      <TokenDisplayModal
+        data={tokenModal}
+        acked={tokenAcked}
+        onAckedChange={setTokenAcked}
+        onClose={() => setTokenModal(null)}
+      />
     </div>
   );
 }

@@ -180,6 +180,7 @@ impl TenantRepository {
         filter: TenantFilter,
         pagination: Pagination,
     ) -> Result<PaginatedResult<TenantListItem>> {
+        let pagination = pagination.capped();
         let offset = pagination.offset() as i64;
         let limit = pagination.page_size as i64;
 

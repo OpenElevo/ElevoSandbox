@@ -121,8 +121,8 @@ mod tests {
 /// Share permission record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharePermission {
-    pub tenant_id: String,
-    pub share_id: String,
+    pub tenant_id: uuid::Uuid,
+    pub share_id: uuid::Uuid,
     pub permission: PermissionLevel,
     pub created_at: chrono::DateTime<chrono::Utc>,
 }

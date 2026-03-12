@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// Share visibility
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -37,8 +38,8 @@ impl std::fmt::Display for Visibility {
 /// Share resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Share {
-    pub id: String,
-    pub owner_tenant_id: String,
+    pub id: Uuid,
+    pub owner_tenant_id: Uuid,
     pub name: String,
     pub source_path: String,
     pub description: String,
@@ -51,7 +52,8 @@ pub struct Share {
 /// Parameters for creating a share
 #[derive(Debug, Deserialize)]
 pub struct CreateShareParams {
-    pub owner_tenant_id: String,
+    #[serde(default)]
+    pub owner_tenant_id: Option<Uuid>,
     pub name: String,
     pub source_path: String,
     #[serde(default)]
@@ -74,7 +76,7 @@ pub struct UpdateShareParams {
 /// Filter for listing shares
 #[derive(Debug, Default, Deserialize)]
 pub struct ShareFilter {
-    pub owner_tenant_id: Option<String>,
+    pub owner_tenant_id: Option<Uuid>,
     pub visibility: Option<String>,
     pub search: Option<String>,
 }
@@ -82,14 +84,14 @@ pub struct ShareFilter {
 /// Sandbox mount record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxMount {
-    pub sandbox_id: String,
-    pub share_id: String,
+    pub sandbox_id: Uuid,
+    pub share_id: Uuid,
     pub mount_path: String,
 }
 
 /// Mount request when creating a sandbox
 #[derive(Debug, Clone, Deserialize)]
 pub struct MountRequest {
-    pub share_id: String,
+    pub share_id: Uuid,
     pub mount_path: String,
 }

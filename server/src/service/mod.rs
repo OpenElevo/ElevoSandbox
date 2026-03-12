@@ -1,5 +1,6 @@
 //! Business logic services
 
+pub mod api_key_usage;
 pub mod audit;
 pub mod namespace;
 pub mod path_security;

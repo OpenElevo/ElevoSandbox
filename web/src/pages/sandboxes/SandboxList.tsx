@@ -1,8 +1,8 @@
 import { useState, useMemo } from 'react';
-import { Table, Button, Input, Space, Tag, Typography, Drawer, Descriptions, App, Select } from 'antd';
+import { Table, Button, Input, Space, Tag, Typography, Drawer, Descriptions, App, Select, Alert } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { listSandboxes, getSandbox, deleteSandbox } from '@/api/sandboxes';
+import { listSandboxes, getSandbox, deleteSandbox, batchDeleteSandboxes } from '@/api/sandboxes';
 import { listTenants } from '@/api/tenants';
 import { listShares } from '@/api/shares';
 import type { Sandbox } from '@/types';
@@ -20,6 +20,7 @@ export default function SandboxList() {
   const [pageSize, setPageSize] = useState(20);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
+  const [allPagesSelected, setAllPagesSelected] = useState(false);
 
   const debouncedSearch = useDebounce(search);
 
@@ -71,26 +72,52 @@ export default function SandboxList() {
   };
 
   const handleBatchDelete = () => {
-    if (selectedKeys.length === 0) return;
+    if (selectedKeys.length === 0 && !allPagesSelected) return;
+
+    const countLabel = allPagesSelected
+      ? `所有匹配的 ${data?.total ?? 0} 个`
+      : `${selectedKeys.length} 个`;
+
     modal.confirm({
-      title: `批量删除 ${selectedKeys.length} 个沙箱？`,
+      title: `批量删除 ${countLabel} 沙箱？`,
       okText: '删除',
       okButtonProps: { danger: true },
       cancelText: '取消',
       onOk: async () => {
-        const results = await Promise.allSettled(
-          selectedKeys.map((id) => deleteSandbox(id))
-        );
-        const failed = results.filter((r) => r.status === 'rejected').length;
-        setSelectedKeys([]);
-        queryClient.invalidateQueries({ queryKey: ['sandboxes'] });
-        if (failed > 0) {
-          message.warning(`${selectedKeys.length - failed} 个已删除，${failed} 个失败`);
+        if (allPagesSelected) {
+          // Use filter mode for cross-page all-select
+          const filterParams: { state?: string; namespace_id?: string } = {};
+          if (stateFilter) filterParams.state = stateFilter;
+          if (nsFilter) filterParams.namespace_id = nsFilter;
+
+          const result = await batchDeleteSandboxes({ filter: filterParams });
+          setSelectedKeys([]);
+          setAllPagesSelected(false);
+          queryClient.invalidateQueries({ queryKey: ['sandboxes'] });
+          if (result.failed > 0) {
+            message.warning(`${result.deleted} 个已删除，${result.failed} 个失败`);
+          } else {
+            message.success(`${result.deleted} 个沙箱已删除`);
+          }
         } else {
-          message.success(`${selectedKeys.length} 个沙箱已删除`);
+          // Use ids mode for current-page selection
+          const result = await batchDeleteSandboxes({ ids: selectedKeys });
+          setSelectedKeys([]);
+          setAllPagesSelected(false);
+          queryClient.invalidateQueries({ queryKey: ['sandboxes'] });
+          if (result.failed > 0) {
+            message.warning(`${result.deleted} 个已删除，${result.failed} 个失败`);
+          } else {
+            message.success(`${result.deleted} 个沙箱已删除`);
+          }
         }
       },
     });
+  };
+
+  const handleCancelSelection = () => {
+    setSelectedKeys([]);
+    setAllPagesSelected(false);
   };
 
   const tenantMap = new Map((tenantsData?.tenants ?? []).map((t) => [t.id, t.name]));
@@ -102,23 +129,32 @@ export default function SandboxList() {
     value: s,
   }));
 
+  const total = data?.total ?? 0;
+  const currentPageCount = data?.sandboxes?.length ?? 0;
+  const showAllPagesBanner = selectedKeys.length > 0 && total > currentPageCount;
+
   const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name',
+    {
+      title: '名称', dataIndex: 'name', key: 'name',
       render: (name: string, r: Sandbox) => (
         <a onClick={() => setDetailId(r.id)}>{name || r.id.slice(0, 8)}</a>
       ),
     },
     { title: '模板', dataIndex: 'template', key: 'template', width: 120 },
-    { title: '状态', dataIndex: 'state', key: 'state', width: 100,
+    {
+      title: '状态', dataIndex: 'state', key: 'state', width: 100,
       render: (s: string) => <Tag color={SANDBOX_STATE_COLORS[s] || 'default'}>{SANDBOX_STATE_LABELS[s] || s}</Tag>,
     },
-    { title: '命名空间', dataIndex: 'namespace_id', key: 'ns', width: 160,
+    {
+      title: '命名空间', dataIndex: 'namespace_id', key: 'ns', width: 160,
       render: (nid: string) => tenantMap.get(nid) || (nid ? nid.slice(0, 8) : '-'),
     },
-    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
+    {
+      title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
       render: (v: string) => formatTime(v),
     },
-    { title: '操作', key: 'actions', width: 120,
+    {
+      title: '操作', key: 'actions', width: 120,
       render: (_: unknown, record: Sandbox) => {
         const isTransient = record.state === 'starting' || record.state === 'stopping';
         const isRunning = record.state === 'running';
@@ -144,11 +180,6 @@ export default function SandboxList() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Typography.Title level={4} style={{ margin: 0 }}>沙箱管理</Typography.Title>
-        {selectedKeys.length > 0 && (
-          <Button danger onClick={handleBatchDelete}>
-            删除 {selectedKeys.length} 个选中项
-          </Button>
-        )}
       </div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Input
@@ -178,6 +209,52 @@ export default function SandboxList() {
           options={tenantOptions}
         />
       </Space>
+
+      {/* Cross-page selection banner */}
+      {showAllPagesBanner && !allPagesSelected && (
+        <Alert
+          type="info"
+          style={{ marginBottom: 12 }}
+          message={
+            <Space>
+              <span>已选 {selectedKeys.length} 项</span>
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0 }}
+                onClick={() => setAllPagesSelected(true)}
+              >
+                选择所有匹配结果（共 {total} 项）
+              </Button>
+              <Button danger size="small" onClick={handleBatchDelete}>批量删除</Button>
+              <Button size="small" onClick={handleCancelSelection}>取消选择</Button>
+            </Space>
+          }
+        />
+      )}
+
+      {allPagesSelected && (
+        <Alert
+          type="warning"
+          style={{ marginBottom: 12 }}
+          message={
+            <Space>
+              <span>已选择所有匹配结果（共 {total} 项）</span>
+              <Button danger size="small" onClick={handleBatchDelete}>批量删除</Button>
+              <Button size="small" onClick={handleCancelSelection}>取消选择</Button>
+            </Space>
+          }
+        />
+      )}
+
+      {selectedKeys.length > 0 && !showAllPagesBanner && (
+        <div style={{ marginBottom: 12 }}>
+          <Button danger onClick={handleBatchDelete}>
+            删除 {selectedKeys.length} 个选中项
+          </Button>
+        </div>
+      )}
+
       <Table
         dataSource={data?.sandboxes ?? []}
         columns={columns}
@@ -185,10 +262,16 @@ export default function SandboxList() {
         loading={isLoading}
         rowSelection={{
           selectedRowKeys: selectedKeys,
-          onChange: (keys) => setSelectedKeys(keys as string[]),
+          onChange: (keys) => {
+            setSelectedKeys(keys as string[]);
+            setAllPagesSelected(false);
+          },
+          getCheckboxProps: (record: Sandbox) => ({
+            disabled: record.state === 'starting' || record.state === 'stopping',
+          }),
         }}
         pagination={{
-          current: page, pageSize, total: data?.total ?? 0,
+          current: page, pageSize, total,
           onChange: (p, ps) => { setPage(p); setPageSize(ps); },
           showSizeChanger: true, showTotal: (t) => `共 ${t} 个沙箱`,
         }}
@@ -220,7 +303,14 @@ export default function SandboxList() {
             {detail.env && Object.keys(detail.env).length > 0 && (
               <Descriptions.Item label="环境变量">
                 {Object.entries(detail.env).map(([k, v]) => (
-                  <div key={k}><Typography.Text code>{k}</Typography.Text> = {typeof v === 'string' && (k.toLowerCase().includes('secret') || k.toLowerCase().includes('password') || k.toLowerCase().includes('token')) ? '••••••••' : String(v)}</div>
+                  <div key={k}>
+                    <Typography.Text code>{k}</Typography.Text> ={' '}
+                    {typeof v === 'string' && (
+                      k.toLowerCase().includes('secret') ||
+                      k.toLowerCase().includes('password') ||
+                      k.toLowerCase().includes('token')
+                    ) ? '••••••••' : String(v)}
+                  </div>
                 ))}
               </Descriptions.Item>
             )}

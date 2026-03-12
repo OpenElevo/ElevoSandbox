@@ -23,8 +23,8 @@ struct PermissionRow {
 impl From<PermissionRow> for SharePermission {
     fn from(row: PermissionRow) -> Self {
         SharePermission {
-            tenant_id: row.tenant_id.to_string(),
-            share_id: row.share_id.to_string(),
+            tenant_id: row.tenant_id,
+            share_id: row.share_id,
             permission: PermissionLevel::from_str_value(&row.permission)
                 .unwrap_or(PermissionLevel::Read),
             created_at: row.created_at,
@@ -40,15 +40,10 @@ impl SharePermissionRepository {
     /// Grant or update permission for a tenant on a share
     pub async fn grant_permission(
         &self,
-        share_id: &str,
-        tenant_id: &str,
+        share_id: Uuid,
+        tenant_id: Uuid,
         level: PermissionLevel,
     ) -> Result<SharePermission, Error> {
-        let share_uuid = Uuid::parse_str(share_id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-        let tenant_uuid = Uuid::parse_str(tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid tenant ID".into()))?;
-
         let row = sqlx::query_as::<_, PermissionRow>(
             r#"
             INSERT INTO share_permissions (tenant_id, share_id, permission)
@@ -58,8 +53,8 @@ impl SharePermissionRepository {
             RETURNING tenant_id, share_id, permission, created_at
             "#,
         )
-        .bind(tenant_uuid)
-        .bind(share_uuid)
+        .bind(tenant_id)
+        .bind(share_id)
         .bind(level.as_str())
         .fetch_one(&self.pool)
         .await
@@ -71,19 +66,14 @@ impl SharePermissionRepository {
     /// Revoke permission for a tenant on a share
     pub async fn revoke_permission(
         &self,
-        share_id: &str,
-        tenant_id: &str,
+        share_id: Uuid,
+        tenant_id: Uuid,
     ) -> Result<(), Error> {
-        let share_uuid = Uuid::parse_str(share_id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-        let tenant_uuid = Uuid::parse_str(tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid tenant ID".into()))?;
-
         let result = sqlx::query(
             "DELETE FROM share_permissions WHERE share_id = $1 AND tenant_id = $2",
         )
-        .bind(share_uuid)
-        .bind(tenant_uuid)
+        .bind(share_id)
+        .bind(tenant_id)
         .execute(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
@@ -100,19 +90,14 @@ impl SharePermissionRepository {
     /// Get permission level for a tenant on a share
     pub async fn get_permission(
         &self,
-        share_id: &str,
-        tenant_id: &str,
+        share_id: Uuid,
+        tenant_id: Uuid,
     ) -> Result<Option<PermissionLevel>, Error> {
-        let share_uuid = Uuid::parse_str(share_id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-        let tenant_uuid = Uuid::parse_str(tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid tenant ID".into()))?;
-
         let row = sqlx::query_as::<_, PermissionRow>(
             "SELECT * FROM share_permissions WHERE share_id = $1 AND tenant_id = $2",
         )
-        .bind(share_uuid)
-        .bind(tenant_uuid)
+        .bind(share_id)
+        .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
@@ -126,15 +111,12 @@ impl SharePermissionRepository {
     /// List all permissions for a share
     pub async fn list_by_share(
         &self,
-        share_id: &str,
+        share_id: Uuid,
     ) -> Result<Vec<SharePermission>, Error> {
-        let share_uuid = Uuid::parse_str(share_id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-
         let rows = sqlx::query_as::<_, PermissionRow>(
             "SELECT * FROM share_permissions WHERE share_id = $1 ORDER BY created_at",
         )
-        .bind(share_uuid)
+        .bind(share_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
@@ -145,19 +127,49 @@ impl SharePermissionRepository {
     /// List all permissions for a tenant
     pub async fn list_by_tenant(
         &self,
-        tenant_id: &str,
+        tenant_id: Uuid,
     ) -> Result<Vec<SharePermission>, Error> {
-        let tenant_uuid = Uuid::parse_str(tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid tenant ID".into()))?;
-
         let rows = sqlx::query_as::<_, PermissionRow>(
             "SELECT * FROM share_permissions WHERE tenant_id = $1 ORDER BY created_at",
         )
-        .bind(tenant_uuid)
+        .bind(tenant_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         Ok(rows.into_iter().map(SharePermission::from).collect())
+    }
+
+    /// Update an existing permission (plain UPDATE — returns NOT_FOUND if no rows affected).
+    ///
+    /// Unlike `grant_permission`, this does not upsert: it only updates an already-granted
+    /// permission and returns an error if the permission record does not exist.
+    pub async fn update_permission(
+        &self,
+        share_id: Uuid,
+        tenant_id: Uuid,
+        level: PermissionLevel,
+    ) -> Result<SharePermission, Error> {
+        let row = sqlx::query_as::<_, PermissionRow>(
+            r#"
+            UPDATE share_permissions
+            SET permission = $3
+            WHERE share_id = $1 AND tenant_id = $2
+            RETURNING tenant_id, share_id, permission, created_at
+            "#,
+        )
+        .bind(share_id)
+        .bind(tenant_id)
+        .bind(level.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("Failed to update permission: {}", e)))?;
+
+        match row {
+            Some(r) => Ok(r.into()),
+            None => Err(Error::WorkspaceNotFound(
+                "Permission not found".to_string(),
+            )),
+        }
     }
 }

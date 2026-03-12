@@ -4,10 +4,12 @@
 //! of namespace directories on the filesystem.
 
 use std::path::PathBuf;
+use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{NaiveDateTime, Utc};
 use tokio::fs;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::config::Config;
 
@@ -45,16 +47,16 @@ impl NamespaceService {
     }
 
     /// Create a namespace directory for a tenant
-    pub async fn create_namespace_dir(&self, tenant_id: &str) -> std::io::Result<PathBuf> {
-        let dir = self.namespaces_dir.join(tenant_id);
+    pub async fn create_namespace_dir(&self, tenant_id: Uuid) -> std::io::Result<PathBuf> {
+        let dir = self.namespaces_dir.join(tenant_id.to_string());
         fs::create_dir_all(&dir).await?;
         info!("Created namespace directory: {}", dir.display());
         Ok(dir)
     }
 
     /// Soft-delete a namespace directory by moving it to trash
-    pub async fn delete_namespace_dir(&self, tenant_id: &str) -> std::io::Result<()> {
-        let dir = self.namespaces_dir.join(tenant_id);
+    pub async fn delete_namespace_dir(&self, tenant_id: Uuid) -> std::io::Result<()> {
+        let dir = self.namespaces_dir.join(tenant_id.to_string());
         if !dir.exists() {
             warn!(
                 "Namespace directory does not exist, skipping delete: {}",
@@ -77,13 +79,13 @@ impl NamespaceService {
     }
 
     /// Get the path for a namespace directory
-    pub fn namespace_path(&self, tenant_id: &str) -> PathBuf {
-        self.namespaces_dir.join(tenant_id)
+    pub fn namespace_path(&self, tenant_id: Uuid) -> PathBuf {
+        self.namespaces_dir.join(tenant_id.to_string())
     }
 
     /// Get a sub-path within a namespace
-    pub fn namespace_subpath(&self, tenant_id: &str, subpath: &str) -> PathBuf {
-        let base = self.namespaces_dir.join(tenant_id);
+    pub fn namespace_subpath(&self, tenant_id: Uuid, subpath: &str) -> PathBuf {
+        let base = self.namespaces_dir.join(tenant_id.to_string());
         let trimmed = subpath.trim_start_matches('/');
         if trimmed.is_empty() {
             base
@@ -93,7 +95,7 @@ impl NamespaceService {
     }
 
     /// Check if a path exists within a namespace
-    pub async fn path_exists(&self, tenant_id: &str, subpath: &str) -> bool {
+    pub async fn path_exists(&self, tenant_id: Uuid, subpath: &str) -> bool {
         self.namespace_subpath(tenant_id, subpath).exists()
     }
 
@@ -112,11 +114,25 @@ impl NamespaceService {
         })
     }
 
+    /// Parse timestamp from trash directory name (format: `{tenant_id}_{timestamp}`).
+    ///
+    /// The timestamp component is formatted as `%Y%m%d%H%M%S` (e.g. `20260311153045`).
+    /// Returns `None` if the name does not match the expected format.
+    fn parse_trash_timestamp(dir_name: &str) -> Option<chrono::DateTime<Utc>> {
+        // Find the last underscore separator between UUID and timestamp
+        let underscore_pos = dir_name.rfind('_')?;
+        let timestamp_str = &dir_name[underscore_pos + 1..];
+        NaiveDateTime::parse_from_str(timestamp_str, "%Y%m%d%H%M%S")
+            .ok()
+            .map(|dt| dt.and_utc())
+    }
+
     /// Clean up expired trash directories
     async fn cleanup_trash(&self) -> std::io::Result<()> {
         let retention_secs = self.trash_retention_days * 86400;
         let mut entries = fs::read_dir(&self.trash_dir).await?;
         let mut cleaned = 0u32;
+        let now = Utc::now();
 
         while let Some(entry) = entries.next_entry().await? {
             let metadata = entry.metadata().await?;
@@ -124,10 +140,30 @@ impl NamespaceService {
                 continue;
             }
 
-            let modified = metadata.modified()?;
-            let age = modified
-                .elapsed()
-                .unwrap_or(std::time::Duration::ZERO);
+            let dir_name = entry.file_name();
+            let name_str = dir_name.to_string_lossy();
+
+            // Parse the creation timestamp from the directory name rather than
+            // relying on filesystem mtime, which may be unreliable across mounts.
+            let age: Duration = match Self::parse_trash_timestamp(&name_str) {
+                Some(created_at) => {
+                    let diff_secs = (now - created_at).num_seconds().max(0) as u64;
+                    Duration::from_secs(diff_secs)
+                }
+                None => {
+                    // Directory name does not match expected pattern; fall back to
+                    // filesystem mtime so we don't silently skip unknown entries.
+                    warn!(
+                        "Trash directory '{}' has unexpected name format, falling back to mtime",
+                        name_str
+                    );
+                    metadata
+                        .modified()
+                        .ok()
+                        .and_then(|m| m.elapsed().ok())
+                        .unwrap_or(Duration::ZERO)
+                }
+            };
 
             if age.as_secs() >= retention_secs {
                 let path = entry.path();

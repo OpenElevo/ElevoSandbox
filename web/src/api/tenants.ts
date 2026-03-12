@@ -48,3 +48,8 @@ export async function createApiKey(tenantId: string, params: { name: string; exp
 export async function revokeApiKey(tenantId: string, keyId: string) {
   await client.delete(`/tenants/${tenantId}/keys/${keyId}`);
 }
+
+export async function listTenantPermissions(tenantId: string) {
+  const res = await client.get(`/tenants/${tenantId}/permissions`);
+  return res.data.permissions as import('@/types').SharePermission[];
+}

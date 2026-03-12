@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::audit::{AuditLog, AuditLogFilter, CreateAuditLogParams};
-use crate::domain::tenant::Pagination;
+use crate::domain::tenant::{Pagination, PaginatedResult};
 use crate::error::Error;
 
 #[derive(Clone)]
@@ -30,12 +30,12 @@ struct AuditLogRow {
 impl From<AuditLogRow> for AuditLog {
     fn from(row: AuditLogRow) -> Self {
         AuditLog {
-            id: row.id.to_string(),
+            id: row.id,
             actor_type: row.actor_type,
-            actor_id: row.actor_id.map(|id| id.to_string()),
+            actor_id: row.actor_id,
             action: row.action,
             resource_type: row.resource_type,
-            resource_id: row.resource_id.to_string(),
+            resource_id: row.resource_id,
             resource_name: row.resource_name,
             detail: row.detail,
             ip_address: row.ip_address,
@@ -76,9 +76,10 @@ impl AuditRepository {
         &self,
         filter: AuditLogFilter,
         pagination: Pagination,
-    ) -> Result<(Vec<AuditLog>, i64), Error> {
-        let page = pagination.page.max(1);
-        let per_page = pagination.page_size.min(100);
+    ) -> Result<PaginatedResult<AuditLog>, Error> {
+        let pagination = pagination.capped();
+        let page = pagination.page;
+        let per_page = pagination.page_size;
         let offset = ((page - 1) * per_page) as i64;
         let limit = per_page as i64;
 
@@ -86,10 +87,11 @@ impl AuditRepository {
             || filter.actor_type.is_some()
             || filter.actor_id.is_some()
             || filter.resource_type.is_some()
+            || filter.resource_id.is_some()
             || filter.from.is_some()
             || filter.to.is_some();
 
-        let (rows, count) = if !has_filters {
+        let (rows, total) = if !has_filters {
             let count: (i64,) =
                 sqlx::query_as("SELECT COUNT(*) FROM audit_logs")
                     .fetch_one(&self.pool)
@@ -108,8 +110,8 @@ impl AuditRepository {
             self.list_filtered(filter, offset, limit).await?
         };
 
-        let logs = rows.into_iter().map(AuditLog::from).collect();
-        Ok((logs, count))
+        let items = rows.into_iter().map(AuditLog::from).collect();
+        Ok(PaginatedResult { items, total, page, page_size: per_page })
     }
 
     async fn list_filtered(
@@ -135,6 +137,10 @@ impl AuditRepository {
         }
         if filter.resource_type.is_some() {
             conditions.push(format!("resource_type = ${}", bind_idx));
+            bind_idx += 1;
+        }
+        if filter.resource_id.is_some() {
+            conditions.push(format!("resource_id = ${}", bind_idx));
             bind_idx += 1;
         }
         if filter.from.is_some() {
@@ -180,6 +186,10 @@ impl AuditRepository {
         if let Some(ref resource_type) = filter.resource_type {
             count_query = count_query.bind(resource_type);
             data_query = data_query.bind(resource_type);
+        }
+        if let Some(resource_id) = filter.resource_id {
+            count_query = count_query.bind(resource_id);
+            data_query = data_query.bind(resource_id);
         }
         if let Some(ref from) = filter.from {
             count_query = count_query.bind(from);

@@ -3,10 +3,17 @@ import type { PermissionLevel } from '@/types';
 export const PERMISSION_LEVELS: PermissionLevel[] = ['read', 'write', 'execute', 'admin'];
 
 export const PERMISSION_LABELS: Record<PermissionLevel, string> = {
-  read: '只读',
-  write: '读写',
+  read: '读取',
+  write: '写入',
   execute: '执行',
   admin: '管理',
+};
+
+export const PERMISSION_DISPLAY: Record<PermissionLevel, string> = {
+  read: '读取 (read)',
+  write: '写入 (write)',
+  execute: '执行 (execute)',
+  admin: '管理 (admin)',
 };
 
 export const PERMISSION_COLORS: Record<PermissionLevel, string> = {

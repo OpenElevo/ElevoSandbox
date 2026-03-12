@@ -6,10 +6,13 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use uuid::Uuid;
+
 use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
 use crate::domain::share::{CreateShareParams, ShareFilter, UpdateShareParams};
 use crate::domain::tenant::Pagination;
+use crate::service::path_security;
 use crate::AppState;
 
 /// POST /api/v1/shares
@@ -53,7 +56,7 @@ pub async fn create_share(
 
     // If tenant, force owner to self
     if let Some(tid) = auth.tenant_id() {
-        params.owner_tenant_id = tid.to_string();
+        params.owner_tenant_id = Some(tid);
     } else if !auth.is_admin() {
         return (
             StatusCode::FORBIDDEN,
@@ -62,10 +65,28 @@ pub async fn create_share(
             .into_response();
     }
 
+    let owner_id = match params.owner_tenant_id {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "owner_tenant_id is required"}})),
+            )
+                .into_response()
+        }
+    };
+
+    // Normalize source_path to eliminate `.` and leading slashes before
+    // the existence check and before storing in the database.
+    // `..` components are now rejected outright.
+    let normalized_source = match path_security::normalize_path(&params.source_path) {
+        Ok(p) => p.to_string_lossy().into_owned(),
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+    params.source_path = normalized_source;
+
     // Validate source_path exists on disk
-    let ns_dir = state
-        .namespace_service
-        .namespace_path(&params.owner_tenant_id);
+    let ns_dir = state.namespace_service.namespace_path(owner_id);
     let source_dir = ns_dir.join(&params.source_path);
     if !source_dir.exists() || !source_dir.is_dir() {
         return (
@@ -80,7 +101,7 @@ pub async fn create_share(
     match state.share_repository.create_share(&params).await {
         Ok(share) => {
             state.audit_service.log(
-                &auth, "share.create", "share", &share.id, &share.name,
+                &auth, "share.create", "share", share.id, &share.name,
                 serde_json::json!({"source_path": share.source_path}),
             );
             (
@@ -111,12 +132,20 @@ pub async fn list_shares(
         }
     };
 
+    let page = pagination.page.max(1);
+    let page_size = pagination.page_size.min(100);
+
     if auth.is_admin() {
-        // Admin sees all shares
+        // Admin sees all shares with pagination
         match state.share_repository.list_shares(filter, pagination).await {
-            Ok((shares, total)) => (
+            Ok(result) => (
                 StatusCode::OK,
-                Json(serde_json::json!({"shares": shares, "total": total})),
+                Json(serde_json::json!({
+                    "items": result.items,
+                    "total": result.total,
+                    "page": result.page,
+                    "page_size": result.page_size
+                })),
             )
                 .into_response(),
             Err(e) => super::tenant_handler::error_response(e),
@@ -125,14 +154,22 @@ pub async fn list_shares(
         // Tenant sees accessible shares
         match state
             .share_repository
-            .list_accessible_shares(&tid.to_string())
+            .list_accessible_shares(tid)
             .await
         {
-            Ok(shares) => (
-                StatusCode::OK,
-                Json(serde_json::json!({"shares": shares, "total": shares.len()})),
-            )
-                .into_response(),
+            Ok(shares) => {
+                let total = shares.len() as i64;
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "items": shares,
+                        "total": total,
+                        "page": page,
+                        "page_size": page_size
+                    })),
+                )
+                    .into_response()
+            }
             Err(e) => super::tenant_handler::error_response(e),
         }
     } else {
@@ -161,15 +198,20 @@ pub async fn get_share(
         }
     };
 
+    let share_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
     if let Err(e) = state
         .permission_service
-        .check_share_permission(&auth, &id, PermissionLevel::Read)
+        .check_share_permission(&auth, share_id, PermissionLevel::Read)
         .await
     {
         return super::tenant_handler::error_response(e);
     }
 
-    match state.share_repository.get_share(&id).await {
+    match state.share_repository.get_share(share_id).await {
         Ok(share) => (
             StatusCode::OK,
             Json(serde_json::json!({"share": share})),
@@ -196,9 +238,14 @@ pub async fn update_share(
         }
     };
 
+    let share_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
     if let Err(e) = state
         .permission_service
-        .check_share_permission(&auth, &id, PermissionLevel::Admin)
+        .check_share_permission(&auth, share_id, PermissionLevel::Admin)
         .await
     {
         return super::tenant_handler::error_response(e);
@@ -225,10 +272,10 @@ pub async fn update_share(
         }
     };
 
-    match state.share_repository.update_share(&id, params).await {
+    match state.share_repository.update_share(share_id, params).await {
         Ok(share) => {
             state.audit_service.log(
-                &auth, "share.update", "share", &share.id, &share.name,
+                &auth, "share.update", "share", share.id, &share.name,
                 serde_json::json!({}),
             );
             (
@@ -258,22 +305,41 @@ pub async fn delete_share(
         }
     };
 
+    let share_id = match Uuid::parse_str(&id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
     if let Err(e) = state
         .permission_service
-        .check_share_permission(&auth, &id, PermissionLevel::Admin)
+        .check_share_permission(&auth, share_id, PermissionLevel::Admin)
         .await
     {
         return super::tenant_handler::error_response(e);
     }
 
-    match state.share_repository.delete_share(&id).await {
+    // Fetch the share before deletion to capture the name for audit logging
+    let share_name = match state.share_repository.get_share(share_id).await {
+        Ok(share) => share.name,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+
+    match state.share_repository.delete_share(share_id).await {
         Ok(()) => {
             state.audit_service.log(
-                &auth, "share.delete", "share", &id, "",
+                &auth, "share.delete", "share", share_id, &share_name,
                 serde_json::json!({}),
             );
             StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => super::tenant_handler::error_response(e),
     }
+}
+
+fn bad_request(msg: &str) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": msg}})),
+    )
+        .into_response()
 }

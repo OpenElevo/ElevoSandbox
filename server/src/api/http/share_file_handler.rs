@@ -1,4 +1,8 @@
 //! Share file operation handlers
+//!
+//! All paths are sanitized through `sanitize_share_path` to prevent directory traversal
+//! attacks. User-provided paths are normalized and validated against the share's source_path
+//! boundary, ensuring they cannot escape into the broader namespace.
 
 use axum::{
     extract::{Path, Query, State},
@@ -6,14 +10,37 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
+use crate::service::path_security;
 use crate::AppState;
 
 use super::workspace::{
     FileInfoResponse, ListFilesResponse, PathQuery, ReadFileResponse, WriteFileRequest,
 };
+
+/// Resolve an effective relative path for the workspace service by sanitizing
+/// the user-provided path against the share's source directory.
+///
+/// Uses the centralized `sanitize_share_path` to:
+/// - Reject null bytes
+/// - Normalize `.` and `..` so they cannot escape the share boundary
+/// - Return the path relative to the namespace root (suitable for workspace_service)
+fn resolve_share_path(
+    namespace_root: &std::path::Path,
+    source_path: &str,
+    user_path: &str,
+) -> Result<String, crate::error::Error> {
+    let full_path = path_security::sanitize_share_path(namespace_root, source_path, user_path)?;
+    // Strip the namespace_root prefix to get the path relative to the namespace,
+    // which is what workspace_service expects.
+    let relative = full_path
+        .strip_prefix(namespace_root)
+        .unwrap_or(&full_path);
+    Ok(relative.to_string_lossy().into_owned())
+}
 
 /// GET /api/v1/shares/:id/files
 pub async fn read_share_file(
@@ -27,25 +54,30 @@ pub async fn read_share_file(
         None => return unauthorized(),
     };
 
-    if let Err(e) = state
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
+    let share = match state
         .permission_service
-        .check_share_permission(&auth, &share_id, PermissionLevel::Read)
+        .check_share_permission(&auth, share_uuid, PermissionLevel::Read)
         .await
     {
-        return super::tenant_handler::error_response(e);
-    }
-
-    let share = match state.share_repository.get_share(&share_id).await {
         Ok(s) => s,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    // Build the effective path: namespace_id as workspace key, source_path + user path
-    let effective_path = build_share_path(&share.source_path, &query.path);
+    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
+        Ok(p) => p,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
 
+    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .read_file_string(&share.owner_tenant_id, &effective_path)
+        .read_file_string(&storage_id, &effective_path)
         .await
     {
         Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
@@ -65,15 +97,16 @@ pub async fn write_share_file(
         None => return unauthorized(),
     };
 
-    if let Err(e) = state
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
+    let share = match state
         .permission_service
-        .check_share_permission(&auth, &share_id, PermissionLevel::Write)
+        .check_share_permission(&auth, share_uuid, PermissionLevel::Write)
         .await
     {
-        return super::tenant_handler::error_response(e);
-    }
-
-    let share = match state.share_repository.get_share(&share_id).await {
         Ok(s) => s,
         Err(e) => return super::tenant_handler::error_response(e),
     };
@@ -99,11 +132,16 @@ pub async fn write_share_file(
         }
     };
 
-    let effective_path = build_share_path(&share.source_path, &query.path);
+    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
+        Ok(p) => p,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
 
+    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .write_file(&share.owner_tenant_id, &effective_path, req.content.as_bytes())
+        .write_file(&storage_id, &effective_path, req.content.as_bytes())
         .await
     {
         Ok(()) => (
@@ -127,25 +165,31 @@ pub async fn delete_share_file(
         None => return unauthorized(),
     };
 
-    if let Err(e) = state
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
+    let share = match state
         .permission_service
-        .check_share_permission(&auth, &share_id, PermissionLevel::Write)
+        .check_share_permission(&auth, share_uuid, PermissionLevel::Write)
         .await
     {
-        return super::tenant_handler::error_response(e);
-    }
-
-    let share = match state.share_repository.get_share(&share_id).await {
         Ok(s) => s,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let effective_path = build_share_path(&share.source_path, &query.path);
+    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
+        Ok(p) => p,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
     let recursive = query.recursive.as_deref() == Some("true");
 
+    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .delete_file(&share.owner_tenant_id, &effective_path, recursive)
+        .delete_file(&storage_id, &effective_path, recursive)
         .await
     {
         Ok(()) => (
@@ -169,24 +213,30 @@ pub async fn list_share_files(
         None => return unauthorized(),
     };
 
-    if let Err(e) = state
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
+    let share = match state
         .permission_service
-        .check_share_permission(&auth, &share_id, PermissionLevel::Read)
+        .check_share_permission(&auth, share_uuid, PermissionLevel::Read)
         .await
     {
-        return super::tenant_handler::error_response(e);
-    }
-
-    let share = match state.share_repository.get_share(&share_id).await {
         Ok(s) => s,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let effective_path = build_share_path(&share.source_path, &query.path);
+    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
+        Ok(p) => p,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
 
+    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .list_files(&share.owner_tenant_id, &effective_path)
+        .list_files(&storage_id, &effective_path)
         .await
     {
         Ok(files) => {
@@ -206,21 +256,74 @@ pub async fn list_share_files(
     }
 }
 
-/// Build effective path by joining share source_path with user-provided relative path
-fn build_share_path(source_path: &str, user_path: &str) -> String {
-    let source = source_path.trim_matches('/');
-    let user = user_path.trim_start_matches('/');
-    if user.is_empty() {
-        source.to_string()
-    } else {
-        format!("{}/{}", source, user)
-    }
-}
-
 fn unauthorized() -> axum::response::Response {
     (
         StatusCode::UNAUTHORIZED,
         Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
     )
         .into_response()
+}
+
+fn bad_request(msg: &str) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": msg}})),
+    )
+        .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn ns() -> &'static Path {
+        Path::new("/data/namespaces/tenant1")
+    }
+
+    #[test]
+    fn test_resolve_share_path_basic() {
+        assert_eq!(
+            resolve_share_path(ns(), "shared/data", "file.txt").unwrap(),
+            "shared/data/file.txt"
+        );
+        // Empty user path → share root directory
+        let empty_result = resolve_share_path(ns(), "shared/data", "").unwrap();
+        assert!(
+            empty_result.starts_with("shared/data"),
+            "empty user_path should resolve to share root: {empty_result}"
+        );
+        // Root-only user path → share root directory
+        let root_result = resolve_share_path(ns(), "shared/data", "/").unwrap();
+        assert!(
+            root_result.starts_with("shared/data"),
+            "/ user_path should resolve to share root: {root_result}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_share_path_traversal_rejected() {
+        // `..` components must now be rejected, not silently neutralised
+        assert!(resolve_share_path(ns(), "shared/data", "../../etc/passwd").is_err());
+        assert!(resolve_share_path(ns(), "shared/data", "../secret").is_err());
+    }
+
+    #[test]
+    fn test_resolve_share_path_dot_components() {
+        // `.` is still fine (current directory reference)
+        assert_eq!(
+            resolve_share_path(ns(), "shared/data", "./file.txt").unwrap(),
+            "shared/data/file.txt"
+        );
+        // Paths without `..` but with `.` still work
+        assert_eq!(
+            resolve_share_path(ns(), "shared/data", "a/./b/c").unwrap(),
+            "shared/data/a/b/c"
+        );
+    }
+
+    #[test]
+    fn test_resolve_share_path_null_byte_rejected() {
+        assert!(resolve_share_path(ns(), "shared/data", "foo\0bar").is_err());
+    }
 }

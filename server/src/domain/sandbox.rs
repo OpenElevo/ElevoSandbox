@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use uuid::Uuid;
 
 use crate::domain::share::MountRequest;
 
@@ -49,14 +50,14 @@ impl SandboxState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sandbox {
     /// Unique identifier
-    pub id: String,
-
-    /// Workspace ID this sandbox is bound to (legacy, will be removed in Phase 2b)
-    pub workspace_id: String,
+    pub id: Uuid,
 
     /// Namespace (tenant) ID this sandbox belongs to
+    pub namespace_id: Uuid,
+
+    /// Namespace (tenant) name — populated via JOIN in list queries
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub namespace_id: Option<String>,
+    pub namespace_name: Option<String>,
 
     /// Root path within the namespace (default: "/")
     #[serde(default = "default_root_path")]
@@ -87,7 +88,7 @@ pub struct Sandbox {
     pub updated_at: DateTime<Utc>,
 
     /// Timeout in seconds (0 = no timeout)
-    pub timeout: u64,
+    pub timeout: i32,
 
     /// Error message (if state is Error)
     pub error_message: Option<String>,
@@ -95,12 +96,12 @@ pub struct Sandbox {
 
 impl Sandbox {
     /// Create a new sandbox
-    pub fn new(id: String, workspace_id: String, template: String) -> Self {
+    pub fn new(id: Uuid, namespace_id: Uuid, template: String) -> Self {
         let now = Utc::now();
         Self {
             id,
-            workspace_id,
-            namespace_id: None,
+            namespace_id,
+            namespace_name: None,
             root_path: "/".to_string(),
             name: None,
             template,
@@ -157,13 +158,8 @@ fn default_root_path() -> String {
 /// Parameters for creating a sandbox
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSandboxParams {
-    /// Workspace ID to bind this sandbox to (legacy, optional)
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-
     /// Namespace (tenant) ID — set from AuthContext for tenant callers
-    #[serde(default)]
-    pub namespace_id: Option<String>,
+    pub namespace_id: Uuid,
 
     /// Root path within the namespace
     #[serde(default = "default_root_path")]
@@ -182,7 +178,7 @@ pub struct CreateSandboxParams {
     pub metadata: Option<HashMap<String, String>>,
 
     /// Timeout in seconds
-    pub timeout: Option<u64>,
+    pub timeout: Option<i32>,
 
     /// Share mounts to attach
     #[serde(default)]

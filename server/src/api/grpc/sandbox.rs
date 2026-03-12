@@ -5,6 +5,7 @@ use std::sync::Arc;
 use prost_types::Timestamp;
 use tonic::{Request, Response, Status};
 use tracing::debug;
+use uuid::Uuid;
 
 use crate::domain::sandbox::{
     CreateSandboxParams, Sandbox as DomainSandbox, SandboxState as DomainSandboxState,
@@ -58,8 +59,8 @@ fn state_from_proto(state: i32) -> Option<DomainSandboxState> {
 /// Convert domain Sandbox to proto Sandbox
 fn sandbox_to_proto(sb: DomainSandbox) -> ProtoSandbox {
     ProtoSandbox {
-        id: sb.id,
-        workspace_id: sb.workspace_id,
+        id: sb.id.to_string(),
+        workspace_id: sb.namespace_id.to_string(),
         name: sb.name,
         template: sb.template,
         state: state_to_proto(sb.state),
@@ -73,9 +74,9 @@ fn sandbox_to_proto(sb: DomainSandbox) -> ProtoSandbox {
             seconds: sb.updated_at.timestamp(),
             nanos: sb.updated_at.timestamp_subsec_nanos() as i32,
         }),
-        timeout: sb.timeout,
+        timeout: sb.timeout as u64,
         error_message: sb.error_message,
-        namespace_id: sb.namespace_id,
+        namespace_id: Some(sb.namespace_id.to_string()),
         root_path: sb.root_path,
         mounts: vec![],
     }
@@ -103,13 +104,13 @@ impl SandboxService for GrpcSandboxService {
 
         // workspace_id in proto is used as namespace_id
         let namespace_id = if req.workspace_id.is_empty() {
-            None
+            return Err(Status::invalid_argument("workspace_id (namespace_id) is required"));
         } else {
-            Some(req.workspace_id)
+            Uuid::parse_str(&req.workspace_id)
+                .map_err(|_| Status::invalid_argument("invalid workspace_id (namespace_id)"))?
         };
 
         let params = CreateSandboxParams {
-            workspace_id: None,
             namespace_id,
             root_path: "/".to_string(),
             template: req.template,
@@ -124,7 +125,7 @@ impl SandboxService for GrpcSandboxService {
             } else {
                 Some(req.metadata)
             },
-            timeout: req.timeout,
+            timeout: req.timeout.map(|t| t as i32),
             mounts: vec![],
         };
 
@@ -142,7 +143,9 @@ impl SandboxService for GrpcSandboxService {
         let req = request.into_inner();
         debug!(id = %req.id, "get_sandbox");
 
-        let sandbox = self.service.get(&req.id).await.map_err(error_to_status)?;
+        let sandbox_id = Uuid::parse_str(&req.id)
+            .map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
+        let sandbox = self.service.get(sandbox_id).await.map_err(error_to_status)?;
 
         Ok(Response::new(GetSandboxResponse {
             sandbox: Some(sandbox_to_proto(sandbox)),
@@ -178,8 +181,10 @@ impl SandboxService for GrpcSandboxService {
         let req = request.into_inner();
         debug!(id = %req.id, force = req.force, "delete_sandbox");
 
+        let sandbox_id = Uuid::parse_str(&req.id)
+            .map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
         self.service
-            .delete(&req.id, req.force)
+            .delete(sandbox_id, req.force)
             .await
             .map_err(error_to_status)?;
 

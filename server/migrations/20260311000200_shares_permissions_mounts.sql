@@ -36,10 +36,4 @@ CREATE TABLE sandbox_mounts (
 );
 
 -- Clean up legacy columns from sandboxes
-ALTER TABLE sandboxes DROP COLUMN IF EXISTS workspace_id;
 ALTER TABLE sandboxes DROP COLUMN IF EXISTS nfs_url;
-ALTER TABLE sandboxes ALTER COLUMN namespace_id SET NOT NULL;
-
--- Drop legacy workspace tables
-DROP TABLE IF EXISTS workspaces;
-DROP INDEX IF EXISTS idx_sandboxes_workspace_id;

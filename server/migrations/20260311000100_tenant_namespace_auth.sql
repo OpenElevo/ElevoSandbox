@@ -30,10 +30,17 @@ CREATE TABLE api_keys (
 CREATE INDEX idx_api_keys_tenant_id ON api_keys(tenant_id);
 
 -- sandboxes: add namespace_id and root_path columns
-ALTER TABLE sandboxes ADD COLUMN namespace_id UUID REFERENCES tenants(id) ON DELETE RESTRICT;
+ALTER TABLE sandboxes ADD COLUMN namespace_id UUID NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT;
 ALTER TABLE sandboxes ADD COLUMN root_path TEXT NOT NULL DEFAULT '/';
 CREATE INDEX idx_sandboxes_namespace_id ON sandboxes(namespace_id);
+
+-- Composite index on (namespace_id, state) for efficient namespace-scoped state filtering.
+-- Replaces the single-column idx_sandboxes_state from the initial migration.
+DROP INDEX IF EXISTS idx_sandboxes_state;
+CREATE INDEX idx_sandboxes_namespace_state ON sandboxes(namespace_id, state);
 
 -- Rename workspace_leases to namespace_leases
 ALTER TABLE workspace_leases RENAME TO namespace_leases;
 ALTER TABLE namespace_leases RENAME COLUMN workspace_id TO namespace_id;
+ALTER TABLE namespace_leases ADD CONSTRAINT fk_namespace_leases_tenant
+    FOREIGN KEY (namespace_id) REFERENCES tenants(id) ON DELETE CASCADE;

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
 use crate::error::{Error, Result};
 
-/// Database row for sandbox
+/// Database row for sandbox (plain SELECT, no JOIN)
 #[derive(Debug, FromRow)]
 struct SandboxRow {
     id: uuid::Uuid,
@@ -21,7 +21,26 @@ struct SandboxRow {
     container_id: Option<String>,
     env: serde_json::Value,
     metadata: serde_json::Value,
-    timeout: i64,
+    timeout: i32,
+    error_message: Option<String>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+/// Database row for sandbox with tenant name JOIN
+#[derive(Debug, FromRow)]
+struct SandboxWithNameRow {
+    id: uuid::Uuid,
+    namespace_id: uuid::Uuid,
+    namespace_name: Option<String>,
+    root_path: String,
+    name: Option<String>,
+    template: String,
+    state: String,
+    container_id: Option<String>,
+    env: serde_json::Value,
+    metadata: serde_json::Value,
+    timeout: i32,
     error_message: Option<String>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -41,9 +60,9 @@ impl TryFrom<SandboxRow> for Sandbox {
             .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
 
         Ok(Sandbox {
-            id: row.id.to_string(),
-            workspace_id: String::new(),
-            namespace_id: Some(row.namespace_id.to_string()),
+            id: row.id,
+            namespace_id: row.namespace_id,
+            namespace_name: None,
             root_path: row.root_path,
             name: row.name,
             template: row.template,
@@ -53,7 +72,39 @@ impl TryFrom<SandboxRow> for Sandbox {
             metadata,
             created_at: row.created_at,
             updated_at: row.updated_at,
-            timeout: row.timeout as u64,
+            timeout: row.timeout,
+            error_message: row.error_message,
+        })
+    }
+}
+
+impl TryFrom<SandboxWithNameRow> for Sandbox {
+    type Error = Error;
+
+    fn try_from(row: SandboxWithNameRow) -> Result<Self> {
+        let state = SandboxState::from_str(&row.state)
+            .ok_or_else(|| Error::Internal(format!("Invalid sandbox state: {}", row.state)))?;
+
+        let env: HashMap<String, String> = serde_json::from_value(row.env)
+            .map_err(|e| Error::Internal(format!("Failed to parse env: {}", e)))?;
+
+        let metadata: HashMap<String, String> = serde_json::from_value(row.metadata)
+            .map_err(|e| Error::Internal(format!("Failed to parse metadata: {}", e)))?;
+
+        Ok(Sandbox {
+            id: row.id,
+            namespace_id: row.namespace_id,
+            namespace_name: row.namespace_name,
+            root_path: row.root_path,
+            name: row.name,
+            template: row.template,
+            state,
+            container_id: row.container_id,
+            env,
+            metadata,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+            timeout: row.timeout,
             error_message: row.error_message,
         })
     }
@@ -97,17 +148,7 @@ impl SandboxRepository {
             .map_err(|e| Error::Internal(e.to_string()))?;
         let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let timeout = params.timeout.unwrap_or(0) as i64;
-
-        let namespace_id = match &params.namespace_id {
-            Some(nid) => Uuid::parse_str(nid)
-                .map_err(|e| Error::Internal(format!("Invalid namespace_id: {}", e)))?,
-            None => {
-                return Err(Error::InvalidRequest(
-                    "namespace_id is required".to_string(),
-                ));
-            }
-        };
+        let timeout = params.timeout.unwrap_or(0);
 
         // Use a transaction to insert sandbox + mounts atomically
         let mut tx = self.pool.begin().await?;
@@ -119,7 +160,7 @@ impl SandboxRepository {
             "#,
         )
         .bind(id)
-        .bind(namespace_id)
+        .bind(params.namespace_id)
         .bind(&params.root_path)
         .bind(&params.name)
         .bind(&template)
@@ -134,13 +175,11 @@ impl SandboxRepository {
 
         // Insert sandbox mounts
         for mount in &params.mounts {
-            let share_uuid = Uuid::parse_str(&mount.share_id)
-                .map_err(|_| Error::InvalidParameter("Invalid share_id in mount".into()))?;
             sqlx::query(
                 "INSERT INTO sandbox_mounts (sandbox_id, share_id, mount_path) VALUES ($1, $2, $3)",
             )
             .bind(id)
-            .bind(share_uuid)
+            .bind(mount.share_id)
             .bind(&mount.mount_path)
             .execute(&mut *tx)
             .await
@@ -149,14 +188,11 @@ impl SandboxRepository {
 
         tx.commit().await?;
 
-        self.get(&id.to_string()).await
+        self.get(id).await
     }
 
     /// Get a sandbox by ID
-    pub async fn get(&self, id: &str) -> Result<Sandbox> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
-
+    pub async fn get(&self, id: Uuid) -> Result<Sandbox> {
         let row: SandboxRow = sqlx::query_as(
             r#"
             SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
@@ -164,7 +200,7 @@ impl SandboxRepository {
             WHERE id = $1
             "#,
         )
-        .bind(uuid)
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| Error::SandboxNotFound(id.to_string()))?;
@@ -172,16 +208,20 @@ impl SandboxRepository {
         row.try_into()
     }
 
-    /// List all sandboxes with optional state filter
+    /// List all sandboxes with optional state filter (JOINs tenants for namespace_name)
     pub async fn list(&self, state_filter: Option<SandboxState>) -> Result<Vec<Sandbox>> {
-        let rows: Vec<SandboxRow> = match state_filter {
+        let rows: Vec<SandboxWithNameRow> = match state_filter {
             Some(state) => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
-                    FROM sandboxes
-                    WHERE state = $1
-                    ORDER BY created_at DESC
+                    SELECT s.id, s.namespace_id, t.name AS namespace_name,
+                           s.root_path, s.name, s.template, s.state, s.container_id,
+                           s.env, s.metadata, s.timeout, s.error_message,
+                           s.created_at, s.updated_at
+                    FROM sandboxes s
+                    LEFT JOIN tenants t ON t.id = s.namespace_id
+                    WHERE s.state = $1
+                    ORDER BY s.created_at DESC
                     "#,
                 )
                 .bind(state.as_str())
@@ -191,11 +231,62 @@ impl SandboxRepository {
             None => {
                 sqlx::query_as(
                     r#"
-                    SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
-                    FROM sandboxes
-                    ORDER BY created_at DESC
+                    SELECT s.id, s.namespace_id, t.name AS namespace_name,
+                           s.root_path, s.name, s.template, s.state, s.container_id,
+                           s.env, s.metadata, s.timeout, s.error_message,
+                           s.created_at, s.updated_at
+                    FROM sandboxes s
+                    LEFT JOIN tenants t ON t.id = s.namespace_id
+                    ORDER BY s.created_at DESC
                     "#,
                 )
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        rows.into_iter().map(|r| r.try_into()).collect()
+    }
+
+    /// List sandboxes by namespace ID with optional state filter (JOINs tenants for namespace_name)
+    pub async fn list_by_namespace(
+        &self,
+        namespace_id: Uuid,
+        state_filter: Option<SandboxState>,
+    ) -> Result<Vec<Sandbox>> {
+        let rows: Vec<SandboxWithNameRow> = match state_filter {
+            Some(state) => {
+                sqlx::query_as(
+                    r#"
+                    SELECT s.id, s.namespace_id, t.name AS namespace_name,
+                           s.root_path, s.name, s.template, s.state, s.container_id,
+                           s.env, s.metadata, s.timeout, s.error_message,
+                           s.created_at, s.updated_at
+                    FROM sandboxes s
+                    LEFT JOIN tenants t ON t.id = s.namespace_id
+                    WHERE s.namespace_id = $1 AND s.state = $2
+                    ORDER BY s.created_at DESC
+                    "#,
+                )
+                .bind(namespace_id)
+                .bind(state.as_str())
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as(
+                    r#"
+                    SELECT s.id, s.namespace_id, t.name AS namespace_name,
+                           s.root_path, s.name, s.template, s.state, s.container_id,
+                           s.env, s.metadata, s.timeout, s.error_message,
+                           s.created_at, s.updated_at
+                    FROM sandboxes s
+                    LEFT JOIN tenants t ON t.id = s.namespace_id
+                    WHERE s.namespace_id = $1
+                    ORDER BY s.created_at DESC
+                    "#,
+                )
+                .bind(namespace_id)
                 .fetch_all(&self.pool)
                 .await?
             }
@@ -207,12 +298,10 @@ impl SandboxRepository {
     /// Update sandbox state
     pub async fn update_state(
         &self,
-        id: &str,
+        id: Uuid,
         state: SandboxState,
         error_message: Option<&str>,
     ) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
         let now = Utc::now();
 
         let result = sqlx::query(
@@ -225,7 +314,7 @@ impl SandboxRepository {
         .bind(state.as_str())
         .bind(error_message)
         .bind(now)
-        .bind(uuid)
+        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -237,9 +326,7 @@ impl SandboxRepository {
     }
 
     /// Update sandbox container ID
-    pub async fn update_container_id(&self, id: &str, container_id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
+    pub async fn update_container_id(&self, id: Uuid, container_id: &str) -> Result<()> {
         let now = Utc::now();
 
         let result = sqlx::query(
@@ -251,7 +338,7 @@ impl SandboxRepository {
         )
         .bind(container_id)
         .bind(now)
-        .bind(uuid)
+        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -263,12 +350,9 @@ impl SandboxRepository {
     }
 
     /// Delete a sandbox
-    pub async fn delete(&self, id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::SandboxNotFound(id.to_string()))?;
-
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
         let result = sqlx::query("DELETE FROM sandboxes WHERE id = $1")
-            .bind(uuid)
+            .bind(id)
             .execute(&self.pool)
             .await?;
 
@@ -310,30 +394,30 @@ impl SandboxRepository {
         rows.into_iter().map(|r| r.try_into()).collect()
     }
 
-    /// List sandboxes by namespace ID
-    pub async fn list_by_namespace(&self, namespace_id: &str) -> Result<Vec<Sandbox>> {
-        let uuid = Uuid::parse_str(namespace_id)
-            .map_err(|e| Error::Internal(format!("Invalid namespace_id: {}", e)))?;
-
-        let rows: Vec<SandboxRow> = sqlx::query_as(
+    /// Get a sandbox including tenant name (via JOIN)
+    pub async fn get_with_name(&self, id: Uuid) -> Result<Sandbox> {
+        let row: SandboxWithNameRow = sqlx::query_as(
             r#"
-            SELECT id, namespace_id, root_path, name, template, state, container_id, env, metadata, timeout, error_message, created_at, updated_at
-            FROM sandboxes
-            WHERE namespace_id = $1
-            ORDER BY created_at DESC
+            SELECT s.id, s.namespace_id, t.name AS namespace_name,
+                   s.root_path, s.name, s.template, s.state, s.container_id,
+                   s.env, s.metadata, s.timeout, s.error_message,
+                   s.created_at, s.updated_at
+            FROM sandboxes s
+            LEFT JOIN tenants t ON t.id = s.namespace_id
+            WHERE s.id = $1
             "#,
         )
-        .bind(uuid)
-        .fetch_all(&self.pool)
-        .await?;
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| Error::SandboxNotFound(id.to_string()))?;
 
-        rows.into_iter().map(|r| r.try_into()).collect()
+        row.try_into()
     }
 
+
     /// Get mounts for a sandbox
-    pub async fn get_mounts(&self, sandbox_id: &str) -> Result<Vec<crate::domain::share::SandboxMount>> {
-        let uuid = Uuid::parse_str(sandbox_id)
-            .map_err(|_| Error::SandboxNotFound(sandbox_id.to_string()))?;
+    pub async fn get_mounts(&self, sandbox_id: Uuid) -> Result<Vec<crate::domain::share::SandboxMount>> {
 
         #[derive(Debug, FromRow)]
         struct MountRow {
@@ -345,15 +429,15 @@ impl SandboxRepository {
         let rows: Vec<MountRow> = sqlx::query_as(
             "SELECT sandbox_id, share_id, mount_path FROM sandbox_mounts WHERE sandbox_id = $1",
         )
-        .bind(uuid)
+        .bind(sandbox_id)
         .fetch_all(&self.pool)
         .await?;
 
         Ok(rows
             .into_iter()
             .map(|r| crate::domain::share::SandboxMount {
-                sandbox_id: r.sandbox_id.to_string(),
-                share_id: r.share_id.to_string(),
+                sandbox_id: r.sandbox_id,
+                share_id: r.share_id,
                 mount_path: r.mount_path,
             })
             .collect())
@@ -364,31 +448,31 @@ impl SandboxRepository {
 mod tests {
     use super::*;
 
-    // Helper to create a test workspace
-    async fn create_test_workspace(pool: &PgPool) -> String {
-        let workspace_id = Uuid::new_v4();
+    // Helper to create a test tenant (namespace)
+    async fn create_test_tenant(pool: &PgPool) -> Uuid {
+        let tenant_id = Uuid::new_v4();
         let now = Utc::now();
         sqlx::query(
-            r#"INSERT INTO workspaces (id, name, metadata, created_at, updated_at) VALUES ($1, $2, '{}', $3, $4)"#,
+            r#"INSERT INTO tenants (id, name, description, is_active, storage_type, storage_config, created_at, updated_at)
+               VALUES ($1, $2, '', true, 'managed', '{}', $3, $4)"#,
         )
-        .bind(workspace_id)
-        .bind("test-workspace")
+        .bind(tenant_id)
+        .bind("test-tenant")
         .bind(now)
         .bind(now)
         .execute(pool)
         .await
-        .expect("Failed to create test workspace");
-        workspace_id.to_string()
+        .expect("Failed to create test tenant");
+        tenant_id
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_create_and_get_sandbox(pool: PgPool) {
-        let workspace_id = create_test_workspace(&pool).await;
+        let namespace_id = create_test_tenant(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id: Some(workspace_id.clone()),
-            namespace_id: None,
+            namespace_id,
             root_path: "/".to_string(),
             template: Some("python:3.11".to_string()),
             name: Some("test-sandbox".to_string()),
@@ -399,25 +483,24 @@ mod tests {
         };
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
-        assert_eq!(sandbox.workspace_id, workspace_id);
+        assert_eq!(sandbox.namespace_id, namespace_id);
         assert_eq!(sandbox.name, Some("test-sandbox".to_string()));
         assert_eq!(sandbox.template, "python:3.11");
         assert_eq!(sandbox.state, SandboxState::Starting);
         assert_eq!(sandbox.timeout, 3600);
 
-        let fetched = repo.get(&sandbox.id).await.expect("Failed to get sandbox");
+        let fetched = repo.get(sandbox.id).await.expect("Failed to get sandbox");
         assert_eq!(fetched.id, sandbox.id);
         assert_eq!(fetched.name, sandbox.name);
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_update_state(pool: PgPool) {
-        let workspace_id = create_test_workspace(&pool).await;
+        let namespace_id = create_test_tenant(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id: Some(workspace_id),
-            namespace_id: None,
+            namespace_id,
             root_path: "/".to_string(),
             template: None,
             name: None,
@@ -429,23 +512,22 @@ mod tests {
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
 
-        repo.update_state(&sandbox.id, SandboxState::Running, None)
+        repo.update_state(sandbox.id, SandboxState::Running, None)
             .await
             .expect("Failed to update state");
 
-        let fetched = repo.get(&sandbox.id).await.expect("Failed to get sandbox");
+        let fetched = repo.get(sandbox.id).await.expect("Failed to get sandbox");
         assert_eq!(fetched.state, SandboxState::Running);
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_list_sandboxes(pool: PgPool) {
-        let workspace_id = create_test_workspace(&pool).await;
+        let namespace_id = create_test_tenant(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         // Create two sandboxes
         let params1 = CreateSandboxParams {
-            workspace_id: Some(workspace_id.clone()),
-            namespace_id: None,
+            namespace_id,
             root_path: "/".to_string(),
             template: Some("python".to_string()),
             name: Some("sandbox1".to_string()),
@@ -455,8 +537,7 @@ mod tests {
             mounts: vec![],
         };
         let params2 = CreateSandboxParams {
-            workspace_id: Some(workspace_id),
-            namespace_id: None,
+            namespace_id,
             root_path: "/".to_string(),
             template: Some("node".to_string()),
             name: Some("sandbox2".to_string()),
@@ -475,7 +556,7 @@ mod tests {
             .expect("Failed to create sandbox 2");
 
         // Update one to running
-        repo.update_state(&sandbox2.id, SandboxState::Running, None)
+        repo.update_state(sandbox2.id, SandboxState::Running, None)
             .await
             .expect("Failed to update state");
 
@@ -499,12 +580,11 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_delete_sandbox(pool: PgPool) {
-        let workspace_id = create_test_workspace(&pool).await;
+        let namespace_id = create_test_tenant(&pool).await;
         let repo = SandboxRepository::new(pool);
 
         let params = CreateSandboxParams {
-            workspace_id: Some(workspace_id),
-            namespace_id: None,
+            namespace_id,
             root_path: "/".to_string(),
             template: None,
             name: None,
@@ -516,11 +596,11 @@ mod tests {
 
         let sandbox = repo.create(params).await.expect("Failed to create sandbox");
 
-        repo.delete(&sandbox.id)
+        repo.delete(sandbox.id)
             .await
             .expect("Failed to delete sandbox");
 
-        let result = repo.get(&sandbox.id).await;
+        let result = repo.get(sandbox.id).await;
         assert!(matches!(result, Err(Error::SandboxNotFound(_))));
     }
 }

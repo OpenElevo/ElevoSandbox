@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use futures::Stream;
 use tracing::info;
+use uuid::Uuid;
 
 use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{CommandResult, ProcessEvent};
@@ -45,7 +46,9 @@ impl ProcessService {
     /// Run a command and wait for completion
     pub async fn run(&self, sandbox_id: &str, opts: RunCommandOptions) -> Result<CommandResult> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox_uuid = Uuid::parse_str(sandbox_id)
+            .map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))?;
+        let sandbox = self.repository.get(sandbox_uuid).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),
@@ -88,7 +91,9 @@ impl ProcessService {
         opts: RunCommandOptions,
     ) -> Result<impl Stream<Item = ProcessEvent>> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox_uuid = Uuid::parse_str(sandbox_id)
+            .map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))?;
+        let sandbox = self.repository.get(sandbox_uuid).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),
@@ -129,7 +134,9 @@ impl ProcessService {
     /// Kill a running process
     pub async fn kill(&self, sandbox_id: &str, pid: u32, signal: Option<i32>) -> Result<()> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox_uuid = Uuid::parse_str(sandbox_id)
+            .map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))?;
+        let sandbox = self.repository.get(sandbox_uuid).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),

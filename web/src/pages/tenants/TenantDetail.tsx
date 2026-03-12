@@ -1,13 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Card, Descriptions, Tag, Button, Space, Tabs, Typography, App, Drawer, Form, Input, Table, Modal, Checkbox, DatePicker } from 'antd';
+import {
+  Card, Descriptions, Tag, Button, Space, Tabs, Typography, App,
+  Drawer, Form, Input, Table, Modal, Checkbox, DatePicker, Alert,
+} from 'antd';
+import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getTenant, updateTenant, activateTenant, deactivateTenant, deleteTenant, listApiKeys, createApiKey, revokeApiKey, listTenantPermissions } from '@/api/tenants';
+import {
+  getTenant, updateTenant, activateTenant, deactivateTenant,
+  deleteTenant, listApiKeys, createApiKey, revokeApiKey, listTenantPermissions,
+} from '@/api/tenants';
 import { listShares } from '@/api/shares';
 import type { ApiKey, SharePermission } from '@/types';
-import { PERMISSION_COLORS } from '@/utils/constants';
+import { PERMISSION_COLORS, PERMISSION_LABELS } from '@/utils/constants';
 import { formatTime } from '@/utils/time';
 import FileBrowser from '@/components/FileBrowser/FileBrowser';
+import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
 import dayjs from 'dayjs';
 
 function getApiKeyStatus(key: ApiKey): { label: string; color: string } {
@@ -18,6 +26,73 @@ function getApiKeyStatus(key: ApiKey): { label: string; color: string } {
   return { label: '活跃', color: 'green' };
 }
 
+// ─── Token display modal with copy button ──────────────────────────────────────
+
+interface TokenModalData {
+  name: string;
+  token: string;
+}
+
+interface TokenDisplayModalProps {
+  data: TokenModalData | null;
+  acked: boolean;
+  onAckedChange: (v: boolean) => void;
+  onClose: () => void;
+}
+
+function TokenDisplayModal({ data, acked, onAckedChange, onClose }: TokenDisplayModalProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!data) return;
+    navigator.clipboard.writeText(data.token).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <Modal
+      title="API Key 已创建"
+      open={!!data}
+      onOk={onClose}
+      onCancel={onClose}
+      maskClosable={false}
+      keyboard={false}
+      okButtonProps={{ disabled: !acked }}
+      cancelButtonProps={{ style: { display: 'none' } }}
+    >
+      <Alert
+        type="warning"
+        message="API Key 创建成功"
+        description="请立即复制并妥善保存以下 Token，此 Token 仅展示一次，关闭后无法再查看。"
+        showIcon
+        style={{ marginBottom: 12 }}
+      />
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <Input
+          readOnly
+          value={data?.token ?? ''}
+          onClick={(e) => (e.target as HTMLInputElement).select()}
+          style={{ fontFamily: 'monospace' }}
+        />
+        <Button
+          icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+          onClick={handleCopy}
+          type={copied ? 'primary' : 'default'}
+        >
+          {copied ? '已复制 ✓' : '复制'}
+        </Button>
+      </div>
+      <Checkbox checked={acked} onChange={(e) => onAckedChange(e.target.checked)}>
+        我已安全保存此 Token
+      </Checkbox>
+    </Modal>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
 export default function TenantDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -25,12 +100,13 @@ export default function TenantDetail() {
   const { message, modal } = App.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get('tab') || 'keys';
+  const setBreadcrumbName = useBreadcrumbStore((s) => s.setBreadcrumbName);
 
   const [editOpen, setEditOpen] = useState(false);
   const [editForm] = Form.useForm();
   const [keyForm] = Form.useForm();
   const [keyDrawerOpen, setKeyDrawerOpen] = useState(false);
-  const [tokenModal, setTokenModal] = useState<{ name: string; token: string } | null>(null);
+  const [tokenModal, setTokenModal] = useState<TokenModalData | null>(null);
   const [tokenAcked, setTokenAcked] = useState(false);
 
   const { data: tenant, isLoading } = useQuery({
@@ -38,6 +114,12 @@ export default function TenantDetail() {
     queryFn: () => getTenant(id!),
     enabled: !!id,
   });
+
+  useEffect(() => {
+    if (id && tenant?.name) {
+      setBreadcrumbName(id, tenant.name);
+    }
+  }, [id, tenant?.name, setBreadcrumbName]);
 
   const { data: apiKeys } = useQuery({
     queryKey: ['api-keys', id],
@@ -97,34 +179,102 @@ export default function TenantDetail() {
     });
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!tenant) return;
-    let inputName = '';
-    modal.confirm({
-      title: `删除租户「${tenant.name}」？`,
-      content: (
-        <div>
-          <Typography.Text type="danger">此操作不可逆。</Typography.Text>
-          <Input style={{ marginTop: 8 }} placeholder="请输入租户名称确认" onChange={(e) => { inputName = e.target.value; }} />
-        </div>
-      ),
-      okText: '删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        if (inputName !== tenant.name) { message.error('名称不匹配'); throw new Error('mismatch'); }
-        await deleteTenant(id!, true);
-        message.success('租户已删除');
-        navigate('/admin/tenants');
-      },
-    });
+
+    // First probe without force to determine the error code
+    try {
+      await deleteTenant(id!, false);
+      message.success('租户已删除');
+      navigate('/admin/tenants');
+      return;
+    } catch (err: unknown) {
+      const error = err as { response?: { status?: number; data?: { error?: { code?: string; message?: string } } } };
+      const status = error.response?.status;
+      const code = error.response?.data?.error?.code;
+      const msg = error.response?.data?.error?.message;
+
+      if (status !== 409) {
+        message.error(msg || '删除租户失败');
+        return;
+      }
+
+      // Case 1: has active shares or sandboxes → hard block, no delete possible
+      if (code === 'HAS_ACTIVE_SHARES' || code === 'HAS_ACTIVE_SANDBOXES') {
+        Modal.error({
+          title: '无法删除租户',
+          content: msg || '该租户仍有活跃的 Share 或 Sandbox，请先清理后再删除。',
+        });
+        return;
+      }
+
+      // Case 2: has active API keys → warning, require name confirm, then force=true
+      if (code === 'HAS_ACTIVE_API_KEYS') {
+        let inputName = '';
+        modal.confirm({
+          title: `删除租户「${tenant.name}」？`,
+          content: (
+            <div>
+              <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
+                {msg || '该租户有活跃 API Key，删除后这些 Key 将永久失效。'}
+              </Typography.Text>
+              <Typography.Text type="danger" style={{ display: 'block', marginBottom: 8 }}>
+                此操作不可逆，请谨慎操作。
+              </Typography.Text>
+              <Input
+                placeholder="请输入租户名称确认"
+                onChange={(e) => { inputName = e.target.value; }}
+              />
+            </div>
+          ),
+          okText: '确认删除',
+          okButtonProps: { danger: true },
+          cancelText: '取消',
+          onOk: async () => {
+            if (inputName !== tenant.name) {
+              message.error('名称不匹配');
+              throw new Error('mismatch');
+            }
+            await deleteTenant(id!, true);
+            message.success('租户已删除');
+            navigate('/admin/tenants');
+          },
+        });
+        return;
+      }
+
+      // Case 3: other 409 / clean tenant — normal name confirmation
+      let inputName = '';
+      modal.confirm({
+        title: `删除租户「${tenant.name}」？`,
+        content: (
+          <div>
+            <Typography.Text type="danger">此操作不可逆。</Typography.Text>
+            <Input
+              style={{ marginTop: 8 }}
+              placeholder="请输入租户名称确认"
+              onChange={(e) => { inputName = e.target.value; }}
+            />
+          </div>
+        ),
+        okText: '删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          if (inputName !== tenant.name) { message.error('名称不匹配'); throw new Error('mismatch'); }
+          await deleteTenant(id!, true);
+          message.success('租户已删除');
+          navigate('/admin/tenants');
+        },
+      });
+    }
   };
 
   const handleCreateKey = () => {
     keyForm.validateFields().then((values) => {
       const params: { name: string; expires_at?: string } = { name: values.name };
       if (values.expires_at) {
-        params.expires_at = values.expires_at.toISOString();
+        params.expires_at = (values.expires_at as ReturnType<typeof dayjs>).toISOString();
       }
       createKeyMutation.mutate(params);
     });
@@ -150,37 +300,63 @@ export default function TenantDetail() {
   const keyColumns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
     { title: '前缀', dataIndex: 'token_prefix', key: 'prefix' },
-    { title: '状态', key: 'status',
+    {
+      title: '状态', key: 'status',
       render: (_: unknown, record: ApiKey) => {
         const status = getApiKeyStatus(record);
         return <Tag color={status.color}>{status.label}</Tag>;
       },
     },
-    { title: '过期时间', dataIndex: 'expires_at', key: 'expires',
-      render: (v: string | null) => v ? formatTime(v) : '永不过期' },
-    { title: '最近使用', dataIndex: 'last_used_at', key: 'last_used',
-      render: (v: string | null) => v ? formatTime(v) : '从未使用' },
+    {
+      title: '过期时间', dataIndex: 'expires_at', key: 'expires',
+      render: (v: string | null) => v ? formatTime(v) : '永不过期',
+    },
+    {
+      title: '最近使用', dataIndex: 'last_used_at', key: 'last_used',
+      render: (v: string | null) => v ? formatTime(v) : '从未使用',
+    },
     { title: '创建时间', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
-    { title: '操作', key: 'actions',
-      render: (_: unknown, record: ApiKey) => record.is_active && !record.expires_at || (record.expires_at && dayjs(record.expires_at).isAfter(dayjs())) ? (
-        <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
-      ) : null },
+    {
+      title: '操作', key: 'actions',
+      render: (_: unknown, record: ApiKey) =>
+        (record.is_active && !record.expires_at) || (record.expires_at && dayjs(record.expires_at).isAfter(dayjs())) ? (
+          <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
+        ) : null,
+    },
   ];
 
   const shareColumns = [
-    { title: '名称', dataIndex: 'name', key: 'name',
-      render: (name: string, r: { id: string }) => <a onClick={() => navigate(`/admin/shares/${r.id}`)}>{name}</a> },
+    {
+      title: '名称', dataIndex: 'name', key: 'name',
+      render: (name: string, r: { id: string }) => (
+        <a onClick={() => navigate(`/admin/shares/${r.id}`)}>{name}</a>
+      ),
+    },
     { title: '源路径', dataIndex: 'source_path', key: 'path' },
-    { title: '可见性', dataIndex: 'visibility', key: 'vis',
-      render: (v: string) => <Tag color={v === 'public' ? 'blue' : 'default'}>{v === 'public' ? '公开' : '私有'}</Tag> },
+    {
+      title: '可见性', dataIndex: 'visibility', key: 'vis',
+      render: (v: string) => <Tag color={v === 'public' ? 'blue' : 'default'}>{v === 'public' ? '公开' : '私有'}</Tag>,
+    },
     { title: '创建时间', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
   ];
 
   const permissionColumns = [
-    { title: '共享', dataIndex: 'share_id', key: 'share',
-      render: (sid: string) => <a onClick={() => navigate(`/admin/shares/${sid}`)}>{sid.slice(0, 8)}...</a> },
-    { title: '权限', dataIndex: 'permission', key: 'permission',
-      render: (p: string) => <Tag color={(PERMISSION_COLORS as Record<string, string>)[p] || 'default'}>{p}</Tag> },
+    {
+      title: '共享', dataIndex: 'share_id', key: 'share',
+      render: (sid: string, record: SharePermission) => (
+        <a onClick={() => navigate(`/admin/shares/${sid}`)}>
+          {record.share_name || sid.slice(0, 8) + '...'}
+        </a>
+      ),
+    },
+    {
+      title: '权限', dataIndex: 'permission', key: 'permission',
+      render: (p: string) => (
+        <Tag color={(PERMISSION_COLORS as Record<string, string>)[p] || 'default'}>
+          {(PERMISSION_LABELS as Record<string, string>)[p] || p}
+        </Tag>
+      ),
+    },
     { title: '授予时间', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
   ];
 
@@ -204,7 +380,7 @@ export default function TenantDetail() {
           <Descriptions.Item label="状态">
             <Tag color={tenant.is_active ? 'green' : 'default'}>{tenant.is_active ? '活跃' : '已停用'}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="存储类型">{tenant.storage_type || 'local'}</Descriptions.Item>
+          <Descriptions.Item label="存储类型">{tenant.storage_type === 'remote' ? '远程' : '托管'}</Descriptions.Item>
           <Descriptions.Item label="描述" span={2}>{tenant.description || '-'}</Descriptions.Item>
           <Descriptions.Item label="创建时间">{formatTime(tenant.created_at)}</Descriptions.Item>
           <Descriptions.Item label="更新时间">{formatTime(tenant.updated_at)}</Descriptions.Item>
@@ -216,48 +392,78 @@ export default function TenantDetail() {
         onChange={(key) => setSearchParams({ tab: key })}
         style={{ marginTop: 16 }}
         items={[
-          { key: 'keys', label: 'API Keys', children: (
-            <div>
-              <Button type="primary" size="small" onClick={() => setKeyDrawerOpen(true)} style={{ marginBottom: 12 }}>
-                创建 Key
-              </Button>
-              <Table dataSource={apiKeys ?? []} columns={keyColumns} rowKey="id" size="small" pagination={false} />
-            </div>
-          )},
-          { key: 'shares', label: '共享', children: (
-            <Table dataSource={sharesData?.shares ?? []} columns={shareColumns} rowKey="id" size="small" pagination={false} />
-          )},
-          { key: 'permissions', label: '权限', children: (
-            <Table
-              dataSource={permissionsData ?? []}
-              columns={permissionColumns}
-              rowKey={(r: SharePermission) => `${r.share_id}-${r.tenant_id}`}
-              size="small"
-              pagination={false}
-              locale={{ emptyText: '该租户暂无授权记录' }}
-            />
-          )},
-          { key: 'files', label: '命名空间文件', children: (
-            <FileBrowser namespaceId={id!} />
-          )},
+          {
+            key: 'keys', label: 'API Keys', children: (
+              <div>
+                <Button type="primary" size="small" onClick={() => setKeyDrawerOpen(true)} style={{ marginBottom: 12 }}>
+                  创建 Key
+                </Button>
+                <Table dataSource={apiKeys ?? []} columns={keyColumns} rowKey="id" size="small" pagination={false} />
+              </div>
+            ),
+          },
+          {
+            key: 'shares', label: '共享', children: (
+              <Table dataSource={sharesData?.shares ?? []} columns={shareColumns} rowKey="id" size="small" pagination={false} />
+            ),
+          },
+          {
+            key: 'permissions', label: '权限', children: (
+              <Table
+                dataSource={permissionsData ?? []}
+                columns={permissionColumns}
+                rowKey={(r: SharePermission) => `${r.share_id}-${r.tenant_id}`}
+                size="small"
+                pagination={false}
+                locale={{ emptyText: '该租户暂无授权记录' }}
+              />
+            ),
+          },
+          {
+            key: 'files', label: '命名空间文件', children: (
+              <FileBrowser namespaceId={id!} />
+            ),
+          },
         ]}
       />
 
-      <Drawer title="编辑租户" open={editOpen} onClose={() => setEditOpen(false)} width={400}
-        extra={<Button type="primary" onClick={() => editForm.validateFields().then((v) => updateMutation.mutate(v))} loading={updateMutation.isPending}>保存</Button>}>
+      <Drawer
+        title="编辑租户"
+        open={editOpen}
+        onClose={() => setEditOpen(false)}
+        width={400}
+        extra={
+          <Button
+            type="primary"
+            onClick={() => editForm.validateFields().then((v) => updateMutation.mutate(v))}
+            loading={updateMutation.isPending}
+          >
+            保存
+          </Button>
+        }
+      >
         <Form form={editForm} layout="vertical">
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
         </Form>
       </Drawer>
 
-      <Drawer title="创建 API Key" open={keyDrawerOpen} onClose={() => setKeyDrawerOpen(false)} width={400}
-        extra={<Button type="primary" onClick={handleCreateKey} loading={createKeyMutation.isPending}>创建</Button>}>
+      <Drawer
+        title="创建 API Key"
+        open={keyDrawerOpen}
+        onClose={() => setKeyDrawerOpen(false)}
+        width={400}
+        extra={
+          <Button type="primary" onClick={handleCreateKey} loading={createKeyMutation.isPending}>
+            创建
+          </Button>
+        }
+      >
         <Form form={keyForm} layout="vertical">
           <Form.Item name="name" label="Key 名称" rules={[{ required: true, message: '请输入 Key 名称' }]}>
             <Input placeholder="例如 production" />
           </Form.Item>
-          <Form.Item name="expires_at" label="过期时间">
+          <Form.Item name="expires_at" label="过期时间" extra="不填写则永不过期">
             <DatePicker
               showTime
               placeholder="留空则永不过期"
@@ -268,28 +474,12 @@ export default function TenantDetail() {
         </Form>
       </Drawer>
 
-      <Modal
-        title="API Key 已创建"
-        open={!!tokenModal}
-        onOk={() => setTokenModal(null)}
-        onCancel={() => setTokenModal(null)}
-        maskClosable={false}
-        keyboard={false}
-        okButtonProps={{ disabled: !tokenAcked }}
-        cancelButtonProps={{ style: { display: 'none' } }}
-      >
-        <Typography.Paragraph>
-          Key <strong>{tokenModal?.name}</strong> 已创建。请立即复制 Token，关闭后将无法再次查看。
-        </Typography.Paragraph>
-        <Input.TextArea value={tokenModal?.token} readOnly rows={2} />
-        <Checkbox
-          checked={tokenAcked}
-          onChange={(e) => setTokenAcked(e.target.checked)}
-          style={{ marginTop: 12 }}
-        >
-          我已安全保存此 Token
-        </Checkbox>
-      </Modal>
+      <TokenDisplayModal
+        data={tokenModal}
+        acked={tokenAcked}
+        onAckedChange={setTokenAcked}
+        onClose={() => setTokenModal(null)}
+      />
     </div>
   );
 }

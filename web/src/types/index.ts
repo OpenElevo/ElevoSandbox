@@ -38,6 +38,7 @@ export interface ApiKey {
 export interface Share {
   id: string;
   owner_tenant_id: string;
+  owner_tenant_name?: string;
   name: string;
   source_path: string;
   description: string;
@@ -66,6 +67,7 @@ export type PermissionLevel = 'read' | 'write' | 'execute' | 'admin';
 export interface SharePermission {
   tenant_id: string;
   share_id: string;
+  share_name?: string;
   permission: PermissionLevel;
   created_at: string;
   tenant_name?: string;

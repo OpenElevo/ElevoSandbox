@@ -41,10 +41,17 @@ impl AuthConfig {
     }
 
     fn jwt_secret_bytes(&self) -> &[u8] {
-        self.jwt_secret
-            .as_deref()
-            .unwrap_or("dev-secret-do-not-use-in-production")
-            .as_bytes()
+        match self.jwt_secret.as_deref() {
+            Some(secret) => secret.as_bytes(),
+            None => {
+                if !self.dev_mode {
+                    // This should not happen — config validation should catch it.
+                    // Log a loud warning so operators notice immediately.
+                    warn!("JWT_SECRET is not configured in production mode! Using insecure fallback.");
+                }
+                b"dev-secret-do-not-use-in-production"
+            }
+        }
     }
 
     /// Create a JWT token for admin login
@@ -71,6 +78,8 @@ impl AuthConfig {
     fn verify_jwt(&self, token: &str) -> Result<JwtClaims, AuthError> {
         let mut validation = Validation::default();
         validation.set_required_spec_claims(&["exp", "sub"]);
+        // Only accept "admin" as valid subject
+        validation.sub = Some("admin".to_string());
 
         let data = decode::<JwtClaims>(
             token,
@@ -79,6 +88,9 @@ impl AuthConfig {
         )
         .map_err(|e| match e.kind() {
             jsonwebtoken::errors::ErrorKind::ExpiredSignature => AuthError::TokenExpired,
+            jsonwebtoken::errors::ErrorKind::InvalidSubject => {
+                AuthError::InvalidToken("invalid subject claim".to_string())
+            }
             _ => AuthError::InvalidToken(format!("{}", e)),
         })?;
 
@@ -132,13 +144,13 @@ pub async fn auth_middleware(
         }
     };
 
-    // Extract client IP
-    let ip_address = extract_client_ip(&request);
+    // Extract client IP (honouring TRUSTED_PROXY_IPS allowlist)
+    let ip_address = extract_client_ip(&request, &state.config.trusted_proxy_ips);
 
     // Route based on token prefix
     if token.starts_with("sk_") {
         // API Key authentication path
-        match authenticate_api_key(&state, token).await {
+        match authenticate_api_key(&state, token, ip_address).await {
             Ok(ctx) => {
                 request.extensions_mut().insert(ctx);
                 next.run(request).await
@@ -165,7 +177,11 @@ pub async fn auth_middleware(
 }
 
 /// Authenticate via API Key (SHA-256 hash lookup)
-async fn authenticate_api_key(state: &AppState, token: &str) -> Result<AuthContext, AuthError> {
+async fn authenticate_api_key(
+    state: &AppState,
+    token: &str,
+    ip_address: Option<std::net::IpAddr>,
+) -> Result<AuthContext, AuthError> {
     let result = state
         .tenant_repository
         .find_by_token_hash(token)
@@ -185,24 +201,15 @@ async fn authenticate_api_key(state: &AppState, token: &str) -> Result<AuthConte
         return Err(AuthError::TenantDeactivated);
     }
 
-    // Update last_used_at asynchronously (fire-and-forget)
-    let repo = state.tenant_repository.clone();
-    let key_id = key.id.clone();
-    tokio::spawn(async move {
-        if let Err(e) = repo.update_last_used(&key_id).await {
-            warn!("Failed to update API key last_used_at: {}", e);
-        }
-    });
-
-    let tenant_uuid = Uuid::parse_str(&tenant.id)
-        .map_err(|e| AuthError::Internal(format!("Invalid tenant UUID: {}", e)))?;
+    // Update last_used_at via batching tracker (coalesces writes)
+    state.api_key_usage.update(key.id);
 
     Ok(AuthContext {
         identity: Identity::Tenant {
-            id: tenant_uuid,
+            id: tenant.id,
             name: tenant.name,
         },
-        ip_address: None,
+        ip_address,
     })
 }
 
@@ -221,11 +228,11 @@ fn authenticate_jwt(
         ip_address,
     };
 
-    // Check if token needs refresh
+    // Check if token needs refresh — use current request IP, not the original login IP
     let refreshed = if config.should_refresh(&claims) {
         debug!("JWT token nearing expiry, issuing refresh");
         config
-            .create_admin_token(claims.login_ip.clone())
+            .create_admin_token(ip_address.map(|ip| ip.to_string()))
             .ok()
     } else {
         None
@@ -234,27 +241,63 @@ fn authenticate_jwt(
     Ok((ctx, refreshed))
 }
 
-/// Extract client IP from request
-fn extract_client_ip(request: &Request) -> Option<std::net::IpAddr> {
-    // Try X-Forwarded-For first
-    if let Some(xff) = request.headers().get("x-forwarded-for") {
-        if let Ok(s) = xff.to_str() {
-            if let Some(first) = s.split(',').next() {
-                if let Ok(ip) = first.trim().parse() {
+/// Extract the direct connection IP from request extensions.
+fn socket_ip(request: &Request) -> Option<std::net::IpAddr> {
+    request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|ci| ci.0.ip())
+}
+
+/// Extract client IP from request, respecting the trusted-proxy allowlist.
+///
+/// When `trusted_proxy_ips` is non-empty, proxy headers (X-Forwarded-For,
+/// X-Real-IP) are only honoured when the direct connection originates from
+/// one of the listed trusted proxy IPs.  When the list is empty, the legacy
+/// behaviour (always trust XFF/XRI) is preserved for backward compatibility.
+pub(crate) fn extract_client_ip(
+    request: &Request,
+    trusted_proxy_ips: &[String],
+) -> Option<std::net::IpAddr> {
+    let direct_ip = socket_ip(request);
+
+    // Determine whether proxy headers should be trusted for this connection.
+    let should_trust_proxy = if trusted_proxy_ips.is_empty() {
+        // Backward-compatible: always trust proxy headers when no list is configured.
+        true
+    } else {
+        // Only trust proxy headers when the direct connection comes from a
+        // configured trusted proxy IP.
+        direct_ip.map_or(false, |ip| {
+            trusted_proxy_ips
+                .iter()
+                .any(|trusted| trusted.trim().parse::<std::net::IpAddr>().ok() == Some(ip))
+        })
+    };
+
+    if should_trust_proxy {
+        // Try X-Forwarded-For first
+        if let Some(xff) = request.headers().get("x-forwarded-for") {
+            if let Ok(s) = xff.to_str() {
+                if let Some(first) = s.split(',').next() {
+                    if let Ok(ip) = first.trim().parse() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+        // Try X-Real-IP
+        if let Some(xri) = request.headers().get("x-real-ip") {
+            if let Ok(s) = xri.to_str() {
+                if let Ok(ip) = s.trim().parse() {
                     return Some(ip);
                 }
             }
         }
     }
-    // Try X-Real-IP
-    if let Some(xri) = request.headers().get("x-real-ip") {
-        if let Ok(s) = xri.to_str() {
-            if let Ok(ip) = s.trim().parse() {
-                return Some(ip);
-            }
-        }
-    }
-    None
+
+    // Fall back to the direct socket address.
+    direct_ip
 }
 
 /// Convert AuthError to HTTP response
@@ -394,6 +437,29 @@ mod tests {
             .verify_jwt_public(&token)
             .expect("Failed to verify dev mode token");
         assert_eq!(claims.sub, "admin");
+    }
+
+    #[test]
+    fn test_jwt_invalid_subject_rejected() {
+        let config = test_config();
+        let now = Utc::now().timestamp();
+        // Create a token with sub="hacker" instead of "admin"
+        let claims = JwtClaims {
+            sub: "hacker".to_string(),
+            session_id: Uuid::new_v4(),
+            login_ip: None,
+            iat: now,
+            exp: now + 3600,
+        };
+        let token = jsonwebtoken::encode(
+            &jsonwebtoken::Header::default(),
+            &claims,
+            &jsonwebtoken::EncodingKey::from_secret(config.jwt_secret_bytes()),
+        )
+        .unwrap();
+
+        let result = config.verify_jwt_public(&token);
+        assert!(matches!(result, Err(AuthError::InvalidToken(_))));
     }
 
     #[test]

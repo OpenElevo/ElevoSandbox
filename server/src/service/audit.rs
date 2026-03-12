@@ -22,7 +22,7 @@ impl AuditService {
         auth: &AuthContext,
         action: &str,
         resource_type: &str,
-        resource_id: &str,
+        resource_id: Uuid,
         resource_name: &str,
         detail: serde_json::Value,
     ) {
@@ -35,7 +35,6 @@ impl AuditService {
             }
         };
 
-        let resource_uuid = Uuid::parse_str(resource_id).unwrap_or(Uuid::nil());
         let ip_address = auth.ip_address.map(|ip| ip.to_string());
 
         let params = CreateAuditLogParams {
@@ -43,7 +42,7 @@ impl AuditService {
             actor_id,
             action: action.to_string(),
             resource_type: resource_type.to_string(),
-            resource_id: resource_uuid,
+            resource_id,
             resource_name: resource_name.to_string(),
             detail,
             ip_address,

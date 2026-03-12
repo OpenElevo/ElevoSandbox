@@ -33,6 +33,8 @@ pub struct CreateSandboxRequest {
 pub struct SandboxResponse {
     pub id: String,
     pub namespace_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace_name: Option<String>,
     pub root_path: String,
     pub name: Option<String>,
     pub template: String,
@@ -74,6 +76,7 @@ fn sandbox_to_response(sandbox: crate::domain::sandbox::Sandbox) -> SandboxRespo
     SandboxResponse {
         id: sandbox.id.to_string(),
         namespace_id: sandbox.namespace_id.to_string(),
+        namespace_name: sandbox.namespace_name,
         root_path: sandbox.root_path,
         name: sandbox.name,
         template: sandbox.template,
@@ -97,7 +100,7 @@ pub async fn create_sandbox(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -151,7 +154,7 @@ pub async fn create_sandbox(
     } else {
         return (
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": {"code": "FORBIDDEN"}})),
+            Json(serde_json::json!({"error": {"code": "FORBIDDEN", "message": "权限不足"}})),
         )
             .into_response();
     };
@@ -168,13 +171,26 @@ pub async fn create_sandbox(
     };
 
     match state.sandbox_service.create(params).await {
-        Ok(sandbox) => (
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "sandbox": sandbox_to_response(sandbox)
-            })),
-        )
-            .into_response(),
+        Ok(sandbox) => {
+            state.audit_service.log(
+                &auth,
+                "sandbox.create",
+                "sandbox",
+                sandbox.id,
+                sandbox.name.as_deref().unwrap_or(""),
+                serde_json::json!({
+                    "namespace_id": sandbox.namespace_id,
+                    "template": sandbox.template,
+                }),
+            );
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "sandbox": sandbox_to_response(sandbox)
+                })),
+            )
+                .into_response()
+        }
         Err(e) => super::tenant_handler::error_response(e),
     }
 }
@@ -190,7 +206,7 @@ pub async fn get_sandbox(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -237,7 +253,7 @@ pub async fn list_sandboxes(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -362,7 +378,7 @@ pub async fn batch_delete_sandboxes(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -484,34 +500,51 @@ pub async fn batch_delete_sandboxes(
             continue;
         }
 
+        // Fetch sandbox for permission check and audit logging
+        let sandbox = match state.sandbox_service.get(uuid).await {
+            Ok(sb) => sb,
+            Err(e) => {
+                failed.push(BatchDeleteError {
+                    id: id_str,
+                    error: e.to_string(),
+                });
+                continue;
+            }
+        };
+
         // Per-item permission check: admins can delete any sandbox; tenants can only
         // delete sandboxes that belong to their own namespace.
         if !auth.is_admin() {
             if let Some(tenant_id) = auth.tenant_id() {
-                match state.sandbox_service.get(uuid).await {
-                    Ok(sb) => {
-                        if sb.namespace_id != tenant_id {
-                            failed.push(BatchDeleteError {
-                                id: id_str,
-                                error: "permission denied: sandbox belongs to a different namespace"
-                                    .to_string(),
-                            });
-                            continue;
-                        }
-                    }
-                    Err(e) => {
-                        failed.push(BatchDeleteError {
-                            id: id_str,
-                            error: e.to_string(),
-                        });
-                        continue;
-                    }
+                if sandbox.namespace_id != tenant_id {
+                    failed.push(BatchDeleteError {
+                        id: id_str,
+                        error: "permission denied: sandbox belongs to a different namespace"
+                            .to_string(),
+                    });
+                    continue;
                 }
             }
         }
 
+        let sandbox_name = sandbox.name.as_deref().unwrap_or("").to_string();
+        let sandbox_namespace_id = sandbox.namespace_id;
+
         match state.sandbox_service.delete(uuid, true).await {
-            Ok(()) => succeeded.push(id_str),
+            Ok(()) => {
+                state.audit_service.log(
+                    &auth,
+                    "sandbox.delete",
+                    "sandbox",
+                    uuid,
+                    &sandbox_name,
+                    serde_json::json!({
+                        "namespace_id": sandbox_namespace_id,
+                        "force": true,
+                    }),
+                );
+                succeeded.push(id_str)
+            }
             Err(e) => failed.push(BatchDeleteError {
                 id: id_str,
                 error: e.to_string(),
@@ -538,7 +571,7 @@ pub async fn delete_sandbox(
         None => {
             return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
             )
                 .into_response()
         }
@@ -555,27 +588,44 @@ pub async fn delete_sandbox(
         }
     };
 
+    // Fetch sandbox for permission check and audit logging
+    let sandbox = match state.sandbox_service.get(sandbox_id).await {
+        Ok(sb) => sb,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+
     // Tenants can only delete sandboxes in their own namespace
     if !auth.is_admin() {
         if let Some(tenant_id) = auth.tenant_id() {
-            match state.sandbox_service.get(sandbox_id).await {
-                Ok(sb) => {
-                    if sb.namespace_id != tenant_id {
-                        return (
-                            StatusCode::NOT_FOUND,
-                            Json(serde_json::json!({"error": {"code": "NOT_FOUND", "message": "Sandbox not found"}})),
-                        )
-                            .into_response();
-                    }
-                }
-                Err(e) => return super::tenant_handler::error_response(e),
+            if sandbox.namespace_id != tenant_id {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(serde_json::json!({"error": {"code": "NOT_FOUND", "message": "Sandbox not found"}})),
+                )
+                    .into_response();
             }
         }
     }
 
+    let sandbox_name = sandbox.name.as_deref().unwrap_or("").to_string();
+    let sandbox_namespace_id = sandbox.namespace_id;
+
     let force = query.force.map(|f| f == "true").unwrap_or(false);
     match state.sandbox_service.delete(sandbox_id, force).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response(),
+        Ok(()) => {
+            state.audit_service.log(
+                &auth,
+                "sandbox.delete",
+                "sandbox",
+                sandbox_id,
+                &sandbox_name,
+                serde_json::json!({
+                    "namespace_id": sandbox_namespace_id,
+                    "force": force,
+                }),
+            );
+            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
+        }
         Err(e) => super::tenant_handler::error_response(e),
     }
 }

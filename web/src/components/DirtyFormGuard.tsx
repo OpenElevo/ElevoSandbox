@@ -6,7 +6,7 @@ interface DirtyFormGuardProps {
   message?: string;
 }
 
-export default function DirtyFormGuard({ dirty, message = 'You have unsaved changes. Discard them?' }: DirtyFormGuardProps) {
+export default function DirtyFormGuard({ dirty, message = '有未保存的内容，确认放弃？' }: DirtyFormGuardProps) {
   const handleBeforeUnload = useCallback((e: BeforeUnloadEvent) => {
     if (dirty) {
       e.preventDefault();
@@ -23,13 +23,14 @@ export default function DirtyFormGuard({ dirty, message = 'You have unsaved chan
     if (!dirty) return;
     const handlePopState = () => {
       Modal.confirm({
-        title: 'Unsaved Changes',
+        title: '未保存的更改',
         content: message,
-        okText: 'Discard',
-        cancelText: 'Stay',
+        okText: '放弃',
+        cancelText: '继续编辑',
         okButtonProps: { danger: true },
+        autoFocusButton: 'cancel',
         onCancel: () => {
-          // Push current state back
+          // Push current state back to prevent navigation
           window.history.pushState(null, '', window.location.href);
         },
       });

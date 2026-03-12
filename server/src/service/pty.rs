@@ -11,6 +11,11 @@ use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::postgres::SandboxRepository;
 
+fn parse_sandbox_id(sandbox_id: &str) -> Result<Uuid> {
+    Uuid::parse_str(sandbox_id)
+        .map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))
+}
+
 /// PTY service for managing interactive terminals
 pub struct PtyService {
     agent_pool: Arc<AgentConnPool>,
@@ -29,7 +34,7 @@ impl PtyService {
     /// Create a new PTY
     pub async fn create(&self, sandbox_id: &str, opts: PtyOptions) -> Result<PtyInfo> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox = self.repository.get(parse_sandbox_id(sandbox_id)?).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),
@@ -74,7 +79,7 @@ impl PtyService {
     /// Resize a PTY
     pub async fn resize(&self, sandbox_id: &str, pty_id: &str, cols: u16, rows: u16) -> Result<()> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox = self.repository.get(parse_sandbox_id(sandbox_id)?).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),
@@ -100,7 +105,7 @@ impl PtyService {
     /// Kill a PTY
     pub async fn kill(&self, sandbox_id: &str, pty_id: &str) -> Result<()> {
         // Validate sandbox exists and is running
-        let sandbox = self.repository.get(sandbox_id).await?;
+        let sandbox = self.repository.get(parse_sandbox_id(sandbox_id)?).await?;
         if sandbox.state != SandboxState::Running {
             return Err(Error::InvalidSandboxState {
                 expected: "running".to_string(),

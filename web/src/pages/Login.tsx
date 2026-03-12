@@ -75,6 +75,7 @@ export default function Login() {
           size="large"
           block
           loading={loading}
+          disabled={!password.trim()}
           onClick={handleLogin}
           style={{ marginTop: 16 }}
         >

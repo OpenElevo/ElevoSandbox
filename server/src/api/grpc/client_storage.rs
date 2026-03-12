@@ -18,7 +18,9 @@ use crate::infra::fuse::mount::FuseMountManager;
 use crate::infra::storage::remote::RemoteStoragePool;
 use crate::infra::storage::router::StorageRouter;
 use crate::infra::storage::StorageBackend;
+use crate::infra::tenant_repository::TenantRepository;
 use crate::infra::workspace_repository::WorkspaceRepository;
+use crate::service::api_key_usage::ApiKeyUsageTracker;
 use crate::proto::{
     client_message, client_storage_service_server::ClientStorageService, read_file_stream_request,
     server_storage_message, write_file_stream_response, ClientMessage, ReadFileStreamRequest,
@@ -31,8 +33,10 @@ pub struct ClientStorageServiceImpl {
     pool: Arc<RemoteStoragePool>,
     storage_router: Arc<StorageRouter>,
     workspace_repository: Arc<WorkspaceRepository>,
+    tenant_repository: TenantRepository,
     config: Arc<Config>,
     fuse_manager: Arc<FuseMountManager>,
+    api_key_usage: Arc<ApiKeyUsageTracker>,
 }
 
 impl ClientStorageServiceImpl {
@@ -40,15 +44,19 @@ impl ClientStorageServiceImpl {
         pool: Arc<RemoteStoragePool>,
         storage_router: Arc<StorageRouter>,
         workspace_repository: Arc<WorkspaceRepository>,
+        tenant_repository: TenantRepository,
         config: Arc<Config>,
         fuse_manager: Arc<FuseMountManager>,
+        api_key_usage: Arc<ApiKeyUsageTracker>,
     ) -> Self {
         Self {
             pool,
             storage_router,
             workspace_repository,
+            tenant_repository,
             config,
             fuse_manager,
+            api_key_usage,
         }
     }
 }
@@ -67,33 +75,50 @@ async fn send_handshake_error(tx: &mpsc::Sender<ServerStorageMessage>, error_msg
         .await;
 }
 
-/// Verify the Client token against the configured fs_api_token.
-/// Returns true if authentication passes.
+/// Authentication result from token verification.
+enum AuthResult {
+    /// Authenticated via API Key — contains the tenant_id
+    ApiKey { tenant_id: String },
+}
+
+/// Verify the Client token.
 ///
-/// Reuses the same token as FileSystemService (fs_api_token). When no token
-/// is configured, all connections are accepted (open mode).
-fn verify_token(config: &Config, token: &str) -> bool {
-    match &config.fs_api_token {
-        Some(expected_token) => {
-            // Fixed-length comparison to reduce timing side-channel risk.
-            // Network latency over gRPC dominates, making timing attacks impractical,
-            // but we still XOR all bytes to avoid early-exit on first mismatch.
-            let a = expected_token.as_bytes();
-            let b = token.as_bytes();
-            if a.len() != b.len() {
-                return false;
-            }
-            let mut diff: u8 = 0;
-            for (x, y) in a.iter().zip(b.iter()) {
-                diff |= x ^ y;
-            }
-            diff == 0
-        }
-        None => {
-            // No token configured — open mode (same as FileSystemService behavior)
-            true
-        }
+/// Validates API Keys (`sk_...`) by hashing and looking up in the database.
+/// The associated tenant must be active. Returns the tenant_id for ownership checks.
+/// Usage is tracked via the batching tracker.
+async fn verify_token(
+    tenant_repo: &TenantRepository,
+    api_key_usage: &ApiKeyUsageTracker,
+    token: &str,
+) -> Result<AuthResult, String> {
+    if !token.starts_with("sk_") {
+        return Err("invalid token format: expected API key (sk_...)".to_string());
     }
+
+    let result = tenant_repo
+        .find_by_token_hash(token)
+        .await
+        .map_err(|e| format!("auth error: {}", e))?;
+
+    let (key, tenant) = match result {
+        Some(pair) => pair,
+        None => return Err("unknown API key".to_string()),
+    };
+
+    if !key.is_usable() {
+        return Err("API key revoked or expired".to_string());
+    }
+
+    if !tenant.is_active {
+        return Err("tenant is deactivated".to_string());
+    }
+
+    // Track usage via the batching tracker
+    api_key_usage.update(key.id);
+
+    Ok(AuthResult::ApiKey {
+        tenant_id: tenant.id.to_string(),
+    })
 }
 
 #[tonic::async_trait]
@@ -126,6 +151,8 @@ impl ClientStorageService for ClientStorageServiceImpl {
             }
         });
 
+        let tenant_repository = self.tenant_repository.clone();
+        let api_key_usage = self.api_key_usage.clone();
         let out_tx_clone = out_tx.clone();
         tokio::spawn(async move {
             // ── Step 1: Wait for handshake ──
@@ -159,34 +186,62 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 }
             };
 
-            // ── Step 2: Authenticate token ──
-            if !verify_token(&config, &token) {
+            // ── Step 2: Authenticate token (API Key) ──
+            let auth_result =
+                match verify_token(&tenant_repository, &api_key_usage, &token).await {
+                    Ok(result) => result,
+                    Err(msg) => {
+                        send_handshake_error(&out_tx_clone, format!("authentication failed: {}", msg)).await;
+                        warn!(workspace_id = %workspace_id, "Client storage authentication failed");
+                        return;
+                    }
+                };
+
+            // Verify the tenant owns this workspace/namespace
+            let AuthResult::ApiKey { ref tenant_id } = auth_result;
+            if *tenant_id != workspace_id {
                 send_handshake_error(
                     &out_tx_clone,
-                    "authentication failed: invalid token".to_string(),
+                    "API key does not have access to this workspace".to_string(),
                 )
                 .await;
-                warn!(workspace_id = %workspace_id, "Client storage authentication failed");
+                warn!(
+                    workspace_id = %workspace_id,
+                    tenant_id = %tenant_id,
+                    "Client storage: tenant does not own workspace"
+                );
                 return;
             }
 
-            // ── Step 3: Verify workspace exists and is remote ──
-            let workspace = match workspace_repository.get(&workspace_id).await {
-                Ok(ws) => ws,
+            // ── Step 3: Verify tenant exists and uses remote storage ──
+            let tenant_uuid = match uuid::Uuid::parse_str(&workspace_id) {
+                Ok(u) => u,
                 Err(_) => {
                     send_handshake_error(
                         &out_tx_clone,
-                        format!("workspace '{}' not found", workspace_id),
+                        format!("invalid namespace ID: {}", workspace_id),
                     )
                     .await;
                     return;
                 }
             };
 
-            if !workspace.is_remote() {
+            let tenant = match tenant_repository.get_tenant(tenant_uuid).await {
+                Ok(t) => t,
+                Err(_) => {
+                    send_handshake_error(
+                        &out_tx_clone,
+                        format!("namespace '{}' not found", workspace_id),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            if tenant.storage_type != crate::domain::workspace::StorageType::Remote {
                 send_handshake_error(
                     &out_tx_clone,
-                    format!("workspace '{}' is not a remote workspace", workspace_id),
+                    format!("namespace '{}' is not configured for remote storage", workspace_id),
                 )
                 .await;
                 return;
