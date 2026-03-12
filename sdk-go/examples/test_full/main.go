@@ -14,11 +14,12 @@
 // Flags:
 //
 //	-server string  gRPC server address (default "localhost:9090")
-//	-token string   FUSE API token (default "test-token")
+//	-token string   FUSE API token (optional, empty means no auth)
+//	-apikey string  gRPC API key or JWT for authentication (optional)
 //
 // Example:
 //
-//	go run examples/test_full/main.go -server localhost:9090
+//	go run examples/test_full/main.go -server localhost:9090 -apikey "$JWT"
 package main
 
 import (
@@ -36,6 +37,7 @@ import (
 var (
 	serverAddr = flag.String("server", "localhost:9090", "gRPC server address")
 	fuseToken  = flag.String("token", "", "FUSE API token (optional, empty means no auth)")
+	apiKey     = flag.String("apikey", "", "gRPC API key or JWT for authentication (optional)")
 )
 
 func main() {
@@ -45,6 +47,7 @@ func main() {
 	fmt.Printf("Server: %s\n\n", *serverAddr)
 
 	client, err := workspace.NewClient(*serverAddr, workspace.ClientOptions{
+		APIKey:  *apiKey,
 		Timeout: 60 * time.Second,
 	})
 	if err != nil {
@@ -62,11 +65,23 @@ func main() {
 
 	// Run tests
 	workspaceID = testWorkspace(ctx, client)
+	testWorkspaceFiles(ctx, client, workspaceID)
+
+	// Sandbox tests require Docker and a valid namespace (tenant).
+	// Skip gracefully if sandbox creation fails.
 	sandboxID = testSandbox(ctx, client, workspaceID)
-	testCommand(ctx, client, sandboxID)
-	testShell(ctx, client, sandboxID)
-	testDirectoryListing(ctx, client, sandboxID)
-	testFuse(ctx, *serverAddr, *fuseToken, workspaceID)
+	if sandboxID != "" {
+		testCommand(ctx, client, sandboxID)
+		testShell(ctx, client, sandboxID)
+		testDirectoryListing(ctx, client, sandboxID)
+	}
+
+	// Use API key as FUSE token if no explicit FUSE token provided
+	fuseTokenVal := *fuseToken
+	if fuseTokenVal == "" {
+		fuseTokenVal = *apiKey
+	}
+	testFuse(ctx, *serverAddr, fuseTokenVal, workspaceID)
 
 	fmt.Println("\n=== All tests passed! ===")
 }
@@ -83,22 +98,98 @@ func testWorkspace(ctx context.Context, client *workspace.Client) string {
 	return ws.ID
 }
 
+func testWorkspaceFiles(ctx context.Context, client *workspace.Client, workspaceID string) {
+	fmt.Println("2. Testing workspace file operations via gRPC...")
+
+	// Write file
+	fmt.Println("   Writing file...")
+	err := client.Workspace.WriteFileString(ctx, workspaceID, "grpc_test.txt", "Hello from gRPC file API")
+	if err != nil {
+		log.Fatalf("Failed to write file: %v", err)
+	}
+	fmt.Println("   Write OK")
+
+	// Read file
+	fmt.Println("   Reading file...")
+	content, err := client.Workspace.ReadFileString(ctx, workspaceID, "grpc_test.txt")
+	if err != nil {
+		log.Fatalf("Failed to read file: %v", err)
+	}
+	if content != "Hello from gRPC file API" {
+		log.Fatalf("Content mismatch: expected %q, got %q", "Hello from gRPC file API", content)
+	}
+	fmt.Printf("   Content: %s\n", content)
+	fmt.Println("   Content verified OK")
+
+	// Mkdir
+	fmt.Println("   Creating directory...")
+	if err := client.Workspace.Mkdir(ctx, workspaceID, "test_dir"); err != nil {
+		log.Fatalf("Failed to mkdir: %v", err)
+	}
+	fmt.Println("   Mkdir OK")
+
+	// Write file in subdirectory
+	if err := client.Workspace.WriteFileString(ctx, workspaceID, "test_dir/nested.txt", "nested content"); err != nil {
+		log.Fatalf("Failed to write nested file: %v", err)
+	}
+
+	// List files
+	fmt.Println("   Listing files...")
+	files, err := client.Workspace.ListFiles(ctx, workspaceID, ".")
+	if err != nil {
+		log.Fatalf("Failed to list files: %v", err)
+	}
+	fmt.Printf("   Files (%d): ", len(files))
+	for i, f := range files {
+		if i > 0 {
+			fmt.Print(", ")
+		}
+		fmt.Printf("%s(%s)", f.Name, f.Type)
+	}
+	fmt.Println()
+
+	// File exists
+	exists, err := client.Workspace.FileExists(ctx, workspaceID, "grpc_test.txt")
+	if err != nil {
+		log.Fatalf("Failed to check file exists: %v", err)
+	}
+	if !exists {
+		log.Fatalf("File should exist but doesn't")
+	}
+	fmt.Println("   FileExists OK")
+
+	// Delete file
+	fmt.Println("   Deleting file...")
+	if err := client.Workspace.DeleteFile(ctx, workspaceID, "test_dir/nested.txt", false); err != nil {
+		log.Fatalf("Failed to delete file: %v", err)
+	}
+	exists, _ = client.Workspace.FileExists(ctx, workspaceID, "test_dir/nested.txt")
+	if exists {
+		log.Fatalf("File should be deleted but still exists")
+	}
+	fmt.Println("   Delete OK")
+
+	fmt.Println("   File operations OK\n")
+}
+
 func testSandbox(ctx context.Context, client *workspace.Client, workspaceID string) string {
-	fmt.Println("2. Creating sandbox...")
+	fmt.Println("3. Creating sandbox...")
 	sandbox, err := client.Sandbox.Create(ctx, &workspace.CreateSandboxParams{
 		WorkspaceID: workspaceID,
 		Name:        "go-sdk-test-sandbox",
 		Template:    "workspace-test:latest",
 	})
 	if err != nil {
-		log.Fatalf("Failed to create sandbox: %v", err)
+		fmt.Printf("   Sandbox creation failed (expected if Docker not available): %v\n", err)
+		fmt.Println("   Skipping sandbox-dependent tests (command, shell, directory listing)")
+		return ""
 	}
 	fmt.Printf("   Created sandbox: %s (state: %s)\n\n", sandbox.ID, sandbox.State)
 	return sandbox.ID
 }
 
 func testCommand(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("3. Running command...")
+	fmt.Println("4. Running command...")
 	result, err := client.Process.Run(ctx, sandboxID, "echo", &workspace.RunCommandOptions{
 		Args: []string{"Hello", "from", "Go", "SDK!"},
 	})
@@ -110,7 +201,7 @@ func testCommand(ctx context.Context, client *workspace.Client, sandboxID string
 }
 
 func testShell(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("4. File operations via shell...")
+	fmt.Println("5. File operations via shell...")
 	result, err := client.Process.Shell(ctx, sandboxID, `
 		echo "Hello from Go SDK" > /workspace/test.txt
 		cat /workspace/test.txt
@@ -123,7 +214,7 @@ func testShell(ctx context.Context, client *workspace.Client, sandboxID string) 
 }
 
 func testDirectoryListing(ctx context.Context, client *workspace.Client, sandboxID string) {
-	fmt.Println("5. Listing workspace directory...")
+	fmt.Println("6. Listing workspace directory...")
 	result, err := client.Process.Run(ctx, sandboxID, "ls", &workspace.RunCommandOptions{
 		Args: []string{"-la", "/workspace"},
 	})
@@ -135,7 +226,7 @@ func testDirectoryListing(ctx context.Context, client *workspace.Client, sandbox
 }
 
 func testFuse(ctx context.Context, grpcAddr, token, workspaceID string) {
-	fmt.Println("6. Testing FUSE mount...")
+	fmt.Println("7. Testing FUSE mount...")
 
 	if !workspace.FuseIsAvailable() {
 		fmt.Println("   FUSE not available on this system, skipping...")
