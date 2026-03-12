@@ -23,9 +23,10 @@ pub use config::Config;
 pub use error::{Error, Result};
 
 use api::grpc::{
-    AuthInterceptor, ClientStorageServiceImpl, FileSystemServiceImpl, GrpcProcessService,
+    ClientStorageServiceImpl, FileSystemServiceImpl, GrpcAuthLayer, GrpcProcessService,
     GrpcPtyService, GrpcSandboxService, GrpcWorkspaceService,
 };
+use api::http::auth::AuthConfig;
 use config::StorageConfig;
 use infra::agent_pool::AgentConnPool;
 use infra::docker::DockerManager;
@@ -40,6 +41,9 @@ use infra::storage::remote::RemoteStoragePool;
 use infra::storage::router::StorageRouter;
 use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonitor};
 use infra::storage::StorageBackend;
+use infra::share_permission_repository::SharePermissionRepository;
+use infra::share_repository::ShareRepository;
+use infra::tenant_repository::TenantRepository;
 use infra::workspace_repository::WorkspaceRepository;
 use proto::client_storage_service_server::ClientStorageServiceServer;
 use proto::file_system_service_server::FileSystemServiceServer;
@@ -63,6 +67,15 @@ pub struct AppState {
     pub process_service: Arc<ProcessService>,
     pub pty_service: Arc<PtyService>,
     pub agent_pool: Arc<AgentConnPool>,
+    pub tenant_repository: TenantRepository,
+    pub auth_config: AuthConfig,
+    pub namespace_service: service::namespace::NamespaceService,
+    pub share_repository: ShareRepository,
+    pub share_permission_repository: SharePermissionRepository,
+    pub permission_service: service::permission::PermissionService,
+    pub audit_repository: infra::audit_repository::AuditRepository,
+    pub audit_service: service::audit::AuditService,
+    pub pool: sqlx::PgPool,
 }
 
 /// Initialize the storage backend based on configuration.
@@ -199,7 +212,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Initialize workspace lease manager
-    let lease_manager = Arc::new(PgLeaseManager::new(pool));
+    let lease_manager = Arc::new(PgLeaseManager::new(pool.clone()));
     let holder_id = format!("server-{}", std::process::id());
     info!("Server holder ID: {}", holder_id);
 
@@ -250,9 +263,13 @@ async fn main() -> anyhow::Result<()> {
         remote_storage_pool.clone(),
     ));
 
+    // Initialize share repositories early (needed by SandboxService)
+    let share_repository = ShareRepository::new(pool.clone());
+    let share_permission_repository = SharePermissionRepository::new(pool.clone());
+
     let sandbox_service = Arc::new(SandboxService::new(
         sandbox_repository.clone(),
-        workspace_repository.clone(),
+        share_repository.clone(),
         docker.clone(),
         agent_pool.clone(),
         config.clone(),
@@ -304,6 +321,33 @@ async fn main() -> anyhow::Result<()> {
     nfs_monitor.start();
     info!("NFS remote mount health monitor started (30s interval)");
 
+    // Initialize tenant repository
+    let tenant_repository = TenantRepository::new(pool.clone());
+
+    // Initialize permission service
+    let permission_service = service::permission::PermissionService::new(
+        share_repository.clone(),
+        share_permission_repository.clone(),
+    );
+
+    // Initialize audit
+    let audit_repository = infra::audit_repository::AuditRepository::new(pool.clone());
+    let audit_service = service::audit::AuditService::new(audit_repository.clone());
+
+    // Initialize auth config
+    let auth_config = AuthConfig::from_config(&config);
+    if auth_config.dev_mode {
+        tracing::warn!("⚠️  ADMIN_PASSWORD not set — running in DEV MODE (all requests treated as admin)");
+    }
+
+    // Initialize namespace service
+    let namespace_service = service::namespace::NamespaceService::new(&config);
+    if let Err(e) = namespace_service.init().await {
+        tracing::warn!("Failed to initialize namespace directories: {}", e);
+    }
+    // Start background trash cleanup
+    namespace_service.clone().start_trash_cleanup();
+
     // Create application state
     let state = AppState {
         config: config.clone(),
@@ -312,6 +356,15 @@ async fn main() -> anyhow::Result<()> {
         process_service,
         pty_service,
         agent_pool: agent_pool.clone(),
+        tenant_repository,
+        auth_config,
+        namespace_service,
+        share_repository,
+        share_permission_repository,
+        permission_service,
+        audit_repository,
+        audit_service,
+        pool: pool.clone(),
     };
 
     // Check if MCP mode is enabled (stdio mode runs exclusively)
@@ -369,43 +422,38 @@ async fn main() -> anyhow::Result<()> {
 
     let client_storage_grpc_server = ClientStorageServiceServer::new(client_storage_service);
 
+    // Build gRPC auth layer (path-aware: skips AgentService, authenticates others)
+    let grpc_auth_layer = GrpcAuthLayer::new(
+        state.tenant_repository.clone(),
+        state.auth_config.clone(),
+        config.fs_api_token.clone(),
+    );
+    info!(
+        "gRPC auth layer enabled (JWT + API Key{})",
+        if config.fs_api_token.is_some() {
+            " + legacy token"
+        } else {
+            ""
+        }
+    );
+
+    let grpc_router = Server::builder()
+        .layer(grpc_auth_layer)
+        .add_service(agent_grpc_server)
+        .add_service(client_storage_grpc_server)
+        .add_service(WorkspaceServiceServer::new(workspace_grpc))
+        .add_service(SandboxServiceServer::new(sandbox_grpc))
+        .add_service(ProcessServiceServer::new(process_grpc))
+        .add_service(PtyServiceServer::new(pty_grpc));
+
     let grpc_router = if config.fs_api_enabled {
         let fs_service =
             FileSystemServiceImpl::new(storage_router.clone() as Arc<dyn StorageBackend>);
-        if let Some(ref token) = config.fs_api_token {
-            info!("FileSystemService enabled with token authentication");
-            let auth_interceptor = AuthInterceptor::new(token.clone());
-            let fs_grpc_server =
-                FileSystemServiceServer::with_interceptor(fs_service, auth_interceptor);
-            Server::builder()
-                .add_service(agent_grpc_server)
-                .add_service(fs_grpc_server)
-                .add_service(client_storage_grpc_server)
-                .add_service(WorkspaceServiceServer::new(workspace_grpc))
-                .add_service(SandboxServiceServer::new(sandbox_grpc))
-                .add_service(ProcessServiceServer::new(process_grpc))
-                .add_service(PtyServiceServer::new(pty_grpc))
-        } else {
-            info!("FileSystemService enabled without authentication");
-            let fs_grpc_server = FileSystemServiceServer::new(fs_service);
-            Server::builder()
-                .add_service(agent_grpc_server)
-                .add_service(fs_grpc_server)
-                .add_service(client_storage_grpc_server)
-                .add_service(WorkspaceServiceServer::new(workspace_grpc))
-                .add_service(SandboxServiceServer::new(sandbox_grpc))
-                .add_service(ProcessServiceServer::new(process_grpc))
-                .add_service(PtyServiceServer::new(pty_grpc))
-        }
+        info!("FileSystemService enabled");
+        grpc_router.add_service(FileSystemServiceServer::new(fs_service))
     } else {
         info!("FileSystemService disabled");
-        Server::builder()
-            .add_service(agent_grpc_server)
-            .add_service(client_storage_grpc_server)
-            .add_service(WorkspaceServiceServer::new(workspace_grpc))
-            .add_service(SandboxServiceServer::new(sandbox_grpc))
-            .add_service(ProcessServiceServer::new(process_grpc))
-            .add_service(PtyServiceServer::new(pty_grpc))
+        grpc_router
     };
 
     // Run both servers concurrently

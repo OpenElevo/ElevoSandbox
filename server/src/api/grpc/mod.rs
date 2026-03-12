@@ -24,7 +24,7 @@ use crate::proto::{
     server_message, AgentMessage, ServerHandshakeAck, ServerHeartbeatAck, ServerMessage,
 };
 
-pub use auth::AuthInterceptor;
+pub use auth::GrpcAuthLayer;
 pub use client_storage::ClientStorageServiceImpl;
 pub use filesystem::FileSystemServiceImpl;
 pub use process::GrpcProcessService;

@@ -5,7 +5,7 @@ pub struct Sandbox {
     /// Unique identifier
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
-    /// Workspace ID this sandbox is bound to
+    /// Workspace ID this sandbox is bound to (deprecated, use namespace_id)
     #[prost(string, tag = "2")]
     pub workspace_id: ::prost::alloc::string::String,
     /// Optional human-readable name
@@ -41,6 +41,28 @@ pub struct Sandbox {
     /// Error message (if state is ERROR)
     #[prost(string, optional, tag = "11")]
     pub error_message: ::core::option::Option<::prost::alloc::string::String>,
+    /// Namespace (tenant) ID this sandbox belongs to
+    #[prost(string, optional, tag = "12")]
+    pub namespace_id: ::core::option::Option<::prost::alloc::string::String>,
+    /// Root path within the namespace
+    #[prost(string, tag = "13")]
+    pub root_path: ::prost::alloc::string::String,
+    /// Share mounts attached to this sandbox
+    #[prost(message, repeated, tag = "14")]
+    pub mounts: ::prost::alloc::vec::Vec<SandboxMount>,
+}
+/// Share mount within a sandbox
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct SandboxMount {
+    /// Share ID being mounted
+    #[prost(string, tag = "1")]
+    pub share_id: ::prost::alloc::string::String,
+    /// Mount path inside the container
+    #[prost(string, tag = "2")]
+    pub mount_path: ::prost::alloc::string::String,
+    /// Whether the mount is read-only
+    #[prost(bool, tag = "3")]
+    pub read_only: bool,
 }
 /// Create sandbox request
 #[derive(Clone, PartialEq, ::prost::Message)]

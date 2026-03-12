@@ -36,7 +36,7 @@ message Sandbox {
   // Unique identifier
   string id = 1;
 
-  // Workspace ID this sandbox is bound to
+  // Workspace ID this sandbox is bound to (deprecated, use namespace_id)
   string workspace_id = 2;
 
   // Optional human-readable name
@@ -65,6 +65,27 @@ message Sandbox {
 
   // Error message (if state is ERROR)
   optional string error_message = 11;
+
+  // Namespace (tenant) ID this sandbox belongs to
+  optional string namespace_id = 12;
+
+  // Root path within the namespace
+  string root_path = 13;
+
+  // Share mounts attached to this sandbox
+  repeated SandboxMount mounts = 14;
+}
+
+// Share mount within a sandbox
+message SandboxMount {
+  // Share ID being mounted
+  string share_id = 1;
+
+  // Mount path inside the container
+  string mount_path = 2;
+
+  // Whether the mount is read-only
+  bool read_only = 3;
 }
 
 // Create sandbox request

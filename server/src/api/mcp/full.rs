@@ -74,12 +74,15 @@ impl FullMcpHandler {
         );
 
         let create_params = CreateSandboxParams {
-            workspace_id: params.workspace_id,
+            workspace_id: Some(params.workspace_id.clone()),
+            namespace_id: Some(params.workspace_id),
+            root_path: "/".to_string(),
             template: params.template,
             name: params.name,
             env: params.env,
             metadata: params.metadata,
             timeout: params.timeout,
+            mounts: vec![],
         };
 
         match self.state.sandbox_service.create(create_params).await {
