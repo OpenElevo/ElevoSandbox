@@ -41,18 +41,29 @@ export class SandboxService {
   }
 
   /**
-   * Create a new sandbox bound to a workspace
+   * Create a new sandbox bound to a namespace
    */
   async create(params: CreateSandboxParams): Promise<Sandbox> {
     try {
       const request: any = {
-        workspaceId: params.workspaceId,
+        namespaceId: params.namespaceId || params.workspaceId,
         env: params.env || {},
         metadata: params.metadata || {},
       };
+      // Keep workspaceId for backward compat with older servers
+      if (params.workspaceId && !params.namespaceId) {
+        request.workspaceId = params.workspaceId;
+      }
       if (params.template) request.template = params.template;
       if (params.name) request.name = params.name;
       if (params.timeout) request.timeout = params.timeout;
+      if (params.rootPath) request.rootPath = params.rootPath;
+      if (params.mounts) {
+        request.mounts = params.mounts.map((m) => ({
+          shareId: m.shareId,
+          mountPath: m.mountPath,
+        }));
+      }
 
       const response = await promisifyUnary(
         this.client,
@@ -198,16 +209,23 @@ export class SandboxService {
   private transformSandbox(data: any): Sandbox {
     return {
       id: data.id,
-      workspaceId: data.workspaceId,
+      workspaceId: data.workspaceId || data.namespaceId,
+      namespaceId: data.namespaceId || data.workspaceId,
       name: data.name || undefined,
       template: data.template,
       state: this.transformState(data.state),
+      rootPath: data.rootPath || '/',
       env: data.env || {},
       metadata: data.metadata || {},
       createdAt: this.transformTimestamp(data.createdAt),
       updatedAt: this.transformTimestamp(data.updatedAt),
       timeout: data.timeout ? parseInt(data.timeout, 10) : undefined,
       errorMessage: data.errorMessage || undefined,
+      mounts: data.mounts?.map((m: any) => ({
+        sandboxId: m.sandboxId || data.id,
+        shareId: m.shareId,
+        mountPath: m.mountPath,
+      })),
     };
   }
 

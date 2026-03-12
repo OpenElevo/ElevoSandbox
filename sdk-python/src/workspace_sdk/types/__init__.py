@@ -39,30 +39,51 @@ class CreateWorkspaceParams:
 
 
 @dataclass
+class MountRequest:
+    """Mount request for attaching a share to a sandbox"""
+    share_id: str
+    mount_path: str
+
+
+@dataclass
+class SandboxMount:
+    """Sandbox mount info"""
+    sandbox_id: str
+    share_id: str
+    mount_path: str
+
+
+@dataclass
 class Sandbox:
     """Sandbox resource"""
     id: str
-    workspace_id: str
     template: str
     state: SandboxState
+    workspace_id: Optional[str] = None  # Deprecated: use namespace_id
+    namespace_id: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     name: Optional[str] = None
+    root_path: Optional[str] = None
     env: Optional[Dict[str, str]] = None
     metadata: Optional[Dict[str, str]] = None
     timeout: Optional[int] = None
     error_message: Optional[str] = None
+    mounts: Optional[List[SandboxMount]] = None
 
 
 @dataclass
 class CreateSandboxParams:
     """Parameters for creating a sandbox"""
-    workspace_id: str
+    workspace_id: Optional[str] = None  # Deprecated: use namespace_id
+    namespace_id: Optional[str] = None
     template: Optional[str] = None
     name: Optional[str] = None
+    root_path: Optional[str] = None
     env: Optional[Dict[str, str]] = None
     metadata: Optional[Dict[str, str]] = None
     timeout: Optional[int] = None
+    mounts: Optional[List[MountRequest]] = None
 
 
 @dataclass
