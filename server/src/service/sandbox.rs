@@ -12,7 +12,7 @@ use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::docker::{CreateContainerOpts, DockerManager};
 use crate::infra::postgres::SandboxRepository;
-use crate::infra::workspace_repository::WorkspaceRepository;
+use crate::infra::share_repository::ShareRepository;
 use crate::Config;
 
 /// Label key for identifying workspace sandboxes
@@ -21,7 +21,7 @@ const SANDBOX_LABEL_KEY: &str = "workspace.sandbox.id";
 /// Sandbox service for managing sandbox lifecycle
 pub struct SandboxService {
     repository: Arc<SandboxRepository>,
-    workspace_repo: Arc<WorkspaceRepository>,
+    share_repo: ShareRepository,
     docker: Arc<DockerManager>,
     agent_pool: Arc<AgentConnPool>,
     config: Arc<Config>,
@@ -31,14 +31,14 @@ impl SandboxService {
     /// Create a new sandbox service
     pub fn new(
         repository: Arc<SandboxRepository>,
-        workspace_repo: Arc<WorkspaceRepository>,
+        share_repo: ShareRepository,
         docker: Arc<DockerManager>,
         agent_pool: Arc<AgentConnPool>,
         config: Arc<Config>,
     ) -> Self {
         Self {
             repository,
-            workspace_repo,
+            share_repo,
             docker,
             agent_pool,
             config,
@@ -47,56 +47,85 @@ impl SandboxService {
 
     /// Create a new sandbox
     pub async fn create(&self, params: CreateSandboxParams) -> Result<Sandbox> {
+        let namespace_id = match &params.namespace_id {
+            Some(nid) => nid.clone(),
+            None => {
+                return Err(Error::InvalidRequest(
+                    "namespace_id is required".to_string(),
+                ));
+            }
+        };
+
         info!(
-            "Creating sandbox with template: {:?}, workspace_id: {}",
-            params.template, params.workspace_id
+            "Creating sandbox with template: {:?}, namespace_id: {}, root_path: {}",
+            params.template, namespace_id, params.root_path
         );
 
-        // Verify workspace exists
-        let workspace = self.workspace_repo.get(&params.workspace_id).await?;
+        // Verify namespace directory exists
+        let namespace_dir = self.get_namespace_dir(&namespace_id, &params.root_path);
+        if !namespace_dir.exists() {
+            error!("Namespace directory does not exist: {:?}", namespace_dir);
+            return Err(Error::Internal("Namespace directory not found".to_string()));
+        }
 
-        // Create database record first
+        // Resolve share mounts — look up each share for host path
+        let mut share_volumes = Vec::new();
+        for mount in &params.mounts {
+            let share = self.share_repo.get_share(&mount.share_id).await?;
+            let host_path = self.config.get_share_host_path(
+                &share.owner_tenant_id,
+                &share.source_path,
+            );
+            // Validate mount_path is absolute and doesn't conflict with /workspace
+            if !mount.mount_path.starts_with('/') {
+                return Err(Error::InvalidParameter(
+                    "mount_path must be an absolute path".into(),
+                ));
+            }
+            if mount.mount_path == "/workspace"
+                || mount.mount_path.starts_with("/workspace/")
+            {
+                return Err(Error::InvalidParameter(
+                    "mount_path cannot overlap with /workspace".into(),
+                ));
+            }
+            share_volumes.push((host_path, mount.mount_path.clone()));
+        }
+
+        // Create database record (includes sandbox_mounts)
         let sandbox = self.repository.create(params.clone()).await?;
         let sandbox_id = sandbox.id.clone();
 
-        // Use workspace directory (already created by WorkspaceService)
-        let workspace_dir = self.get_workspace_dir(&workspace.id);
-        if !workspace_dir.exists() {
-            error!("Workspace directory does not exist: {:?}", workspace_dir);
-            self.repository
-                .update_state(
-                    &sandbox_id,
-                    SandboxState::Error,
-                    Some("Workspace directory not found"),
-                )
-                .await?;
-            return Err(Error::Internal("Workspace directory not found".to_string()));
-        }
-
-        // Build container options
+        // Build container
         let template = params
             .template
             .unwrap_or_else(|| self.config.base_image.clone());
         let mut env = params.env.unwrap_or_default();
 
-        // Add sandbox ID and server address to environment
         env.insert("WORKSPACE_SANDBOX_ID".to_string(), sandbox_id.clone());
-        env.insert("WORKSPACE_WORKSPACE_ID".to_string(), workspace.id.clone());
+        env.insert("WORKSPACE_NAMESPACE_ID".to_string(), namespace_id.clone());
         env.insert(
             "WORKSPACE_SERVER_ADDR".to_string(),
             self.config.agent_server_addr.clone(),
         );
 
-        // Use host path for volume mounting if configured (for Docker-in-Docker scenarios)
-        let volume_host_path = self.config.get_sandbox_workspace_host_path(&workspace.id);
+        // Primary volume: namespace root_path → /workspace
+        let volume_host_path = self.config.get_namespace_workspace_host_path(
+            &namespace_id,
+            &params.root_path,
+        );
         let mut volumes = HashMap::new();
         volumes.insert(volume_host_path, "/workspace".to_string());
 
+        // Add share mount volumes
+        for (host_path, mount_path) in share_volumes {
+            volumes.insert(host_path, mount_path);
+        }
+
         let mut labels = HashMap::new();
         labels.insert(SANDBOX_LABEL_KEY.to_string(), sandbox_id.clone());
-        labels.insert("workspace.workspace.id".to_string(), workspace.id.clone());
+        labels.insert("workspace.namespace.id".to_string(), namespace_id.clone());
 
-        // Determine network mode
         let network_mode = self
             .config
             .docker_network
@@ -109,7 +138,7 @@ impl SandboxService {
             env,
             volumes,
             working_dir: Some("/workspace".to_string()),
-            cmd: None, // Let the image decide the entrypoint
+            cmd: None,
             labels,
             network_mode,
             memory_limit: None,
@@ -117,7 +146,7 @@ impl SandboxService {
             extra_hosts: self.config.sandbox_extra_hosts.clone(),
         };
 
-        // Create container
+        // Create and start container
         let container_id = match self.docker.create_container(container_opts).await {
             Ok(id) => id,
             Err(e) => {
@@ -129,15 +158,12 @@ impl SandboxService {
             }
         };
 
-        // Update container ID in database
         self.repository
             .update_container_id(&sandbox_id, &container_id)
             .await?;
 
-        // Start container
         if let Err(e) = self.docker.start_container(&container_id).await {
             error!("Failed to start container: {}", e);
-            // Try to remove the container
             let _ = self.docker.remove_container(&container_id, true).await;
             self.repository
                 .update_state(&sandbox_id, SandboxState::Error, Some(&e.to_string()))
@@ -154,21 +180,15 @@ impl SandboxService {
         {
             Ok(_) => {
                 info!("Agent connected for sandbox: {}", sandbox_id);
-                self.repository
-                    .update_state(&sandbox_id, SandboxState::Running, None)
-                    .await?;
             }
             Err(_e) => {
                 warn!("Agent connection timeout for sandbox: {}", sandbox_id);
-                // Container is running but agent didn't connect
-                // We'll still mark it as running, agent might connect later
-                self.repository
-                    .update_state(&sandbox_id, SandboxState::Running, None)
-                    .await?;
             }
         }
+        self.repository
+            .update_state(&sandbox_id, SandboxState::Running, None)
+            .await?;
 
-        // Fetch and return updated sandbox
         self.repository.get(&sandbox_id).await
     }
 
@@ -233,9 +253,17 @@ impl SandboxService {
         self.agent_pool.is_connected(id)
     }
 
-    /// Get workspace directory for a workspace
-    fn get_workspace_dir(&self, workspace_id: &str) -> PathBuf {
-        PathBuf::from(&self.config.workspace_dir).join(workspace_id)
+    /// Get namespace directory for a namespace + root_path
+    fn get_namespace_dir(&self, namespace_id: &str, root_path: &str) -> PathBuf {
+        let base = PathBuf::from(&self.config.workspace_dir)
+            .join("namespaces")
+            .join(namespace_id);
+        let trimmed = root_path.trim_start_matches('/');
+        if trimmed.is_empty() {
+            base
+        } else {
+            base.join(trimmed)
+        }
     }
 
     /// Cleanup expired sandboxes
