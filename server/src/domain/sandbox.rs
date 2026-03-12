@@ -4,6 +4,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::domain::share::MountRequest;
+
 /// Sandbox state
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -49,8 +51,16 @@ pub struct Sandbox {
     /// Unique identifier
     pub id: String,
 
-    /// Workspace ID this sandbox is bound to
+    /// Workspace ID this sandbox is bound to (legacy, will be removed in Phase 2b)
     pub workspace_id: String,
+
+    /// Namespace (tenant) ID this sandbox belongs to
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub namespace_id: Option<String>,
+
+    /// Root path within the namespace (default: "/")
+    #[serde(default = "default_root_path")]
+    pub root_path: String,
 
     /// Optional human-readable name
     pub name: Option<String>,
@@ -90,6 +100,8 @@ impl Sandbox {
         Self {
             id,
             workspace_id,
+            namespace_id: None,
+            root_path: "/".to_string(),
             name: None,
             template,
             state: SandboxState::Starting,
@@ -138,11 +150,24 @@ impl Sandbox {
     }
 }
 
+fn default_root_path() -> String {
+    "/".to_string()
+}
+
 /// Parameters for creating a sandbox
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSandboxParams {
-    /// Workspace ID to bind this sandbox to (required)
-    pub workspace_id: String,
+    /// Workspace ID to bind this sandbox to (legacy, optional)
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+
+    /// Namespace (tenant) ID — set from AuthContext for tenant callers
+    #[serde(default)]
+    pub namespace_id: Option<String>,
+
+    /// Root path within the namespace
+    #[serde(default = "default_root_path")]
+    pub root_path: String,
 
     /// Template to use
     pub template: Option<String>,
@@ -158,4 +183,8 @@ pub struct CreateSandboxParams {
 
     /// Timeout in seconds
     pub timeout: Option<u64>,
+
+    /// Share mounts to attach
+    #[serde(default)]
+    pub mounts: Vec<MountRequest>,
 }
