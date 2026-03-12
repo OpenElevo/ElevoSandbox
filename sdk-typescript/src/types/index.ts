@@ -27,10 +27,6 @@ export interface Workspace {
   createdAt: string;
   /** Last update timestamp */
   updatedAt: string;
-  /** Storage type: "managed" or "remote" */
-  storageType: StorageType;
-  /** Storage configuration (JSON string, meaningful for remote workspaces) */
-  storageConfig?: string;
 }
 
 /**
@@ -43,8 +39,6 @@ export interface CreateWorkspaceParams {
   storageType?: StorageType;
   /** Custom metadata */
   metadata?: Record<string, string>;
-  /** Storage type: "managed" (default) or "remote" (Client-provided storage) */
-  storageType?: StorageType;
 }
 
 /**
@@ -202,11 +196,6 @@ export interface PtyHandle {
   /** Event handler for close */
   onClose(callback: () => void): void;
 }
-
-/**
- * Storage type for workspace storage
- */
-export type StorageType = 'managed' | 'remote';
 
 /**
  * Configuration for StorageProvider

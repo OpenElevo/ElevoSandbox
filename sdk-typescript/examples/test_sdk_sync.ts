@@ -116,13 +116,13 @@ async function testFileOps(client: WorkspaceClient): Promise<void> {
     }
     console.log(`  GetFileInfo: name=${info.name} type=${info.type} size=${info.size}`);
 
-    // FileExists (via exists)
-    let exists = await client.workspace.exists(wsId, 'hello.txt');
+    // FileExists
+    let exists = await client.workspace.fileExists(wsId, 'hello.txt');
     if (!exists) {
       throw new Error('file should exist');
     }
 
-    exists = await client.workspace.exists(wsId, 'no-such-file.txt');
+    exists = await client.workspace.fileExists(wsId, 'no-such-file.txt');
     if (exists) {
       throw new Error('non-existent file should not exist');
     }
@@ -138,7 +138,7 @@ async function testFileOps(client: WorkspaceClient): Promise<void> {
 
     // MoveFile
     await client.workspace.moveFile(wsId, 'hello_copy.txt', 'hello_moved.txt');
-    exists = await client.workspace.exists(wsId, 'hello_copy.txt');
+    exists = await client.workspace.fileExists(wsId, 'hello_copy.txt');
     if (exists) {
       throw new Error('moved source should not exist');
     }
@@ -150,7 +150,7 @@ async function testFileOps(client: WorkspaceClient): Promise<void> {
 
     // DeleteFile
     await client.workspace.deleteFile(wsId, 'hello_moved.txt', false);
-    exists = await client.workspace.exists(wsId, 'hello_moved.txt');
+    exists = await client.workspace.fileExists(wsId, 'hello_moved.txt');
     if (exists) {
       throw new Error('deleted file should not exist');
     }
@@ -193,7 +193,7 @@ async function testSandboxFeatures(client: WorkspaceClient, image: string): Prom
       console.log('  Sandbox.exists OK');
 
       // WaitForState
-      sb = await client.sandbox.waitForState(sb.id, 'running', 30000);
+      sb = await client.sandbox.waitForState(sb.id, 'running', AbortSignal.timeout(30000));
       console.log(`  WaitForState: reached ${sb.state}`);
     } finally {
       await client.sandbox.delete(sb.id, true);
@@ -220,7 +220,7 @@ async function testProcessFeatures(client: WorkspaceClient, image: string): Prom
     }
 
     try {
-      await client.sandbox.waitForState(sb.id, 'running', 30000);
+      await client.sandbox.waitForState(sb.id, 'running', AbortSignal.timeout(30000));
 
       // Shell
       const result = await client.process.shell(sb.id, 'echo hello && echo world');
@@ -258,7 +258,7 @@ async function testErrorHandling(client: WorkspaceClient, image: string): Promis
     }
 
     try {
-      await client.sandbox.waitForState(sb.id, 'running', 30000);
+      await client.sandbox.waitForState(sb.id, 'running', AbortSignal.timeout(30000));
 
       // ProcessError from exec
       try {

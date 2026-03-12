@@ -140,21 +140,6 @@ export class PtyNotFoundError extends WorkspaceError {
 }
 
 /**
- * Process execution error (non-zero exit code)
- */
-export class ProcessError extends WorkspaceError {
-  public readonly sandboxId: string;
-  public readonly command: string;
-
-  constructor(sandboxId: string, command: string, message: string) {
-    super(`process error in sandbox ${sandboxId} running '${command}': ${message}`, 4001);
-    this.name = 'ProcessError';
-    this.sandboxId = sandboxId;
-    this.command = command;
-  }
-}
-
-/**
  * Agent not connected error
  */
 export class AgentNotConnectedError extends WorkspaceError {
