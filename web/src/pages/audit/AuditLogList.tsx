@@ -6,19 +6,19 @@ import { listAuditLogs } from '@/api/audit';
 import { listTenants } from '@/api/tenants';
 import type { AuditLog, AuditFilter } from '@/types';
 import { formatTime } from '@/utils/time';
-import { AUDIT_ACTION_GROUPS, RESOURCE_TYPES } from '@/utils/constants';
+import { AUDIT_ACTION_GROUPS, AUDIT_ACTION_LABELS, RESOURCE_TYPES, RESOURCE_TYPE_LABELS } from '@/utils/constants';
 import dayjs from 'dayjs';
 
 const { RangePicker } = DatePicker;
 
 const actionOptions = Object.entries(AUDIT_ACTION_GROUPS).map(([group, actions]) => ({
   label: group,
-  options: actions.map((a) => ({ label: a, value: a })),
+  options: actions.map((a) => ({ label: AUDIT_ACTION_LABELS[a] || a, value: a })),
 }));
 
 export default function AuditLogList() {
   const navigate = useNavigate();
-  const [actionFilter, setActionFilter] = useState<string>();
+  const [actionFilter, setActionFilter] = useState<string[]>([]);
   const [actorTypeFilter, setActorTypeFilter] = useState<string>();
   const [resourceTypeFilter, setResourceTypeFilter] = useState<string>();
   const [timeRange, setTimeRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
@@ -33,7 +33,7 @@ export default function AuditLogList() {
 
   const filter = useMemo<AuditFilter>(() => {
     const f: AuditFilter = { page, page_size: pageSize };
-    if (actionFilter) f.action = actionFilter;
+    if (actionFilter.length > 0) f.action = actionFilter;
     if (actorTypeFilter) f.actor_type = actorTypeFilter;
     if (resourceTypeFilter) f.resource_type = resourceTypeFilter;
     if (timeRange) {
@@ -51,26 +51,31 @@ export default function AuditLogList() {
   const tenantMap = new Map((tenantsData?.tenants ?? []).map((t) => [t.id, t.name]));
 
   const columns = [
-    { title: 'Time', dataIndex: 'created_at', key: 'time', width: 180,
+    { title: '时间', dataIndex: 'created_at', key: 'time', width: 180,
       render: (v: string) => formatTime(v) },
-    { title: 'Action', dataIndex: 'action', key: 'action', width: 180,
-      render: (v: string) => <Tag>{v}</Tag> },
-    { title: 'Actor', key: 'actor', width: 160,
+    { title: '操作', dataIndex: 'action', key: 'action', width: 180,
+      render: (v: string) => <Tag>{AUDIT_ACTION_LABELS[v] || v}</Tag> },
+    { title: '操作者', key: 'actor', width: 160,
       render: (_: unknown, r: AuditLog) => {
-        if (r.actor_type === 'admin') return <Tag color="red">Admin</Tag>;
+        if (r.actor_type === 'admin') return <Tag color="red">管理员</Tag>;
         const name = r.actor_id ? tenantMap.get(r.actor_id) : null;
         return name || (r.actor_id ? r.actor_id.slice(0, 8) : '-');
       },
     },
-    { title: 'Resource', dataIndex: 'resource_type', key: 'res_type', width: 100 },
-    { title: 'Resource Name', key: 'res_name',
+    { title: '资源类型', dataIndex: 'resource_type', key: 'res_type', width: 100,
+      render: (v: string) => RESOURCE_TYPE_LABELS[v] || v },
+    { title: '资源名称', key: 'res_name',
       render: (_: unknown, r: AuditLog) => {
         const name = r.resource_name || r.resource_id.slice(0, 8);
-        if (r.resource_type === 'tenant') {
-          return <a onClick={() => navigate(`/admin/tenants/${r.resource_id}`)}>{name}</a>;
-        }
-        if (r.resource_type === 'share') {
-          return <a onClick={() => navigate(`/admin/shares/${r.resource_id}`)}>{name}</a>;
+        // Don't link to resources that may have been deleted/revoked
+        const isDestructive = r.action.includes('delete') || r.action.includes('revoke');
+        if (!isDestructive) {
+          if (r.resource_type === 'tenant') {
+            return <a onClick={() => navigate(`/admin/tenants/${r.resource_id}`)}>{name}</a>;
+          }
+          if (r.resource_type === 'share') {
+            return <a onClick={() => navigate(`/admin/shares/${r.resource_id}`)}>{name}</a>;
+          }
         }
         return name;
       },
@@ -80,40 +85,48 @@ export default function AuditLogList() {
 
   return (
     <div>
-      <Typography.Title level={4} style={{ marginBottom: 16 }}>Audit Logs</Typography.Title>
+      <Typography.Title level={4} style={{ marginBottom: 16 }}>审计日志</Typography.Title>
       <Space style={{ marginBottom: 16 }} wrap>
         <Select
-          placeholder="Action"
+          mode="multiple"
+          placeholder="操作类型"
           allowClear
           value={actionFilter}
           onChange={(v) => { setActionFilter(v); setPage(1); }}
-          style={{ width: 200 }}
+          style={{ minWidth: 200 }}
+          maxTagCount="responsive"
           options={actionOptions}
         />
         <Select
-          placeholder="Actor Type"
+          placeholder="操作者类型"
           allowClear
           value={actorTypeFilter}
           onChange={(v) => { setActorTypeFilter(v); setPage(1); }}
           style={{ width: 130 }}
           options={[
-            { label: 'Admin', value: 'admin' },
-            { label: 'Tenant', value: 'tenant' },
+            { label: '管理员', value: 'admin' },
+            { label: '租户', value: 'tenant' },
           ]}
         />
         <Select
-          placeholder="Resource Type"
+          placeholder="资源类型"
           allowClear
           value={resourceTypeFilter}
           onChange={(v) => { setResourceTypeFilter(v); setPage(1); }}
           style={{ width: 140 }}
-          options={RESOURCE_TYPES.map((r) => ({ label: r, value: r }))}
+          options={RESOURCE_TYPES.map((r) => ({ label: RESOURCE_TYPE_LABELS[r] || r, value: r }))}
         />
         <RangePicker
           showTime
+          placeholder={['开始时间', '结束时间']}
           onChange={(dates) => setTimeRange(dates as [dayjs.Dayjs, dayjs.Dayjs] | null)}
         />
       </Space>
+      {data && data.total > 1000 && (
+        <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
+          结果较多（{data.total} 条），请使用筛选条件缩小范围
+        </Typography.Text>
+      )}
       <Table
         dataSource={data?.logs ?? []}
         columns={columns}
@@ -131,7 +144,7 @@ export default function AuditLogList() {
         pagination={{
           current: page, pageSize, total: data?.total ?? 0,
           onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-          showSizeChanger: true, showTotal: (t) => `${t} logs`,
+          showSizeChanger: true, showTotal: (t) => `共 ${t} 条日志`,
         }}
       />
     </div>

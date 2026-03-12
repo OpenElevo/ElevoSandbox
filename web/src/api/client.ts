@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { message } from 'antd';
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -30,11 +31,22 @@ client.interceptors.response.use(
     return response;
   },
   (error) => {
-    if (error.response?.status === 401) {
+    const status = error.response?.status;
+    const errorMsg = error.response?.data?.error?.message;
+
+    if (status === 401) {
       localStorage.removeItem('token');
       if (window.location.pathname !== '/admin/login') {
         window.location.href = '/admin/login?redirect=' + encodeURIComponent(window.location.pathname);
       }
+    } else if (status === 403) {
+      message.error(errorMsg || '无权限执行此操作');
+    } else if (status === 429) {
+      message.error('请求过于频繁，请稍后再试');
+    } else if (status && status >= 500) {
+      message.error(errorMsg || '服务器内部错误，请稍后重试');
+    } else if (!error.response) {
+      message.error('网络连接失败，请检查网络');
     }
     return Promise.reject(error);
   },

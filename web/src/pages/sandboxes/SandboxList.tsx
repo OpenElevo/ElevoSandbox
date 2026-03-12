@@ -4,9 +4,11 @@ import { SearchOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { listSandboxes, getSandbox, deleteSandbox } from '@/api/sandboxes';
 import { listTenants } from '@/api/tenants';
+import { listShares } from '@/api/shares';
 import type { Sandbox } from '@/types';
 import { formatTime } from '@/utils/time';
-import { SANDBOX_STATE_COLORS } from '@/utils/constants';
+import { SANDBOX_STATE_COLORS, SANDBOX_STATE_LABELS } from '@/utils/constants';
+import { useDebounce } from '@/hooks/useDebounce';
 
 export default function SandboxList() {
   const queryClient = useQueryClient();
@@ -19,13 +21,15 @@ export default function SandboxList() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
 
+  const debouncedSearch = useDebounce(search);
+
   const queryParams = useMemo(() => {
     const p: Record<string, string | number> = { page, page_size: pageSize };
-    if (search) p.search = search;
+    if (debouncedSearch) p.search = debouncedSearch;
     if (stateFilter) p.state = stateFilter;
     if (nsFilter) p.namespace_id = nsFilter;
     return p;
-  }, [search, stateFilter, nsFilter, page, pageSize]);
+  }, [debouncedSearch, stateFilter, nsFilter, page, pageSize]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['sandboxes', queryParams],
@@ -35,6 +39,11 @@ export default function SandboxList() {
   const { data: tenantsData } = useQuery({
     queryKey: ['tenants-select'],
     queryFn: () => listTenants({ page_size: 200 }),
+  });
+
+  const { data: sharesData } = useQuery({
+    queryKey: ['shares-select'],
+    queryFn: () => listShares({ page_size: 500 }),
   });
 
   const { data: detail } = useQuery({
@@ -47,14 +56,16 @@ export default function SandboxList() {
     mutationFn: (id: string) => deleteSandbox(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sandboxes'] });
-      message.success('Sandbox deleted');
+      message.success('沙箱已删除');
     },
   });
 
   const handleDelete = (sandbox: Sandbox) => {
     modal.confirm({
-      title: `Delete sandbox "${sandbox.name || sandbox.id}"?`,
+      title: `删除沙箱「${sandbox.name || sandbox.id.slice(0, 8)}」？`,
+      okText: '删除',
       okButtonProps: { danger: true },
+      cancelText: '取消',
       onOk: () => deleteMutation.mutateAsync(sandbox.id),
     });
   };
@@ -62,61 +73,86 @@ export default function SandboxList() {
   const handleBatchDelete = () => {
     if (selectedKeys.length === 0) return;
     modal.confirm({
-      title: `Delete ${selectedKeys.length} sandbox(es)?`,
+      title: `批量删除 ${selectedKeys.length} 个沙箱？`,
+      okText: '删除',
       okButtonProps: { danger: true },
+      cancelText: '取消',
       onOk: async () => {
-        for (const id of selectedKeys) {
-          await deleteSandbox(id);
-        }
+        const results = await Promise.allSettled(
+          selectedKeys.map((id) => deleteSandbox(id))
+        );
+        const failed = results.filter((r) => r.status === 'rejected').length;
         setSelectedKeys([]);
         queryClient.invalidateQueries({ queryKey: ['sandboxes'] });
-        message.success(`${selectedKeys.length} sandbox(es) deleted`);
+        if (failed > 0) {
+          message.warning(`${selectedKeys.length - failed} 个已删除，${failed} 个失败`);
+        } else {
+          message.success(`${selectedKeys.length} 个沙箱已删除`);
+        }
       },
     });
   };
 
   const tenantMap = new Map((tenantsData?.tenants ?? []).map((t) => [t.id, t.name]));
+  const shareMap = new Map((sharesData?.shares ?? []).map((s) => [s.id, s.name]));
   const tenantOptions = (tenantsData?.tenants ?? []).map((t) => ({ label: t.name, value: t.id }));
 
+  const stateOptions = ['running', 'starting', 'stopping', 'stopped', 'error'].map((s) => ({
+    label: SANDBOX_STATE_LABELS[s] || s,
+    value: s,
+  }));
+
   const columns = [
-    { title: 'Name', dataIndex: 'name', key: 'name',
+    { title: '名称', dataIndex: 'name', key: 'name',
       render: (name: string, r: Sandbox) => (
         <a onClick={() => setDetailId(r.id)}>{name || r.id.slice(0, 8)}</a>
       ),
     },
-    { title: 'Template', dataIndex: 'template', key: 'template', width: 120 },
-    { title: 'State', dataIndex: 'state', key: 'state', width: 100,
-      render: (s: string) => <Tag color={SANDBOX_STATE_COLORS[s] || 'default'}>{s}</Tag>,
+    { title: '模板', dataIndex: 'template', key: 'template', width: 120 },
+    { title: '状态', dataIndex: 'state', key: 'state', width: 100,
+      render: (s: string) => <Tag color={SANDBOX_STATE_COLORS[s] || 'default'}>{SANDBOX_STATE_LABELS[s] || s}</Tag>,
     },
-    { title: 'Namespace', dataIndex: 'namespace_id', key: 'ns', width: 160,
+    { title: '命名空间', dataIndex: 'namespace_id', key: 'ns', width: 160,
       render: (nid: string) => tenantMap.get(nid) || (nid ? nid.slice(0, 8) : '-'),
     },
-    { title: 'Created', dataIndex: 'created_at', key: 'created', width: 180,
+    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
       render: (v: string) => formatTime(v),
     },
-    { title: 'Actions', key: 'actions', width: 100,
-      render: (_: unknown, record: Sandbox) => (
-        <Button size="small" danger onClick={() => handleDelete(record)}
-          disabled={record.state === 'starting' || record.state === 'stopping'}>
-          Delete
-        </Button>
-      ),
+    { title: '操作', key: 'actions', width: 120,
+      render: (_: unknown, record: Sandbox) => {
+        const isTransient = record.state === 'starting' || record.state === 'stopping';
+        const isRunning = record.state === 'running';
+        return (
+          <Space size="small">
+            {isRunning && (
+              <Button size="small" onClick={() => handleDelete(record)} disabled={isTransient}>
+                停止
+              </Button>
+            )}
+            {!isRunning && (
+              <Button size="small" danger onClick={() => handleDelete(record)} disabled={isTransient}>
+                删除
+              </Button>
+            )}
+          </Space>
+        );
+      },
     },
   ];
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>Sandboxes</Typography.Title>
+        <Typography.Title level={4} style={{ margin: 0 }}>沙箱管理</Typography.Title>
         {selectedKeys.length > 0 && (
           <Button danger onClick={handleBatchDelete}>
-            Delete {selectedKeys.length} selected
+            删除 {selectedKeys.length} 个选中项
           </Button>
         )}
       </div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Input
-          placeholder="Search by name or ID"
+          placeholder="搜索名称或 ID"
           prefix={<SearchOutlined />}
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -124,15 +160,15 @@ export default function SandboxList() {
           style={{ width: 240 }}
         />
         <Select
-          placeholder="State"
+          placeholder="状态"
           allowClear
           value={stateFilter}
           onChange={(v) => { setStateFilter(v); setPage(1); }}
           style={{ width: 130 }}
-          options={['running', 'starting', 'stopping', 'stopped', 'error'].map((s) => ({ label: s, value: s }))}
+          options={stateOptions}
         />
         <Select
-          placeholder="Namespace"
+          placeholder="命名空间"
           allowClear
           showSearch
           optionFilterProp="label"
@@ -154,11 +190,11 @@ export default function SandboxList() {
         pagination={{
           current: page, pageSize, total: data?.total ?? 0,
           onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-          showSizeChanger: true, showTotal: (t) => `${t} sandboxes`,
+          showSizeChanger: true, showTotal: (t) => `共 ${t} 个沙箱`,
         }}
       />
       <Drawer
-        title={`Sandbox: ${detail?.name || detail?.id?.slice(0, 8) || ''}`}
+        title={`沙箱: ${detail?.name || detail?.id?.slice(0, 8) || ''}`}
         open={!!detailId}
         onClose={() => setDetailId(null)}
         width={520}
@@ -166,25 +202,41 @@ export default function SandboxList() {
         {detail && (
           <Descriptions column={1} bordered size="small">
             <Descriptions.Item label="ID">{detail.id}</Descriptions.Item>
-            <Descriptions.Item label="Name">{detail.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Template">{detail.template}</Descriptions.Item>
-            <Descriptions.Item label="State">
-              <Tag color={SANDBOX_STATE_COLORS[detail.state] || 'default'}>{detail.state}</Tag>
+            <Descriptions.Item label="名称">{detail.name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="模板">{detail.template}</Descriptions.Item>
+            <Descriptions.Item label="状态">
+              <Tag color={SANDBOX_STATE_COLORS[detail.state] || 'default'}>{SANDBOX_STATE_LABELS[detail.state] || detail.state}</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="Namespace">{tenantMap.get(detail.namespace_id) || detail.namespace_id}</Descriptions.Item>
-            <Descriptions.Item label="Root Path">{detail.root_path}</Descriptions.Item>
+            <Descriptions.Item label="命名空间">{tenantMap.get(detail.namespace_id) || detail.namespace_id}</Descriptions.Item>
+            <Descriptions.Item label="根路径">{detail.root_path}</Descriptions.Item>
             {detail.error_message && (
-              <Descriptions.Item label="Error">
+              <Descriptions.Item label="错误">
                 <Typography.Text type="danger">{detail.error_message}</Typography.Text>
               </Descriptions.Item>
             )}
-            <Descriptions.Item label="Timeout">{detail.timeout}s</Descriptions.Item>
-            <Descriptions.Item label="Created">{formatTime(detail.created_at)}</Descriptions.Item>
-            <Descriptions.Item label="Updated">{formatTime(detail.updated_at)}</Descriptions.Item>
+            <Descriptions.Item label="超时">{detail.timeout}s</Descriptions.Item>
+            <Descriptions.Item label="创建时间">{formatTime(detail.created_at)}</Descriptions.Item>
+            <Descriptions.Item label="更新时间">{formatTime(detail.updated_at)}</Descriptions.Item>
+            {detail.env && Object.keys(detail.env).length > 0 && (
+              <Descriptions.Item label="环境变量">
+                {Object.entries(detail.env).map(([k, v]) => (
+                  <div key={k}><Typography.Text code>{k}</Typography.Text> = {typeof v === 'string' && (k.toLowerCase().includes('secret') || k.toLowerCase().includes('password') || k.toLowerCase().includes('token')) ? '••••••••' : String(v)}</div>
+                ))}
+              </Descriptions.Item>
+            )}
+            {detail.metadata && Object.keys(detail.metadata).length > 0 && (
+              <Descriptions.Item label="元数据">
+                <Typography.Text copyable style={{ maxWidth: '100%', wordBreak: 'break-all' }}>
+                  {JSON.stringify(detail.metadata, null, 2)}
+                </Typography.Text>
+              </Descriptions.Item>
+            )}
             {detail.mounts && detail.mounts.length > 0 && (
-              <Descriptions.Item label="Mounts">
+              <Descriptions.Item label="挂载">
                 {detail.mounts.map((m) => (
-                  <div key={m.share_id}>{m.mount_path} &larr; {m.share_id.slice(0, 8)}</div>
+                  <div key={m.share_id}>
+                    {m.mount_path} &larr; {shareMap.get(m.share_id) || m.share_id.slice(0, 8)}
+                  </div>
                 ))}
               </Descriptions.Item>
             )}

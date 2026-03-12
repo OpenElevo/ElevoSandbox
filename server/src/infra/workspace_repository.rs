@@ -244,14 +244,14 @@ impl WorkspaceRepository {
         rows.into_iter().map(|r| r.try_into()).collect()
     }
 
-    /// Check if a workspace has any sandboxes
+    /// Check if a workspace/namespace has any sandboxes
     pub async fn has_sandboxes(&self, workspace_id: &str) -> Result<bool> {
         let uuid = Uuid::parse_str(workspace_id)
             .map_err(|_| Error::WorkspaceNotFound(workspace_id.to_string()))?;
 
         let (count,): (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = $1
+            SELECT COUNT(*) FROM sandboxes WHERE namespace_id = $1
             "#,
         )
         .bind(uuid)
@@ -261,14 +261,14 @@ impl WorkspaceRepository {
         Ok(count > 0)
     }
 
-    /// Count sandboxes for a workspace
+    /// Count sandboxes for a workspace/namespace
     pub async fn count_sandboxes(&self, workspace_id: &str) -> Result<i64> {
         let uuid = Uuid::parse_str(workspace_id)
             .map_err(|_| Error::WorkspaceNotFound(workspace_id.to_string()))?;
 
         let (count,): (i64,) = sqlx::query_as(
             r#"
-            SELECT COUNT(*) FROM sandboxes WHERE workspace_id = $1
+            SELECT COUNT(*) FROM sandboxes WHERE namespace_id = $1
             "#,
         )
         .bind(uuid)

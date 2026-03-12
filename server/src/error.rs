@@ -21,6 +21,9 @@ pub enum Error {
     #[error("Sandbox already exists: {0}")]
     SandboxAlreadyExists(String),
 
+    #[error("Resource already exists: {0}")]
+    Conflict(String),
+
     #[error("Template not found: {0}")]
     TemplateNotFound(String),
 
@@ -36,6 +39,12 @@ pub enum Error {
 
     #[error("Workspace has active sandboxes")]
     WorkspaceHasActiveSandboxes,
+
+    #[error("Tenant has active shares")]
+    HasActiveShares,
+
+    #[error("Tenant has {0} active API keys (use force=true to delete)")]
+    HasActiveApiKeys(i64),
 
     #[error("Path not allowed: {0}")]
     PathNotAllowed(String),
@@ -117,7 +126,7 @@ pub enum Error {
 }
 
 impl Error {
-    /// Get the error code
+    /// Get the error code (numeric, kept for backward compatibility)
     pub fn code(&self) -> u32 {
         match self {
             // Sandbox errors (2000-2999)
@@ -130,6 +139,8 @@ impl Error {
             // Workspace errors (7000-7999)
             Error::WorkspaceNotFound(_) => 7001,
             Error::WorkspaceHasActiveSandboxes => 7002,
+            Error::HasActiveShares => 7004,
+            Error::HasActiveApiKeys(_) => 7005,
             Error::PathNotAllowed(_) => 7003,
 
             // FileSystem errors (3000-3999)
@@ -166,6 +177,54 @@ impl Error {
             Error::InvalidParameter(_) => 1002,
             Error::Internal(_) => 1003,
             Error::NotImplemented(_) => 1004,
+            Error::Conflict(_) => 1005,
+        }
+    }
+
+    /// Get a string error code for API responses
+    pub fn error_code_str(&self) -> &'static str {
+        match self {
+            Error::SandboxNotFound(_)
+            | Error::WorkspaceNotFound(_)
+            | Error::FileNotFound(_)
+            | Error::ProcessNotFound(_)
+            | Error::PtyNotFound(_)
+            | Error::TemplateNotFound(_) => "NOT_FOUND",
+
+            Error::SandboxAlreadyExists(_)
+            | Error::FileAlreadyExists(_)
+            | Error::WorkspaceHasActiveSandboxes
+            | Error::HasActiveShares
+            | Error::HasActiveApiKeys(_)
+            | Error::Conflict(_) => "CONFLICT",
+
+            Error::PermissionDenied(_) | Error::PathNotAllowed(_) => "PERMISSION_DENIED",
+
+            Error::InvalidRequest(_)
+            | Error::InvalidParameter(_)
+            | Error::InvalidPath(_)
+            | Error::InvalidSandboxState { .. }
+            | Error::IsADirectory(_)
+            | Error::NotADirectory(_)
+            | Error::DirectoryNotEmpty(_) => "BAD_REQUEST",
+
+            Error::SandboxLimitExceeded | Error::PtyLimitExceeded => "RATE_LIMITED",
+
+            Error::ProcessTimeout | Error::AgentConnectionTimeout => "TIMEOUT",
+
+            Error::AgentNotConnected(_) | Error::AgentCommunicationError(_) => {
+                "SERVICE_UNAVAILABLE"
+            }
+
+            Error::NotImplemented(_) => "NOT_IMPLEMENTED",
+
+            Error::DatabaseError(_)
+            | Error::DockerError(_)
+            | Error::NfsError(_)
+            | Error::Internal(_) => "INTERNAL_ERROR",
+
+            // These are not reachable from the above arms but must be exhaustive
+            Error::ProcessExecutionFailed(_) | Error::PtyAlreadyClosed => "INTERNAL_ERROR",
         }
     }
 
@@ -179,9 +238,13 @@ impl Error {
             | Error::PtyNotFound(_)
             | Error::TemplateNotFound(_) => StatusCode::NOT_FOUND,
 
-            Error::SandboxAlreadyExists(_) | Error::FileAlreadyExists(_) => StatusCode::CONFLICT,
+            Error::SandboxAlreadyExists(_)
+            | Error::FileAlreadyExists(_)
+            | Error::Conflict(_) => StatusCode::CONFLICT,
 
-            Error::WorkspaceHasActiveSandboxes => StatusCode::CONFLICT,
+            Error::WorkspaceHasActiveSandboxes
+            | Error::HasActiveShares
+            | Error::HasActiveApiKeys(_) => StatusCode::CONFLICT,
 
             Error::PermissionDenied(_) | Error::PathNotAllowed(_) => StatusCode::FORBIDDEN,
 
@@ -208,24 +271,27 @@ impl Error {
     }
 }
 
-/// API error response
+/// Outer wrapper for API error responses: `{ "error": { ... } }`
 #[derive(Debug, Serialize)]
-pub struct ErrorResponse {
-    pub code: u32,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub details: Option<String>,
+struct ErrorOuter {
+    error: ErrorInner,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorInner {
+    code: &'static str,
+    message: String,
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let status = self.status_code();
-        let body = ErrorResponse {
-            code: self.code(),
-            message: self.to_string(),
-            details: None,
+        let body = ErrorOuter {
+            error: ErrorInner {
+                code: self.error_code_str(),
+                message: self.to_string(),
+            },
         };
-
         (status, Json(body)).into_response()
     }
 }
@@ -233,6 +299,11 @@ impl IntoResponse for Error {
 // Implement From for common error types
 impl From<sqlx::Error> for Error {
     fn from(err: sqlx::Error) -> Self {
+        if let sqlx::Error::Database(ref db_err) = err {
+            if db_err.code().as_deref() == Some("23505") {
+                return Error::Conflict(db_err.message().to_string());
+            }
+        }
         Error::DatabaseError(err.to_string())
     }
 }

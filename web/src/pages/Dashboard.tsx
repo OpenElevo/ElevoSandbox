@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { getDashboardStats } from '@/api/dashboard';
 import { listAuditLogs } from '@/api/audit';
 import { formatRelative } from '@/utils/time';
+import { AUDIT_ACTION_LABELS } from '@/utils/constants';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -21,26 +22,26 @@ export default function Dashboard() {
 
   const statCards = [
     {
-      title: 'Tenants',
-      value: stats?.tenants.total ?? 0,
-      suffix: stats ? `/ ${stats.tenants.active} active` : '',
+      title: '租户',
+      value: stats ? `${stats.tenants.active}/${stats.tenants.total}` : '-',
+      suffix: '活跃/总数',
       icon: <TeamOutlined style={{ fontSize: 24, color: '#1677ff' }} />,
       onClick: () => navigate('/admin/tenants'),
     },
     {
-      title: 'Shares',
+      title: '共享',
       value: stats?.shares.total ?? 0,
       icon: <ShareAltOutlined style={{ fontSize: 24, color: '#52c41a' }} />,
       onClick: () => navigate('/admin/shares'),
     },
     {
-      title: 'Running Sandboxes',
+      title: '运行中沙箱',
       value: stats?.sandboxes.running ?? 0,
       icon: <CloudServerOutlined style={{ fontSize: 24, color: '#fa8c16' }} />,
       onClick: () => navigate('/admin/sandboxes'),
     },
     {
-      title: 'Active API Keys',
+      title: '活跃 API Key',
       value: stats?.api_keys.active ?? 0,
       icon: <KeyOutlined style={{ fontSize: 24, color: '#722ed1' }} />,
       onClick: () => navigate('/admin/tenants'),
@@ -48,17 +49,18 @@ export default function Dashboard() {
   ];
 
   const activityColumns = [
-    { title: 'Time', dataIndex: 'created_at', key: 'time', width: 140,
+    { title: '时间', dataIndex: 'created_at', key: 'time', width: 140,
       render: (v: string) => formatRelative(v) },
-    { title: 'Action', dataIndex: 'action', key: 'action', width: 180 },
-    { title: 'Resource', dataIndex: 'resource_name', key: 'resource',
+    { title: '操作', dataIndex: 'action', key: 'action', width: 180,
+      render: (v: string) => AUDIT_ACTION_LABELS[v] || v },
+    { title: '资源', dataIndex: 'resource_name', key: 'resource',
       render: (name: string, record: { resource_type: string }) =>
         name || record.resource_type },
   ];
 
   return (
     <div>
-      <Typography.Title level={4} style={{ marginBottom: 24 }}>Dashboard</Typography.Title>
+      <Typography.Title level={4} style={{ marginBottom: 24 }}>仪表盘</Typography.Title>
       {statsLoading ? <Skeleton active paragraph={{ rows: 2 }} /> : (
         <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
           {statCards.map((card) => (
@@ -77,7 +79,7 @@ export default function Dashboard() {
           ))}
         </Row>
       )}
-      <Card title="Recent Activity">
+      <Card title="最近操作">
         <Table
           dataSource={recentActivity?.logs ?? []}
           columns={activityColumns}

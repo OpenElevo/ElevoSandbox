@@ -75,6 +75,7 @@ pub struct AppState {
     pub permission_service: service::permission::PermissionService,
     pub audit_repository: infra::audit_repository::AuditRepository,
     pub audit_service: service::audit::AuditService,
+    pub api_key_usage: Arc<service::api_key_usage::ApiKeyUsageTracker>,
     pub pool: sqlx::PgPool,
 }
 
@@ -270,6 +271,7 @@ async fn main() -> anyhow::Result<()> {
     let sandbox_service = Arc::new(SandboxService::new(
         sandbox_repository.clone(),
         share_repository.clone(),
+        share_permission_repository.clone(),
         docker.clone(),
         agent_pool.clone(),
         config.clone(),
@@ -295,11 +297,15 @@ async fn main() -> anyhow::Result<()> {
         config.clone(),
     ));
 
+    // Initialize tenant repository (needed early by ClientStorageService)
+    let tenant_repository = TenantRepository::new(pool.clone());
+
     // Create ClientStorageService for remote workspace connections
     let client_storage_service = ClientStorageServiceImpl::new(
         remote_storage_pool.clone(),
         storage_router.clone(),
         workspace_repository.clone(),
+        tenant_repository.clone(),
         config.clone(),
         fuse_manager.clone(),
     );
@@ -320,9 +326,6 @@ async fn main() -> anyhow::Result<()> {
     );
     nfs_monitor.start();
     info!("NFS remote mount health monitor started (30s interval)");
-
-    // Initialize tenant repository
-    let tenant_repository = TenantRepository::new(pool.clone());
 
     // Initialize permission service
     let permission_service = service::permission::PermissionService::new(
@@ -348,6 +351,12 @@ async fn main() -> anyhow::Result<()> {
     // Start background trash cleanup
     namespace_service.clone().start_trash_cleanup();
 
+    // Initialize API key usage tracker with background flush
+    let api_key_usage = Arc::new(service::api_key_usage::ApiKeyUsageTracker::new(
+        tenant_repository.clone(),
+    ));
+    let _api_key_flush_handle = api_key_usage.start_background_flush();
+
     // Create application state
     let state = AppState {
         config: config.clone(),
@@ -364,6 +373,7 @@ async fn main() -> anyhow::Result<()> {
         permission_service,
         audit_repository,
         audit_service,
+        api_key_usage,
         pool: pool.clone(),
     };
 
@@ -405,7 +415,7 @@ async fn main() -> anyhow::Result<()> {
     // Start HTTP server
     let http_server = axum::serve(
         tokio::net::TcpListener::bind(http_addr).await?,
-        app.into_make_service(),
+        app.into_make_service_with_connect_info::<SocketAddr>(),
     );
 
     // Start gRPC server for agent connections
@@ -426,16 +436,8 @@ async fn main() -> anyhow::Result<()> {
     let grpc_auth_layer = GrpcAuthLayer::new(
         state.tenant_repository.clone(),
         state.auth_config.clone(),
-        config.fs_api_token.clone(),
     );
-    info!(
-        "gRPC auth layer enabled (JWT + API Key{})",
-        if config.fs_api_token.is_some() {
-            " + legacy token"
-        } else {
-            ""
-        }
-    );
+    info!("gRPC auth layer enabled (JWT + API Key)");
 
     let grpc_router = Server::builder()
         .layer(grpc_auth_layer)
@@ -469,6 +471,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
+
+    // Flush pending API key usage updates before shutdown
+    info!("Flushing API key usage data...");
+    state.api_key_usage.flush_all().await;
 
     // Cleanup: unmount s3fs on shutdown
     if let Some(mount_mgr) = s3_mount_manager {

@@ -15,11 +15,11 @@ interface SidebarProps {
 }
 
 const menuItems = [
-  { key: '/admin/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: '/admin/tenants', icon: <TeamOutlined />, label: 'Tenants' },
-  { key: '/admin/shares', icon: <ShareAltOutlined />, label: 'Shares' },
-  { key: '/admin/sandboxes', icon: <CloudServerOutlined />, label: 'Sandboxes' },
-  { key: '/admin/audit', icon: <AuditOutlined />, label: 'Audit Logs' },
+  { key: '/admin/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
+  { key: '/admin/tenants', icon: <TeamOutlined />, label: '租户管理' },
+  { key: '/admin/shares', icon: <ShareAltOutlined />, label: '共享管理' },
+  { key: '/admin/sandboxes', icon: <CloudServerOutlined />, label: '沙箱管理' },
+  { key: '/admin/audit', icon: <AuditOutlined />, label: '审计日志' },
 ];
 
 export default function Sidebar({ collapsed }: SidebarProps) {
@@ -55,7 +55,7 @@ export default function Sidebar({ collapsed }: SidebarProps) {
         fontWeight: 600,
         borderBottom: '1px solid rgba(255,255,255,0.1)',
       }}>
-        {collapsed ? 'E' : 'Elevo Admin'}
+        {collapsed ? 'E' : 'Elevo 管理'}
       </div>
       <Menu
         theme="dark"

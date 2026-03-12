@@ -29,11 +29,11 @@ export default function Login() {
     try {
       const token = await apiLogin(password);
       storeLogin(token);
-      message.success('Login successful');
+      message.success('登录成功');
       navigate(searchParams.get('redirect') || '/admin/dashboard', { replace: true });
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: { message?: string } } } })
-        ?.response?.data?.error?.message || 'Login failed';
+        ?.response?.data?.error?.message || '登录失败，请检查密码';
       setError(msg);
       inputRef.current?.focus();
     } finally {
@@ -51,14 +51,14 @@ export default function Login() {
     }}>
       <Card style={{ width: 400 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Typography.Title level={3} style={{ margin: 0 }}>Elevo Admin</Typography.Title>
-          <Typography.Text type="secondary">Sign in to continue</Typography.Text>
+          <Typography.Title level={3} style={{ margin: 0 }}>Elevo 管理后台</Typography.Title>
+          <Typography.Text type="secondary">请输入管理员密码登录</Typography.Text>
         </div>
         <Input.Password
           ref={inputRef as never}
           size="large"
           prefix={<LockOutlined />}
-          placeholder="Admin password"
+          placeholder="管理员密码"
           value={password}
           onChange={(e) => { setPassword(e.target.value); setError(''); }}
           onPressEnter={handleLogin}
@@ -78,7 +78,7 @@ export default function Login() {
           onClick={handleLogin}
           style={{ marginTop: 16 }}
         >
-          Sign In
+          登录
         </Button>
       </Card>
     </div>

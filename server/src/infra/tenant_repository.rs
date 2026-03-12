@@ -59,16 +59,11 @@ struct ApiKeyRow {
     created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, FromRow)]
-struct CountRow {
-    count: i64,
-}
-
 // ── Conversions ──
 
 fn tenant_from_row(row: TenantRow) -> Tenant {
     Tenant {
-        id: row.id.to_string(),
+        id: row.id,
         name: row.name,
         description: row.description,
         is_active: row.is_active,
@@ -81,8 +76,8 @@ fn tenant_from_row(row: TenantRow) -> Tenant {
 
 fn api_key_from_row(row: ApiKeyRow) -> ApiKey {
     ApiKey {
-        id: row.id.to_string(),
-        tenant_id: row.tenant_id.to_string(),
+        id: row.id,
+        tenant_id: row.tenant_id,
         name: row.name,
         token_prefix: row.token_prefix,
         is_active: row.is_active,
@@ -160,19 +155,16 @@ impl TenantRepository {
 
         tx.commit().await?;
 
-        let tenant = self.get_tenant(&id.to_string()).await?;
+        let tenant = self.get_tenant(id).await?;
         Ok((tenant, api_key_result))
     }
 
     /// Get a tenant by ID
-    pub async fn get_tenant(&self, id: &str) -> Result<Tenant> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
-
+    pub async fn get_tenant(&self, id: Uuid) -> Result<Tenant> {
         let row = sqlx::query_as::<_, TenantRow>(
             "SELECT id, name, description, is_active, storage_type, storage_config, created_at, updated_at FROM tenants WHERE id = $1",
         )
-        .bind(uuid)
+        .bind(id)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| Error::WorkspaceNotFound(format!("Tenant not found: {}", id)))?;
@@ -180,63 +172,60 @@ impl TenantRepository {
         Ok(tenant_from_row(row))
     }
 
-    /// List tenants with filtering and pagination
+    /// List tenants with filtering and pagination.
+    ///
+    /// Uses parameterized queries to prevent SQL injection.
     pub async fn list_tenants(
         &self,
         filter: TenantFilter,
         pagination: Pagination,
     ) -> Result<PaginatedResult<TenantListItem>> {
-        let (where_clause, count_clause) = self.build_tenant_filter(&filter);
         let offset = pagination.offset() as i64;
         let limit = pagination.page_size as i64;
 
-        // Count query
-        let count_sql = format!("SELECT COUNT(*) as count FROM tenants t {}", count_clause);
-        let count_row = sqlx::query_as::<_, CountRow>(&count_sql)
-            .fetch_one(&self.pool)
-            .await?;
+        // Build parameterized filter
+        let search_pattern = filter.search.as_ref().map(|s| format!("%{}%", s));
 
-        // List query with aggregated counts
-        let list_sql = format!(
+        // Count query with parameterized filters
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*)
+            FROM tenants t
+            WHERE ($1::boolean IS NULL OR t.is_active = $1)
+              AND ($2::text IS NULL OR t.storage_type = $2)
+              AND ($3::text IS NULL OR t.name ILIKE $3 OR t.description ILIKE $3 OR t.id::text = $4)
+            "#,
+        )
+        .bind(filter.is_active)
+        .bind(filter.storage_type.as_deref())
+        .bind(search_pattern.as_deref())
+        .bind(filter.search.as_deref().unwrap_or(""))
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Data query with aggregated counts
+        let rows = sqlx::query_as::<_, TenantListRow>(
             r#"
             SELECT t.id, t.name, t.description, t.is_active, t.storage_type, t.storage_config,
                    t.created_at, t.updated_at,
                    (SELECT COUNT(*) FROM shares s WHERE s.owner_tenant_id = t.id) as share_count,
-                   (SELECT COUNT(*) FROM api_keys k WHERE k.tenant_id = t.id AND k.is_active = true) as active_api_key_count
+                   (SELECT COUNT(*) FROM api_keys k WHERE k.tenant_id = t.id AND k.is_active = true AND (k.expires_at IS NULL OR k.expires_at > now())) as active_api_key_count
             FROM tenants t
-            {}
+            WHERE ($1::boolean IS NULL OR t.is_active = $1)
+              AND ($2::text IS NULL OR t.storage_type = $2)
+              AND ($3::text IS NULL OR t.name ILIKE $3 OR t.description ILIKE $3 OR t.id::text = $4)
             ORDER BY t.created_at DESC
-            LIMIT {} OFFSET {}
+            LIMIT $5 OFFSET $6
             "#,
-            where_clause, limit, offset
-        );
-
-        let rows = sqlx::query_as::<_, TenantListRow>(&list_sql)
-            .fetch_all(&self.pool)
-            .await;
-
-        // If shares table doesn't exist yet (Phase 2b), fall back
-        let rows = match rows {
-            Ok(r) => r,
-            Err(_) => {
-                let fallback_sql = format!(
-                    r#"
-                    SELECT t.id, t.name, t.description, t.is_active, t.storage_type, t.storage_config,
-                           t.created_at, t.updated_at,
-                           0::bigint as share_count,
-                           (SELECT COUNT(*) FROM api_keys k WHERE k.tenant_id = t.id AND k.is_active = true) as active_api_key_count
-                    FROM tenants t
-                    {}
-                    ORDER BY t.created_at DESC
-                    LIMIT {} OFFSET {}
-                    "#,
-                    where_clause, limit, offset
-                );
-                sqlx::query_as::<_, TenantListRow>(&fallback_sql)
-                    .fetch_all(&self.pool)
-                    .await?
-            }
-        };
+        )
+        .bind(filter.is_active)
+        .bind(filter.storage_type.as_deref())
+        .bind(search_pattern.as_deref())
+        .bind(filter.search.as_deref().unwrap_or(""))
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await?;
 
         let items = rows
             .into_iter()
@@ -258,17 +247,14 @@ impl TenantRepository {
 
         Ok(PaginatedResult {
             items,
-            total: count_row.count,
+            total: count,
             page: pagination.page,
             page_size: pagination.page_size,
         })
     }
 
     /// Update a tenant
-    pub async fn update_tenant(&self, id: &str, params: UpdateTenantParams) -> Result<Tenant> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
-
+    pub async fn update_tenant(&self, id: Uuid, params: UpdateTenantParams) -> Result<Tenant> {
         // Build dynamic SET clause
         let mut sets = Vec::new();
         let mut idx = 2u32; // $1 is id
@@ -291,7 +277,7 @@ impl TenantRepository {
         let sql = format!("UPDATE tenants SET {} WHERE id = $1", sets.join(", "));
         let now = Utc::now();
 
-        let mut query = sqlx::query(&sql).bind(uuid);
+        let mut query = sqlx::query(&sql).bind(id);
         if let Some(ref name) = params.name {
             query = query.bind(name);
         }
@@ -305,12 +291,9 @@ impl TenantRepository {
     }
 
     /// Activate a tenant
-    pub async fn activate_tenant(&self, id: &str) -> Result<Tenant> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
-
+    pub async fn activate_tenant(&self, id: Uuid) -> Result<Tenant> {
         sqlx::query("UPDATE tenants SET is_active = true, updated_at = $2 WHERE id = $1")
-            .bind(uuid)
+            .bind(id)
             .bind(Utc::now())
             .execute(&self.pool)
             .await?;
@@ -319,12 +302,9 @@ impl TenantRepository {
     }
 
     /// Deactivate a tenant
-    pub async fn deactivate_tenant(&self, id: &str) -> Result<Tenant> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
-
+    pub async fn deactivate_tenant(&self, id: Uuid) -> Result<Tenant> {
         sqlx::query("UPDATE tenants SET is_active = false, updated_at = $2 WHERE id = $1")
-            .bind(uuid)
+            .bind(id)
             .bind(Utc::now())
             .execute(&self.pool)
             .await?;
@@ -332,28 +312,110 @@ impl TenantRepository {
         self.get_tenant(id).await
     }
 
-    /// Delete a tenant. If force=false, checks for active sandboxes.
-    pub async fn delete_tenant(&self, id: &str, force: bool) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
+    /// Delete a tenant with full precondition checks.
+    ///
+    /// Always blocks on:
+    /// - Active shares (owned by this tenant)
+    /// - Active sandboxes (running, starting, or stopping)
+    ///
+    /// If `force=false`, also blocks on active API keys.
+    /// If `force=true`, cascades deletion of stopped sandboxes, mounts, permissions, and keys.
+    pub async fn delete_tenant(&self, id: Uuid, force: bool) -> Result<()> {
+        // Check for active shares — always blocks
+        let share_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM shares WHERE owner_tenant_id = $1",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if share_count > 0 {
+            return Err(Error::HasActiveShares);
+        }
+
+        // Check for active sandboxes (running, starting, stopping) — always blocks
+        let active_sandbox_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM sandboxes WHERE namespace_id = $1 AND state IN ('starting', 'running', 'stopping')",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if active_sandbox_count > 0 {
+            return Err(Error::WorkspaceHasActiveSandboxes);
+        }
 
         if !force {
-            let count = sqlx::query_as::<_, CountRow>(
-                "SELECT COUNT(*) as count FROM sandboxes WHERE namespace_id = $1 AND state IN ('starting', 'running')",
+            // Check for active (non-expired) API keys — blocks unless forced
+            let key_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM api_keys WHERE tenant_id = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > now())",
             )
-            .bind(uuid)
+            .bind(id)
             .fetch_one(&self.pool)
             .await?;
 
-            if count.count > 0 {
-                return Err(Error::WorkspaceHasActiveSandboxes);
+            if key_count > 0 {
+                return Err(Error::HasActiveApiKeys(key_count));
             }
         }
 
-        sqlx::query("DELETE FROM tenants WHERE id = $1")
-            .bind(uuid)
-            .execute(&self.pool)
+        // Cascade delete in a transaction
+        let mut tx = self.pool.begin().await?;
+
+        // Delete sandbox mounts for stopped/error sandboxes
+        sqlx::query(
+            r#"DELETE FROM sandbox_mounts
+               WHERE sandbox_id IN (
+                   SELECT id FROM sandboxes
+                   WHERE namespace_id = $1 AND state IN ('stopped', 'error')
+               )"#,
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Delete stopped/error sandboxes
+        sqlx::query(
+            "DELETE FROM sandboxes WHERE namespace_id = $1 AND state IN ('stopped', 'error')",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Delete API keys
+        sqlx::query("DELETE FROM api_keys WHERE tenant_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
             .await?;
+
+        // Delete share permissions for shares owned by this tenant
+        sqlx::query(
+            r#"DELETE FROM share_permissions
+               WHERE share_id IN (SELECT id FROM shares WHERE owner_tenant_id = $1)"#,
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
+        // Delete share permissions granted TO this tenant on other shares
+        sqlx::query("DELETE FROM share_permissions WHERE tenant_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        // Delete shares owned by this tenant
+        sqlx::query("DELETE FROM shares WHERE owner_tenant_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        // Delete the tenant
+        sqlx::query("DELETE FROM tenants WHERE id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        tx.commit().await?;
 
         Ok(())
     }
@@ -363,17 +425,14 @@ impl TenantRepository {
     /// Create an API key for a tenant. Returns (ApiKey, plaintext_token).
     pub async fn create_api_key(
         &self,
-        tenant_id: &str,
+        tenant_id: Uuid,
         params: CreateApiKeyParams,
     ) -> Result<(ApiKey, String)> {
-        let uuid = Uuid::parse_str(tenant_id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
-
         // Verify tenant exists
         let _ = self.get_tenant(tenant_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let result = self.create_api_key_in_tx(&mut tx, uuid, params).await?;
+        let result = self.create_api_key_in_tx(&mut tx, tenant_id, params).await?;
         tx.commit().await?;
         Ok(result)
     }
@@ -408,8 +467,8 @@ impl TenantRepository {
         .await?;
 
         let key = ApiKey {
-            id: id.to_string(),
-            tenant_id: tenant_id.to_string(),
+            id,
+            tenant_id,
             name: params.name,
             token_prefix: prefix,
             is_active: true,
@@ -421,15 +480,25 @@ impl TenantRepository {
         Ok((key, token))
     }
 
-    /// List API keys for a tenant
-    pub async fn list_api_keys(&self, tenant_id: &str) -> Result<Vec<ApiKey>> {
-        let uuid = Uuid::parse_str(tenant_id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid tenant ID: {}", e)))?;
+    /// Get a single API key by its ID
+    pub async fn get_api_key(&self, key_id: Uuid) -> Result<ApiKey> {
+        let row = sqlx::query_as::<_, ApiKeyRow>(
+            "SELECT id, tenant_id, name, token_prefix, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE id = $1",
+        )
+        .bind(key_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| Error::WorkspaceNotFound(format!("API key not found: {}", key_id)))?;
 
+        Ok(api_key_from_row(row))
+    }
+
+    /// List API keys for a tenant
+    pub async fn list_api_keys(&self, tenant_id: Uuid) -> Result<Vec<ApiKey>> {
         let rows = sqlx::query_as::<_, ApiKeyRow>(
             "SELECT id, tenant_id, name, token_prefix, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC",
         )
-        .bind(uuid)
+        .bind(tenant_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -437,12 +506,9 @@ impl TenantRepository {
     }
 
     /// Revoke (deactivate) an API key
-    pub async fn revoke_api_key(&self, key_id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(key_id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid key ID: {}", e)))?;
-
+    pub async fn revoke_api_key(&self, key_id: Uuid) -> Result<()> {
         let result = sqlx::query("UPDATE api_keys SET is_active = false WHERE id = $1")
-            .bind(uuid)
+            .bind(key_id)
             .execute(&self.pool)
             .await?;
 
@@ -469,17 +535,14 @@ impl TenantRepository {
             None => return Ok(None),
         };
 
-        let tenant = self.get_tenant(&key.tenant_id).await?;
+        let tenant = self.get_tenant(key.tenant_id).await?;
         Ok(Some((key, tenant)))
     }
 
     /// Update last_used_at for an API key
-    pub async fn update_last_used(&self, key_id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(key_id)
-            .map_err(|e| Error::InvalidParameter(format!("Invalid key ID: {}", e)))?;
-
+    pub async fn update_last_used(&self, key_id: Uuid) -> Result<()> {
         sqlx::query("UPDATE api_keys SET last_used_at = $2 WHERE id = $1")
-            .bind(uuid)
+            .bind(key_id)
             .bind(Utc::now())
             .execute(&self.pool)
             .await?;
@@ -487,30 +550,4 @@ impl TenantRepository {
         Ok(())
     }
 
-    // ── Helpers ──
-
-    fn build_tenant_filter(&self, filter: &TenantFilter) -> (String, String) {
-        let mut conditions = Vec::new();
-
-        if let Some(active) = filter.is_active {
-            conditions.push(format!("t.is_active = {}", active));
-        }
-        if let Some(ref st) = filter.storage_type {
-            conditions.push(format!("t.storage_type = '{}'", st.replace('\'', "''")));
-        }
-        if let Some(ref search) = filter.search {
-            let escaped = search.replace('\'', "''");
-            conditions.push(format!(
-                "(t.name ILIKE '%{}%' OR t.description ILIKE '%{}%' OR t.id::text = '{}')",
-                escaped, escaped, escaped
-            ));
-        }
-
-        if conditions.is_empty() {
-            (String::new(), String::new())
-        } else {
-            let clause = format!("WHERE {}", conditions.join(" AND "));
-            (clause.clone(), clause)
-        }
-    }
 }

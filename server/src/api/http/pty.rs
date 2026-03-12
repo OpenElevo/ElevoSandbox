@@ -74,39 +74,71 @@ async fn handle_pty_socket(
     sandbox_id: String,
     pty_id: String,
 ) {
-    // Handle incoming messages
-    while let Some(msg) = socket.recv().await {
-        if let Ok(msg) = msg {
-            match msg {
-                Message::Text(text) => {
-                    // Send text input to PTY
-                    if let Err(e) = state
-                        .pty_service
-                        .send_input(&sandbox_id, &pty_id, text.as_bytes().to_vec())
-                        .await
-                    {
-                        tracing::error!("Failed to send PTY input: {}", e);
+    use crate::infra::agent_pool::PtyOutputEvent;
+
+    // Subscribe to PTY output from the agent
+    let mut pty_rx = state.agent_pool.subscribe_pty(&sandbox_id, &pty_id);
+
+    // Bidirectional loop: forward input from WebSocket → PTY, output from PTY → WebSocket
+    loop {
+        tokio::select! {
+            // Read from WebSocket (client input)
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        if let Err(e) = state
+                            .pty_service
+                            .send_input(&sandbox_id, &pty_id, text.as_bytes().to_vec())
+                            .await
+                        {
+                            tracing::error!("Failed to send PTY input: {}", e);
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Binary(data))) => {
+                        if let Err(e) = state
+                            .pty_service
+                            .send_input(&sandbox_id, &pty_id, data.to_vec())
+                            .await
+                        {
+                            tracing::error!("Failed to send PTY input: {}", e);
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(e)) => {
+                        tracing::debug!("WebSocket error: {}", e);
                         break;
                     }
+                    _ => {}
                 }
-                Message::Binary(data) => {
-                    // Send binary input to PTY
-                    if let Err(e) = state
-                        .pty_service
-                        .send_input(&sandbox_id, &pty_id, data.to_vec())
-                        .await
-                    {
-                        tracing::error!("Failed to send PTY input: {}", e);
-                        break;
-                    }
-                }
-                Message::Close(_) => break,
-                _ => {}
             }
-        } else {
-            break;
+            // Read from PTY output (agent → client)
+            event = pty_rx.recv() => {
+                match event {
+                    Some(PtyOutputEvent::Output(data)) => {
+                        if socket.send(Message::Binary(data.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(PtyOutputEvent::Exit(code)) => {
+                        let msg = format!("\r\n[Process exited with code {}]\r\n", code);
+                        let _ = socket.send(Message::Text(msg.into())).await;
+                        break;
+                    }
+                    Some(PtyOutputEvent::Error(err)) => {
+                        let msg = format!("\r\n[PTY error: {}]\r\n", err);
+                        let _ = socket.send(Message::Text(msg.into())).await;
+                        break;
+                    }
+                    None => break,
+                }
+            }
         }
     }
+
+    // Cleanup: unsubscribe from PTY output
+    state.agent_pool.unsubscribe_pty(&sandbox_id, &pty_id);
 }
 
 /// Resize a PTY
