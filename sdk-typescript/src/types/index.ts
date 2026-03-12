@@ -41,14 +41,18 @@ export type SandboxState = 'starting' | 'running' | 'stopping' | 'stopped' | 'er
 export interface Sandbox {
   /** Unique identifier */
   id: string;
-  /** Workspace ID this sandbox is bound to */
-  workspaceId: string;
+  /** @deprecated Use namespaceId instead */
+  workspaceId?: string;
+  /** Namespace (tenant) ID this sandbox runs in */
+  namespaceId?: string;
   /** Optional human-readable name */
   name?: string;
   /** Template used to create this sandbox */
   template: string;
   /** Current state */
   state: SandboxState;
+  /** Root path within the namespace */
+  rootPath?: string;
   /** Environment variables */
   env?: Record<string, string>;
   /** Custom metadata */
@@ -61,24 +65,54 @@ export interface Sandbox {
   timeout?: number;
   /** Error message if state is error */
   errorMessage?: string;
+  /** Mounted shares */
+  mounts?: SandboxMount[];
+}
+
+/**
+ * Mount request for attaching a share to a sandbox
+ */
+export interface MountRequest {
+  /** Share ID to mount */
+  shareId: string;
+  /** Path inside the sandbox where the share is mounted */
+  mountPath: string;
+}
+
+/**
+ * Sandbox mount info (after creation)
+ */
+export interface SandboxMount {
+  /** Sandbox ID */
+  sandboxId: string;
+  /** Share ID */
+  shareId: string;
+  /** Mount path inside the sandbox */
+  mountPath: string;
 }
 
 /**
  * Parameters for creating a sandbox
  */
 export interface CreateSandboxParams {
-  /** Workspace ID to bind to (required) */
-  workspaceId: string;
+  /** @deprecated Use namespaceId instead */
+  workspaceId?: string;
+  /** Namespace (tenant) ID — usually set automatically from API key */
+  namespaceId?: string;
   /** Template to use */
   template?: string;
   /** Optional name */
   name?: string;
+  /** Root path within the namespace (default: /) */
+  rootPath?: string;
   /** Environment variables */
   env?: Record<string, string>;
   /** Custom metadata */
   metadata?: Record<string, string>;
   /** Timeout in seconds */
   timeout?: number;
+  /** Shares to mount in the sandbox */
+  mounts?: MountRequest[];
 }
 
 /**

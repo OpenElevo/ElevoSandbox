@@ -13,17 +13,22 @@ type SandboxService struct {
 	client *Client
 }
 
-// Create creates a new sandbox bound to a workspace
+// Create creates a new sandbox bound to a namespace
 func (s *SandboxService) Create(ctx context.Context, params *CreateSandboxParams) (*Sandbox, error) {
 	if params == nil {
-		return nil, fmt.Errorf("params cannot be nil, workspace_id is required")
+		return nil, fmt.Errorf("params cannot be nil")
 	}
-	if params.WorkspaceID == "" {
-		return nil, fmt.Errorf("workspace_id is required")
+
+	nsID := params.NamespaceID
+	if nsID == "" {
+		nsID = params.WorkspaceID // backward compat
+	}
+	if nsID == "" {
+		return nil, fmt.Errorf("namespace_id (or workspace_id) is required")
 	}
 
 	req := &pb.CreateSandboxRequest{
-		WorkspaceId: params.WorkspaceID,
+		WorkspaceId: nsID,
 		Env:         params.Env,
 		Metadata:    params.Metadata,
 	}
@@ -188,6 +193,7 @@ func protoToSandbox(sb *pb.Sandbox) *Sandbox {
 	return &Sandbox{
 		ID:           sb.Id,
 		WorkspaceID:  sb.WorkspaceId,
+		NamespaceID:  sb.WorkspaceId, // Server maps namespace_id to workspace_id in proto
 		Name:         name,
 		Template:     sb.Template,
 		State:        protoToSandboxState(pb.SandboxState(sb.State)),

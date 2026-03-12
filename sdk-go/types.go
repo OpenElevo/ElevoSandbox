@@ -51,29 +51,48 @@ const (
 	SandboxStateFailed   SandboxState = "failed"
 )
 
+// MountRequest contains parameters for mounting a share in a sandbox
+type MountRequest struct {
+	ShareID   string `json:"share_id"`
+	MountPath string `json:"mount_path"`
+}
+
+// SandboxMount represents a share mounted in a sandbox
+type SandboxMount struct {
+	SandboxID string `json:"sandbox_id"`
+	ShareID   string `json:"share_id"`
+	MountPath string `json:"mount_path"`
+}
+
 // Sandbox represents a sandbox instance
 type Sandbox struct {
 	ID           string            `json:"id"`
-	WorkspaceID  string            `json:"workspace_id"`
+	WorkspaceID  string            `json:"workspace_id,omitempty"` // Deprecated: use NamespaceID
+	NamespaceID  string            `json:"namespace_id,omitempty"`
 	Name         string            `json:"name,omitempty"`
 	Template     string            `json:"template"`
 	State        SandboxState      `json:"state"`
+	RootPath     string            `json:"root_path,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
 	Metadata     map[string]string `json:"metadata,omitempty"`
 	CreatedAt    time.Time         `json:"created_at"`
 	UpdatedAt    time.Time         `json:"updated_at"`
 	Timeout      int64             `json:"timeout,omitempty"`
 	ErrorMessage *string           `json:"error_message,omitempty"`
+	Mounts       []SandboxMount    `json:"mounts,omitempty"`
 }
 
 // CreateSandboxParams contains parameters for creating a sandbox
 type CreateSandboxParams struct {
-	WorkspaceID string            `json:"workspace_id"`
+	WorkspaceID string            `json:"workspace_id,omitempty"` // Deprecated: use NamespaceID
+	NamespaceID string            `json:"namespace_id,omitempty"`
 	Template    string            `json:"template,omitempty"`
 	Name        string            `json:"name,omitempty"`
+	RootPath    string            `json:"root_path,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 	Timeout     int64             `json:"timeout,omitempty"`
+	Mounts      []MountRequest    `json:"mounts,omitempty"`
 }
 
 // CommandResult contains the result of a command execution
