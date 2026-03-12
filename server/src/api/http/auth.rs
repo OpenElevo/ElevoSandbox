@@ -54,13 +54,22 @@ impl AuthConfig {
         }
     }
 
-    /// Create a JWT token for admin login
+    /// Create a JWT token for admin login with a freshly generated session ID
     pub fn create_admin_token(&self, ip: Option<String>) -> Result<String, AuthError> {
+        self.create_admin_token_with_session(Uuid::new_v4(), ip)
+    }
+
+    /// Create a JWT token reusing an existing session ID (used for sliding-window renewal)
+    pub fn create_admin_token_with_session(
+        &self,
+        session_id: Uuid,
+        ip: Option<String>,
+    ) -> Result<String, AuthError> {
         let now = Utc::now().timestamp();
         let exp = now + (self.jwt_expiration_hours as i64 * 3600);
         let claims = JwtClaims {
             sub: "admin".to_string(),
-            session_id: Uuid::new_v4(),
+            session_id,
             login_ip: ip,
             iat: now,
             exp,
@@ -228,11 +237,14 @@ fn authenticate_jwt(
         ip_address,
     };
 
-    // Check if token needs refresh — use current request IP, not the original login IP
+    // Check if token needs refresh — preserve session_id, use current request IP
     let refreshed = if config.should_refresh(&claims) {
         debug!("JWT token nearing expiry, issuing refresh");
         config
-            .create_admin_token(ip_address.map(|ip| ip.to_string()))
+            .create_admin_token_with_session(
+                claims.session_id,
+                ip_address.map(|ip| ip.to_string()),
+            )
             .ok()
     } else {
         None

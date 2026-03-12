@@ -132,9 +132,6 @@ pub async fn list_shares(
         }
     };
 
-    let page = pagination.page.max(1);
-    let page_size = pagination.page_size.min(100);
-
     if auth.is_admin() {
         // Admin sees all shares with pagination
         match state.share_repository.list_shares(filter, pagination).await {
@@ -151,25 +148,22 @@ pub async fn list_shares(
             Err(e) => super::tenant_handler::error_response(e),
         }
     } else if let Some(tid) = auth.tenant_id() {
-        // Tenant sees accessible shares
+        // Tenant sees accessible shares with pagination
         match state
             .share_repository
-            .list_accessible_shares(tid)
+            .list_accessible_shares_paginated(tid, pagination)
             .await
         {
-            Ok(shares) => {
-                let total = shares.len() as i64;
-                (
-                    StatusCode::OK,
-                    Json(serde_json::json!({
-                        "items": shares,
-                        "total": total,
-                        "page": page,
-                        "page_size": page_size
-                    })),
-                )
-                    .into_response()
-            }
+            Ok(result) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "items": result.items,
+                    "total": result.total,
+                    "page": result.page,
+                    "page_size": result.page_size
+                })),
+            )
+                .into_response(),
             Err(e) => super::tenant_handler::error_response(e),
         }
     } else {

@@ -8,6 +8,7 @@ import type { SharePermission, PermissionLevel } from '@/types';
 import { formatTime } from '@/utils/time';
 import { PERMISSION_LEVELS, PERMISSION_LABELS } from '@/utils/constants';
 import FileBrowser from '@/components/FileBrowser/FileBrowser';
+import DirtyFormGuard from '@/components/DirtyFormGuard';
 import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
 
 export default function ShareDetail() {
@@ -20,6 +21,7 @@ export default function ShareDetail() {
   const setBreadcrumbName = useBreadcrumbStore((s) => s.setBreadcrumbName);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [editDirty, setEditDirty] = useState(false);
   const [editForm] = Form.useForm();
   const [grantOpen, setGrantOpen] = useState(false);
   const [grantForm] = Form.useForm();
@@ -39,7 +41,7 @@ export default function ShareDetail() {
   const { data: permissions } = useQuery({
     queryKey: ['share-permissions', id],
     queryFn: () => listSharePermissions(id!),
-    enabled: !!id,
+    enabled: !!id && activeTab === 'permissions',
   });
 
   const { data: tenantsData } = useQuery({
@@ -52,6 +54,7 @@ export default function ShareDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['share', id] });
       setEditOpen(false);
+      setEditDirty(false);
       message.success('共享已更新');
     },
   });
@@ -73,6 +76,7 @@ export default function ShareDetail() {
   const handleEdit = () => {
     if (!share) return;
     editForm.setFieldsValue({ name: share.name, description: share.description, visibility: share.visibility });
+    setEditDirty(false);
     setEditOpen(true);
   };
 
@@ -240,7 +244,8 @@ export default function ShareDetail() {
 
       <Drawer title="编辑共享" open={editOpen} onClose={() => setEditOpen(false)} width={400}
         extra={<Button type="primary" onClick={() => editForm.validateFields().then((v) => updateMutation.mutate(v))} loading={updateMutation.isPending}>保存</Button>}>
-        <Form form={editForm} layout="vertical">
+        <DirtyFormGuard dirty={editDirty && editOpen} />
+        <Form form={editForm} layout="vertical" onValuesChange={() => setEditDirty(true)}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
           <Form.Item name="visibility" label="可见性">

@@ -80,10 +80,15 @@ pub async fn list_my_files(
         }
     };
 
+    let safe_path = match path_security::normalize_path(&query.path) {
+        Ok(p) => p.to_string_lossy().into_owned(),
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+
     let storage_id = format!("namespaces/{}", tenant_id);
     match state
         .workspace_service
-        .list_files(&storage_id, &query.path)
+        .list_files(&storage_id, &safe_path)
         .await
     {
         Ok(files) => {

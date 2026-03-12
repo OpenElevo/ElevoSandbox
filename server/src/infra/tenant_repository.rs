@@ -293,22 +293,30 @@ impl TenantRepository {
 
     /// Activate a tenant
     pub async fn activate_tenant(&self, id: Uuid) -> Result<Tenant> {
-        sqlx::query("UPDATE tenants SET is_active = true, updated_at = $2 WHERE id = $1")
+        let result = sqlx::query("UPDATE tenants SET is_active = true, updated_at = $2 WHERE id = $1")
             .bind(id)
             .bind(Utc::now())
             .execute(&self.pool)
             .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::WorkspaceNotFound(format!("Tenant not found: {}", id)));
+        }
 
         self.get_tenant(id).await
     }
 
     /// Deactivate a tenant
     pub async fn deactivate_tenant(&self, id: Uuid) -> Result<Tenant> {
-        sqlx::query("UPDATE tenants SET is_active = false, updated_at = $2 WHERE id = $1")
+        let result = sqlx::query("UPDATE tenants SET is_active = false, updated_at = $2 WHERE id = $1")
             .bind(id)
             .bind(Utc::now())
             .execute(&self.pool)
             .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::WorkspaceNotFound(format!("Tenant not found: {}", id)));
+        }
 
         self.get_tenant(id).await
     }
@@ -321,13 +329,17 @@ impl TenantRepository {
     ///
     /// If `force=false`, also blocks on active API keys.
     /// If `force=true`, cascades deletion of stopped sandboxes, mounts, permissions, and keys.
+    ///
+    /// All precondition checks run inside the transaction to prevent TOCTOU races.
     pub async fn delete_tenant(&self, id: Uuid, force: bool) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+
         // Check for active shares — always blocks
         let share_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM shares WHERE owner_tenant_id = $1",
         )
         .bind(id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         if share_count > 0 {
@@ -339,7 +351,7 @@ impl TenantRepository {
             "SELECT COUNT(*) FROM sandboxes WHERE namespace_id = $1 AND state IN ('starting', 'running', 'stopping')",
         )
         .bind(id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         if active_sandbox_count > 0 {
@@ -352,16 +364,13 @@ impl TenantRepository {
                 "SELECT COUNT(*) FROM api_keys WHERE tenant_id = $1 AND is_active = true AND (expires_at IS NULL OR expires_at > now())",
             )
             .bind(id)
-            .fetch_one(&self.pool)
+            .fetch_one(&mut *tx)
             .await?;
 
             if key_count > 0 {
                 return Err(Error::HasActiveApiKeys(key_count));
             }
         }
-
-        // Cascade delete in a transaction
-        let mut tx = self.pool.begin().await?;
 
         // Delete sandbox mounts for stopped/error sandboxes
         sqlx::query(

@@ -1,11 +1,8 @@
-import { Card, Col, Row, Statistic, Table, Typography, Skeleton } from 'antd';
+import { Card, Col, Row, Statistic, Typography, Skeleton, Button, Empty } from 'antd';
 import { TeamOutlined, ShareAltOutlined, CloudServerOutlined, KeyOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { getDashboardStats } from '@/api/dashboard';
-import { listAuditLogs } from '@/api/audit';
-import { formatRelative } from '@/utils/time';
-import { AUDIT_ACTION_LABELS } from '@/utils/constants';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -13,11 +10,6 @@ export default function Dashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: getDashboardStats,
-  });
-
-  const { data: recentActivity, isLoading: activityLoading } = useQuery({
-    queryKey: ['recent-activity'],
-    queryFn: () => listAuditLogs({ page: 1, page_size: 10 }),
   });
 
   const statCards = [
@@ -48,16 +40,6 @@ export default function Dashboard() {
     },
   ];
 
-  const activityColumns = [
-    { title: '时间', dataIndex: 'created_at', key: 'time', width: 140,
-      render: (v: string) => formatRelative(v) },
-    { title: '操作', dataIndex: 'action', key: 'action', width: 180,
-      render: (v: string) => AUDIT_ACTION_LABELS[v] || v },
-    { title: '资源', dataIndex: 'resource_name', key: 'resource',
-      render: (name: string, record: { resource_type: string }) =>
-        name || record.resource_type },
-  ];
-
   return (
     <div>
       <Typography.Title level={4} style={{ marginBottom: 24 }}>仪表盘</Typography.Title>
@@ -81,20 +63,11 @@ export default function Dashboard() {
           </Col>
         ))}
       </Row>
-      <Card
-        title="最近操作"
-        extra={
-          <Link to="/admin/audit">查看全部审计日志 →</Link>
-        }
-      >
-        <Table
-          dataSource={recentActivity?.logs ?? []}
-          columns={activityColumns}
-          rowKey="id"
-          pagination={false}
-          loading={activityLoading}
-          size="small"
-        />
+      <Card title="最近活动" style={{ marginTop: 24 }}>
+        <Empty description="审计日志功能即将完善" />
+        <div style={{ textAlign: 'center', marginTop: 16 }}>
+          <Button type="link" onClick={() => navigate('/admin/audit-logs')}>查看全部审计日志 →</Button>
+        </div>
       </Card>
     </div>
   );

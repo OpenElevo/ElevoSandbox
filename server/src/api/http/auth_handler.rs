@@ -25,20 +25,9 @@ pub async fn login(
     State(state): State<AppState>,
     request: Request,
 ) -> impl IntoResponse {
-    // Extract client IP for JWT claims
-    let ip = request
-        .headers()
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .or_else(|| {
-            request
-                .headers()
-                .get("x-real-ip")
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string())
-        });
+    // Extract client IP for JWT claims, honouring the trusted-proxy allowlist
+    let ip = super::auth::extract_client_ip(&request, &state.config.trusted_proxy_ips)
+        .map(|addr| addr.to_string());
 
     // Parse body
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 16).await {

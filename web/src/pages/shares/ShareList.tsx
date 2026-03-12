@@ -12,6 +12,7 @@ import client from '@/api/client';
 import type { Share, CreateShareParams, FileInfo } from '@/types';
 import { formatTime } from '@/utils/time';
 import { useDebounce } from '@/hooks/useDebounce';
+import { usePagination } from '@/hooks/usePagination';
 
 // ─── Directory browser modal ──────────────────────────────────────────────────
 
@@ -149,8 +150,7 @@ export default function ShareList() {
   const [search, setSearch] = useState('');
   const [visFilter, setVisFilter] = useState<string>();
   const [ownerFilter, setOwnerFilter] = useState<string>();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const { page, pageSize, setPage, setPageSize } = usePagination();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
   const [form] = Form.useForm();
@@ -259,6 +259,7 @@ export default function ShareList() {
         <a onClick={() => navigate(`/admin/shares/${r.id}`)}>{name}</a>
       ),
     },
+    { title: '描述', dataIndex: 'description', key: 'description', width: 200, ellipsis: true },
     {
       title: '所属租户', dataIndex: 'owner_tenant_id', key: 'owner', width: 200,
       render: (tid: string) => {
@@ -266,13 +267,18 @@ export default function ShareList() {
         return t ? <a onClick={() => navigate(`/admin/tenants/${tid}`)}>{t.name}</a> : tid.slice(0, 8);
       },
     },
-    { title: '源路径', dataIndex: 'source_path', key: 'path' },
+    { title: '授权数', dataIndex: 'permission_count', key: 'permission_count', width: 80 },
+    {
+      title: '源路径', dataIndex: 'source_path', key: 'path',
+      render: (v: string) => <Typography.Text code>{v}</Typography.Text>,
+    },
     {
       title: '可见性', dataIndex: 'visibility', key: 'vis', width: 100,
       render: (v: string) => <Tag color={v === 'public' ? 'blue' : 'default'}>{v === 'public' ? '公开' : '私有'}</Tag>,
     },
     {
       title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
+      sorter: true,
       render: (v: string) => formatTime(v),
     },
     {

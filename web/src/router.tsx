@@ -39,7 +39,7 @@ export const router = createBrowserRouter([
           { path: 'shares', element: <ShareList /> },
           { path: 'shares/:id', element: <ShareDetail /> },
           { path: 'sandboxes', element: <SandboxList /> },
-          { path: 'audit', element: <AuditLogList /> },
+          { path: 'audit-logs', element: <AuditLogList /> },
         ],
       },
     ],

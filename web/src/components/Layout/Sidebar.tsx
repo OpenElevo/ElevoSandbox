@@ -19,7 +19,7 @@ const menuItems = [
   { key: '/admin/tenants', icon: <TeamOutlined />, label: '租户管理' },
   { key: '/admin/shares', icon: <ShareAltOutlined />, label: '共享管理' },
   { key: '/admin/sandboxes', icon: <CloudServerOutlined />, label: '沙箱管理' },
-  { key: '/admin/audit', icon: <AuditOutlined />, label: '审计日志' },
+  { key: '/admin/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
 ];
 
 export default function Sidebar({ collapsed }: SidebarProps) {

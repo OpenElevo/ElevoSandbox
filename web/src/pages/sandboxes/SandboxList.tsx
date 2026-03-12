@@ -9,6 +9,7 @@ import type { Sandbox } from '@/types';
 import { formatTime } from '@/utils/time';
 import { SANDBOX_STATE_COLORS, SANDBOX_STATE_LABELS } from '@/utils/constants';
 import { useDebounce } from '@/hooks/useDebounce';
+import { usePagination } from '@/hooks/usePagination';
 
 export default function SandboxList() {
   const queryClient = useQueryClient();
@@ -16,8 +17,7 @@ export default function SandboxList() {
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<string>();
   const [nsFilter, setNsFilter] = useState<string>();
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const { page, pageSize, setPage, setPageSize } = usePagination();
   const [detailId, setDetailId] = useState<string | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [allPagesSelected, setAllPagesSelected] = useState(false);

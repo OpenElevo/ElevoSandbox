@@ -74,7 +74,7 @@ impl SandboxService {
 
             // Permission check: caller must have at least Read on the share
             let perm_level = self
-                .resolve_mount_permission(namespace_id, share.owner_tenant_id, mount.share_id)
+                .resolve_mount_permission(namespace_id, &share)
                 .await?;
 
             let host_path = self.config.get_share_host_path(
@@ -281,22 +281,22 @@ impl SandboxService {
     /// Rules:
     /// - Share owner (namespace_id == share.owner_tenant_id) → Admin (full access)
     /// - Otherwise: look up explicit permission in DB
-    /// - No permission → error
+    /// - Public share with no explicit permission → Read
+    /// - Private share with no permission → NOT_FOUND (hides existence)
     async fn resolve_mount_permission(
         &self,
         namespace_id: Uuid,
-        share_owner_id: Uuid,
-        share_id: Uuid,
+        share: &crate::domain::share::Share,
     ) -> Result<PermissionLevel> {
         // Owner of the share has implicit admin
-        if namespace_id == share_owner_id {
+        if namespace_id == share.owner_tenant_id {
             return Ok(PermissionLevel::Admin);
         }
 
         // Check explicit permission
         let perm = self
             .permission_repo
-            .get_permission(share_id, namespace_id)
+            .get_permission(share.id, namespace_id)
             .await?;
 
         match perm {
@@ -305,15 +305,13 @@ impl SandboxService {
                 "Insufficient permission to mount share".into(),
             )),
             None => {
-                // No explicit permission — check if the share is public (implicit read for all tenants)
-                let share = self.share_repo.get_share(share_id).await?;
                 if share.visibility == crate::domain::share::Visibility::Public {
                     Ok(PermissionLevel::Read)
                 } else {
                     // Return NOT_FOUND for private shares to hide their existence
                     Err(Error::WorkspaceNotFound(format!(
                         "Share {} not found",
-                        share_id
+                        share.id
                     )))
                 }
             }

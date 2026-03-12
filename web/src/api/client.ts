@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { message } from 'antd';
+import { useAuthStore } from '../stores/authStore';
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -25,7 +26,7 @@ client.interceptors.response.use(
     const refreshedToken = response.headers['x-refreshed-token'];
     if (refreshedToken && !isRefreshing) {
       isRefreshing = true;
-      localStorage.setItem('token', refreshedToken);
+      useAuthStore.getState().setToken(refreshedToken);
       setTimeout(() => { isRefreshing = false; }, 1000);
     }
     return response;
@@ -35,7 +36,7 @@ client.interceptors.response.use(
     const errorMsg = error.response?.data?.error?.message;
 
     if (status === 401) {
-      localStorage.removeItem('token');
+      useAuthStore.getState().logout();
       if (window.location.pathname !== '/admin/login') {
         message.error('登录已过期，请重新登录');
         window.location.href = '/admin/login?redirect=' + encodeURIComponent(window.location.pathname);

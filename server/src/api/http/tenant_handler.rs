@@ -325,7 +325,7 @@ pub fn error_response(e: crate::error::Error) -> axum::response::Response {
         crate::error::Error::HasActiveShares => (StatusCode::CONFLICT, "HAS_ACTIVE_SHARES"),
         crate::error::Error::HasActiveApiKeys(_) => (StatusCode::CONFLICT, "HAS_ACTIVE_API_KEYS"),
         crate::error::Error::PermissionDenied(_)
-        | crate::error::Error::PathNotAllowed(_) => (StatusCode::FORBIDDEN, "FORBIDDEN"),
+        | crate::error::Error::PathNotAllowed(_) => (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
         crate::error::Error::FileAlreadyExists(_)
         | crate::error::Error::SandboxAlreadyExists(_) => (StatusCode::CONFLICT, "CONFLICT"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),

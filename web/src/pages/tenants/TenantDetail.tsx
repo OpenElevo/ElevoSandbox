@@ -1,21 +1,23 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  Card, Descriptions, Tag, Button, Space, Tabs, Typography, App,
-  Drawer, Form, Input, Table, Modal, Checkbox, DatePicker, Alert,
+  Card, Descriptions, Tag, Button, Space, Tabs, App, Modal,
+  Drawer, Form, Input, Table, Checkbox, DatePicker, Alert,
 } from 'antd';
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getTenant, updateTenant, activateTenant, deactivateTenant,
-  deleteTenant, listApiKeys, createApiKey, revokeApiKey, listTenantPermissions,
+  listApiKeys, createApiKey, revokeApiKey, listTenantPermissions,
 } from '@/api/tenants';
 import { listShares } from '@/api/shares';
 import type { ApiKey, SharePermission } from '@/types';
 import { PERMISSION_COLORS, PERMISSION_LABELS } from '@/utils/constants';
 import { formatTime } from '@/utils/time';
 import FileBrowser from '@/components/FileBrowser/FileBrowser';
+import DirtyFormGuard from '@/components/DirtyFormGuard';
 import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
+import { useDeleteTenant } from '@/hooks/useDeleteTenant';
 import dayjs from 'dayjs';
 
 function getApiKeyStatus(key: ApiKey): { label: string; color: string } {
@@ -103,6 +105,7 @@ export default function TenantDetail() {
   const setBreadcrumbName = useBreadcrumbStore((s) => s.setBreadcrumbName);
 
   const [editOpen, setEditOpen] = useState(false);
+  const [editDirty, setEditDirty] = useState(false);
   const [editForm] = Form.useForm();
   const [keyForm] = Form.useForm();
   const [keyDrawerOpen, setKeyDrawerOpen] = useState(false);
@@ -144,6 +147,7 @@ export default function TenantDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tenant', id] });
       setEditOpen(false);
+      setEditDirty(false);
       message.success('租户已更新');
     },
   });
@@ -162,6 +166,7 @@ export default function TenantDetail() {
   const handleEdit = () => {
     if (!tenant) return;
     editForm.setFieldsValue({ name: tenant.name, description: tenant.description });
+    setEditDirty(false);
     setEditOpen(true);
   };
 
@@ -179,95 +184,11 @@ export default function TenantDetail() {
     });
   };
 
-  const handleDelete = async () => {
+  const deleteTenantHandler = useDeleteTenant({ navigateAfterDelete: '/admin/tenants' });
+
+  const handleDelete = () => {
     if (!tenant) return;
-
-    // First probe without force to determine the error code
-    try {
-      await deleteTenant(id!, false);
-      message.success('租户已删除');
-      navigate('/admin/tenants');
-      return;
-    } catch (err: unknown) {
-      const error = err as { response?: { status?: number; data?: { error?: { code?: string; message?: string } } } };
-      const status = error.response?.status;
-      const code = error.response?.data?.error?.code;
-      const msg = error.response?.data?.error?.message;
-
-      if (status !== 409) {
-        message.error(msg || '删除租户失败');
-        return;
-      }
-
-      // Case 1: has active shares or sandboxes → hard block, no delete possible
-      if (code === 'HAS_ACTIVE_SHARES' || code === 'HAS_ACTIVE_SANDBOXES') {
-        Modal.error({
-          title: '无法删除租户',
-          content: msg || '该租户仍有活跃的 Share 或 Sandbox，请先清理后再删除。',
-        });
-        return;
-      }
-
-      // Case 2: has active API keys → warning, require name confirm, then force=true
-      if (code === 'HAS_ACTIVE_API_KEYS') {
-        let inputName = '';
-        modal.confirm({
-          title: `删除租户「${tenant.name}」？`,
-          content: (
-            <div>
-              <Typography.Text type="warning" style={{ display: 'block', marginBottom: 8 }}>
-                {msg || '该租户有活跃 API Key，删除后这些 Key 将永久失效。'}
-              </Typography.Text>
-              <Typography.Text type="danger" style={{ display: 'block', marginBottom: 8 }}>
-                此操作不可逆，请谨慎操作。
-              </Typography.Text>
-              <Input
-                placeholder="请输入租户名称确认"
-                onChange={(e) => { inputName = e.target.value; }}
-              />
-            </div>
-          ),
-          okText: '确认删除',
-          okButtonProps: { danger: true },
-          cancelText: '取消',
-          onOk: async () => {
-            if (inputName !== tenant.name) {
-              message.error('名称不匹配');
-              throw new Error('mismatch');
-            }
-            await deleteTenant(id!, true);
-            message.success('租户已删除');
-            navigate('/admin/tenants');
-          },
-        });
-        return;
-      }
-
-      // Case 3: other 409 / clean tenant — normal name confirmation
-      let inputName = '';
-      modal.confirm({
-        title: `删除租户「${tenant.name}」？`,
-        content: (
-          <div>
-            <Typography.Text type="danger">此操作不可逆。</Typography.Text>
-            <Input
-              style={{ marginTop: 8 }}
-              placeholder="请输入租户名称确认"
-              onChange={(e) => { inputName = e.target.value; }}
-            />
-          </div>
-        ),
-        okText: '删除',
-        okButtonProps: { danger: true },
-        cancelText: '取消',
-        onOk: async () => {
-          if (inputName !== tenant.name) { message.error('名称不匹配'); throw new Error('mismatch'); }
-          await deleteTenant(id!, true);
-          message.success('租户已删除');
-          navigate('/admin/tenants');
-        },
-      });
-    }
+    deleteTenantHandler(tenant);
   };
 
   const handleCreateKey = () => {
@@ -319,7 +240,7 @@ export default function TenantDetail() {
     {
       title: '操作', key: 'actions',
       render: (_: unknown, record: ApiKey) =>
-        (record.is_active && !record.expires_at) || (record.expires_at && dayjs(record.expires_at).isAfter(dayjs())) ? (
+        record.is_active && (!record.expires_at || dayjs(record.expires_at).isAfter(dayjs())) ? (
           <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
         ) : null,
     },
@@ -442,7 +363,8 @@ export default function TenantDetail() {
           </Button>
         }
       >
-        <Form form={editForm} layout="vertical">
+        <DirtyFormGuard dirty={editDirty && editOpen} />
+        <Form form={editForm} layout="vertical" onValuesChange={() => setEditDirty(true)}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
         </Form>

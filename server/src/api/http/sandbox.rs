@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::domain::auth::AuthContext;
 use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
 use crate::domain::share::MountRequest;
+use crate::service::path_security;
 use crate::AppState;
 
 /// Create sandbox request
@@ -159,9 +160,15 @@ pub async fn create_sandbox(
             .into_response();
     };
 
+    let raw_root_path = req.root_path.unwrap_or_else(|| "/".to_string());
+    let safe_root_path = match path_security::normalize_path(&raw_root_path) {
+        Ok(p) => format!("/{}", p.to_string_lossy().trim_start_matches('.')),
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+
     let params = CreateSandboxParams {
         namespace_id,
-        root_path: req.root_path.unwrap_or_else(|| "/".to_string()),
+        root_path: safe_root_path,
         template: req.template,
         name: req.name,
         env: req.env,
@@ -624,7 +631,7 @@ pub async fn delete_sandbox(
                     "force": force,
                 }),
             );
-            (StatusCode::OK, Json(serde_json::json!({ "success": true }))).into_response()
+            StatusCode::NO_CONTENT.into_response()
         }
         Err(e) => super::tenant_handler::error_response(e),
     }

@@ -272,4 +272,49 @@ impl ShareRepository {
 
         Ok(rows.into_iter().map(Share::from).collect())
     }
+
+    /// List shares accessible to a tenant with pagination support.
+    pub async fn list_accessible_shares_paginated(
+        &self,
+        tenant_id: Uuid,
+        pagination: Pagination,
+    ) -> Result<PaginatedResult<Share>, Error> {
+        let pagination = pagination.capped();
+        let page = pagination.page;
+        let per_page = pagination.page_size;
+        let offset = ((page - 1) * per_page) as i64;
+        let limit = per_page as i64;
+
+        let base_where = r#"
+            FROM shares s
+            JOIN tenants t ON t.id = s.owner_tenant_id
+            LEFT JOIN share_permissions sp ON s.id = sp.share_id
+            WHERE t.is_active = true
+              AND (s.owner_tenant_id = $1
+                   OR sp.tenant_id = $1
+                   OR s.visibility = 'public')
+        "#;
+
+        let count_sql = format!("SELECT COUNT(DISTINCT s.id) {}", base_where);
+        let total: i64 = sqlx::query_scalar(&count_sql)
+            .bind(tenant_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let data_sql = format!(
+            "SELECT DISTINCT s.* {} ORDER BY s.created_at DESC LIMIT $2 OFFSET $3",
+            base_where,
+        );
+        let rows = sqlx::query_as::<_, ShareRow>(&data_sql)
+            .bind(tenant_id)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let items = rows.into_iter().map(Share::from).collect();
+        Ok(PaginatedResult { items, total, page, page_size: per_page })
+    }
 }

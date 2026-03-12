@@ -8,6 +8,7 @@ import type { AuditLog, AuditFilter } from '@/types';
 import { formatTime } from '@/utils/time';
 import { AUDIT_ACTION_GROUPS, AUDIT_ACTION_LABELS, RESOURCE_TYPES, RESOURCE_TYPE_LABELS } from '@/utils/constants';
 import dayjs from 'dayjs';
+import { usePagination } from '@/hooks/usePagination';
 
 const { RangePicker } = DatePicker;
 
@@ -23,8 +24,7 @@ export default function AuditLogList() {
   const [actorTenantFilter, setActorTenantFilter] = useState<string>();
   const [resourceTypeFilter, setResourceTypeFilter] = useState<string>();
   const [timeRange, setTimeRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const { page, pageSize, setPage, setPageSize } = usePagination();
   const [expandedKey, setExpandedKey] = useState<string>();
 
   const { data: tenantsData } = useQuery({

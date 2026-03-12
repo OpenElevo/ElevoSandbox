@@ -16,7 +16,7 @@ export default function DeleteConfirmModal({ open, title, entityName, onConfirm,
 
   const handleOk = async () => {
     if (inputValue !== entityName) {
-      setError('Name does not match');
+      setError('名称不匹配');
       return;
     }
     setError('');
@@ -37,15 +37,16 @@ export default function DeleteConfirmModal({ open, title, entityName, onConfirm,
       onOk={handleOk}
       onCancel={handleCancel}
       okButtonProps={{ danger: true, loading }}
-      okText="Delete"
+      okText="删除"
+      cancelText="取消"
     >
       <Typography.Paragraph type="danger">
-        This action cannot be undone. Type <strong>{entityName}</strong> to confirm.
+        此操作不可逆。请输入 <strong>{entityName}</strong> 确认删除。
       </Typography.Paragraph>
       <Input
         value={inputValue}
         onChange={(e) => { setInputValue(e.target.value); setError(''); }}
-        placeholder={`Type "${entityName}" to confirm`}
+        placeholder={`请输入"${entityName}"确认`}
         status={error ? 'error' : undefined}
         onPressEnter={handleOk}
       />

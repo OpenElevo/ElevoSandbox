@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from 'react';
+import { useBlocker } from 'react-router-dom';
 import { Modal } from 'antd';
 
 interface DirtyFormGuardProps {
@@ -6,7 +7,13 @@ interface DirtyFormGuardProps {
   message?: string;
 }
 
+/**
+ * Prevents accidental navigation away from a form with unsaved changes.
+ * Intercepts both browser-level events (tab close, refresh) and
+ * React Router programmatic/link navigation via useBlocker.
+ */
 export default function DirtyFormGuard({ dirty, message = '有未保存的内容，确认放弃？' }: DirtyFormGuardProps) {
+  // Block browser tab close / refresh
   const handleBeforeUnload = useCallback((e: BeforeUnloadEvent) => {
     if (dirty) {
       e.preventDefault();
@@ -18,10 +25,11 @@ export default function DirtyFormGuard({ dirty, message = '有未保存的内容
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [handleBeforeUnload]);
 
-  // Also guard react-router navigation
+  // Block React Router navigation (navigate(), <Link>, back/forward)
+  const blocker = useBlocker(dirty);
+
   useEffect(() => {
-    if (!dirty) return;
-    const handlePopState = () => {
+    if (blocker.state === 'blocked') {
       Modal.confirm({
         title: '未保存的更改',
         content: message,
@@ -29,15 +37,11 @@ export default function DirtyFormGuard({ dirty, message = '有未保存的内容
         cancelText: '继续编辑',
         okButtonProps: { danger: true },
         autoFocusButton: 'cancel',
-        onCancel: () => {
-          // Push current state back to prevent navigation
-          window.history.pushState(null, '', window.location.href);
-        },
+        onOk: () => blocker.proceed(),
+        onCancel: () => blocker.reset(),
       });
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [dirty, message]);
+    }
+  }, [blocker, message]);
 
   return null;
 }

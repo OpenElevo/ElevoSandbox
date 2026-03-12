@@ -50,6 +50,9 @@ pub fn normalize_path(path: &str) -> Result<PathBuf> {
 /// Rejects:
 /// - Paths containing null bytes
 /// - Paths that contain `..` components (returns `Error::PathNotAllowed`)
+///
+/// When the normalized path is `.` (empty/root input), returns `root` itself
+/// rather than `root/.` to avoid surprising trailing-dot paths.
 pub fn sanitize_path(root: &Path, user_path: &str) -> Result<PathBuf> {
     // Reject null bytes
     if user_path.contains('\0') {
@@ -60,6 +63,12 @@ pub fn sanitize_path(root: &Path, user_path: &str) -> Result<PathBuf> {
 
     // Normalize the user path (resolves `.`, rejects `..`, strips leading `/`)
     let normalized = normalize_path(user_path)?;
+
+    // When the input resolves to the current directory, return root itself
+    // so callers receive `/root` rather than the misleading `/root/.`
+    if normalized == Path::new(".") {
+        return Ok(root.to_path_buf());
+    }
 
     // Join root + normalized path
     let full = root.join(&normalized);
@@ -163,10 +172,17 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_path_empty_gives_root_dot() {
+    fn test_sanitize_path_empty_gives_root() {
         let root = Path::new("/data/namespaces/tenant1");
         let result = sanitize_path(root, "").unwrap();
-        assert_eq!(result, PathBuf::from("/data/namespaces/tenant1/."));
+        assert_eq!(result, PathBuf::from("/data/namespaces/tenant1"));
+    }
+
+    #[test]
+    fn test_sanitize_path_root_slash_gives_root() {
+        let root = Path::new("/data/namespaces/tenant1");
+        let result = sanitize_path(root, "/").unwrap();
+        assert_eq!(result, PathBuf::from("/data/namespaces/tenant1"));
     }
 
     // ── sanitize_share_path tests ──

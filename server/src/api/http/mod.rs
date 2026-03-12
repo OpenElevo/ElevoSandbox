@@ -210,37 +210,6 @@ pub fn create_router(state: AppState) -> Router {
             "/tenants/{id}/keys/{key_id}",
             delete(api_key_handler::revoke_api_key),
         )
-        // Namespace file operations
-        .route("/namespaces/{id}/files", get(namespace_handler::read_file))
-        .route("/namespaces/{id}/files", put(namespace_handler::write_file))
-        .route(
-            "/namespaces/{id}/files",
-            post(namespace_handler::write_file),
-        )
-        .route(
-            "/namespaces/{id}/files",
-            delete(namespace_handler::delete_file),
-        )
-        .route(
-            "/namespaces/{id}/files/list",
-            get(namespace_handler::list_files),
-        )
-        .route(
-            "/namespaces/{id}/files/mkdir",
-            post(namespace_handler::mkdir),
-        )
-        .route(
-            "/namespaces/{id}/files/move",
-            post(namespace_handler::move_file),
-        )
-        .route(
-            "/namespaces/{id}/files/copy",
-            post(namespace_handler::copy_file),
-        )
-        .route(
-            "/namespaces/{id}/files/info",
-            get(namespace_handler::get_file_info),
-        )
         // Tenant permissions
         .route(
             "/tenants/{id}/permissions",
@@ -309,6 +278,37 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/shares/{id}/permissions/{tenant_id}",
             delete(permission_handler::revoke_permission),
+        )
+        // Namespace file operations (owner-or-admin checks are enforced in the handler)
+        .route("/namespaces/{id}/files", get(namespace_handler::read_file))
+        .route("/namespaces/{id}/files", put(namespace_handler::write_file))
+        .route(
+            "/namespaces/{id}/files",
+            post(namespace_handler::write_file),
+        )
+        .route(
+            "/namespaces/{id}/files",
+            delete(namespace_handler::delete_file),
+        )
+        .route(
+            "/namespaces/{id}/files/list",
+            get(namespace_handler::list_files),
+        )
+        .route(
+            "/namespaces/{id}/files/mkdir",
+            post(namespace_handler::mkdir),
+        )
+        .route(
+            "/namespaces/{id}/files/move",
+            post(namespace_handler::move_file),
+        )
+        .route(
+            "/namespaces/{id}/files/copy",
+            post(namespace_handler::copy_file),
+        )
+        .route(
+            "/namespaces/{id}/files/info",
+            get(namespace_handler::get_file_info),
         )
         // Sandbox routes
         .route("/sandboxes", post(sandbox::create_sandbox))
