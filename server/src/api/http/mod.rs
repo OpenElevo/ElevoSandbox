@@ -18,15 +18,107 @@ pub mod share_handler;
 pub mod tenant_handler;
 mod workspace;
 
+use std::net::IpAddr;
+use std::num::NonZeroU32;
+use std::sync::Arc;
+
 use axum::{
+    extract::{ConnectInfo, Request},
+    http::StatusCode,
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{delete, get, head, post, put},
-    Router,
+    Json, Router,
+};
+use governor::{
+    clock::DefaultClock,
+    state::keyed::DashMapStateStore,
+    Quota, RateLimiter,
 };
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 use crate::AppState;
+
+type GlobalLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>;
+type KeyedIpLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>;
+
+/// Global per-IP rate limiting middleware
+async fn global_rate_limit(
+    axum::extract::State(limiter): axum::extract::State<Arc<GlobalLimiter>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&request);
+    match limiter.check_key(&ip) {
+        Ok(_) => next.run(request).await,
+        Err(_) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": {"code": "RATE_LIMITED", "message": "Too many requests"}
+            })),
+        )
+            .into_response(),
+    }
+}
+
+/// Extract client IP from request, falling back to a default.
+fn extract_client_ip(request: &Request) -> IpAddr {
+    // Try X-Forwarded-For header first (for reverse proxies)
+    if let Some(forwarded) = request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Some(first_ip) = forwarded.split(',').next() {
+            if let Ok(ip) = first_ip.trim().parse::<IpAddr>() {
+                return ip;
+            }
+        }
+    }
+
+    // Try X-Real-IP header
+    if let Some(real_ip) = request
+        .headers()
+        .get("x-real-ip")
+        .and_then(|v| v.to_str().ok())
+    {
+        if let Ok(ip) = real_ip.trim().parse::<IpAddr>() {
+            return ip;
+        }
+    }
+
+    // Fall back to connection info
+    if let Some(connect_info) = request
+        .extensions()
+        .get::<ConnectInfo<std::net::SocketAddr>>()
+    {
+        return connect_info.0.ip();
+    }
+
+    // Ultimate fallback
+    IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+}
+
+/// Login-specific rate limiting middleware (per-IP, stricter)
+async fn login_rate_limit(
+    axum::extract::State(limiter): axum::extract::State<Arc<KeyedIpLimiter>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let ip = extract_client_ip(&request);
+    match limiter.check_key(&ip) {
+        Ok(_) => next.run(request).await,
+        Err(_) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({
+                "error": {"code": "RATE_LIMITED", "message": "Too many login attempts, please try again later"}
+            })),
+        )
+            .into_response(),
+    }
+}
 
 /// Create the HTTP router with all routes
 pub fn create_router(state: AppState) -> Router {
@@ -35,10 +127,29 @@ pub fn create_router(state: AppState) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Login-specific rate limiter: 10 requests per minute per IP
+    let login_limiter = Arc::new(RateLimiter::dashmap(
+        Quota::per_minute(NonZeroU32::new(10).unwrap()),
+    ));
+
+    // Global per-IP rate limiter: configured RPS (default 100)
+    let rps = state.config.rate_limit_rps.max(1);
+    let global_limiter = Arc::new(RateLimiter::dashmap(
+        Quota::per_second(NonZeroU32::new(rps).unwrap()),
+    ));
+
+    // Login route with its own stricter rate limiter
+    let login_route = Router::new()
+        .route("/auth/login", post(auth_handler::login))
+        .route_layer(middleware::from_fn_with_state(
+            login_limiter,
+            login_rate_limit,
+        ));
+
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/health", get(health::health_check))
-        .route("/auth/login", post(auth_handler::login))
+        .merge(login_route)
         .route(
             "/downloads/workspace-fuse/{platform}/{arch}",
             get(downloads::download_workspace_fuse),
@@ -48,9 +159,9 @@ pub fn create_router(state: AppState) -> Router {
             head(downloads::check_workspace_fuse),
         );
 
-    // Authenticated routes (auth middleware applied)
-    let authenticated_routes = Router::new()
-        // Tenant management (Admin only)
+    // Admin-only routes — requires Admin JWT (per-handler require_admin() checks enforce this)
+    let admin_routes = Router::new()
+        // Tenant management
         .route("/tenants", get(tenant_handler::list_tenants))
         .route("/tenants", post(tenant_handler::create_tenant))
         .route("/tenants/{id}", get(tenant_handler::get_tenant))
@@ -64,7 +175,7 @@ pub fn create_router(state: AppState) -> Router {
             post(tenant_handler::deactivate_tenant),
         )
         .route("/tenants/{id}", delete(tenant_handler::delete_tenant))
-        // API Key management (Admin only)
+        // API Key management
         .route(
             "/tenants/{id}/keys",
             get(api_key_handler::list_api_keys),
@@ -80,6 +191,10 @@ pub fn create_router(state: AppState) -> Router {
         // Namespace file operations
         .route("/namespaces/{id}/files", get(namespace_handler::read_file))
         .route("/namespaces/{id}/files", put(namespace_handler::write_file))
+        .route(
+            "/namespaces/{id}/files",
+            post(namespace_handler::write_file),
+        )
         .route(
             "/namespaces/{id}/files",
             delete(namespace_handler::delete_file),
@@ -104,6 +219,23 @@ pub fn create_router(state: AppState) -> Router {
             "/namespaces/{id}/files/info",
             get(namespace_handler::get_file_info),
         )
+        // Tenant permissions
+        .route(
+            "/tenants/{id}/permissions",
+            get(permission_handler::list_tenant_permissions),
+        )
+        // Audit logs
+        .route("/audit-logs", get(audit_handler::list_audit_logs))
+        // Dashboard stats
+        .route("/dashboard/stats", get(dashboard_handler::get_stats))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ));
+
+    // Dual-auth routes — accepts Admin JWT or Tenant API Key
+    // Nested under /api/v1
+    let authenticated_routes = Router::new()
         // Tenant self-service /me endpoints
         .route("/me", get(me_handler::get_me))
         .route("/me/files", get(me_handler::list_my_files))
@@ -119,11 +251,27 @@ pub fn create_router(state: AppState) -> Router {
         // Share file operations
         .route("/shares/{id}/files", get(share_file_handler::read_share_file))
         .route("/shares/{id}/files", put(share_file_handler::write_share_file))
-        .route("/shares/{id}/files", delete(share_file_handler::delete_share_file))
-        .route("/shares/{id}/files/list", get(share_file_handler::list_share_files))
+        .route(
+            "/shares/{id}/files",
+            post(share_file_handler::write_share_file),
+        )
+        .route(
+            "/shares/{id}/files",
+            delete(share_file_handler::delete_share_file),
+        )
+        .route(
+            "/shares/{id}/files/list",
+            get(share_file_handler::list_share_files),
+        )
         // Share permission management
-        .route("/shares/{id}/permissions", get(permission_handler::list_permissions))
-        .route("/shares/{id}/permissions", post(permission_handler::grant_permission))
+        .route(
+            "/shares/{id}/permissions",
+            get(permission_handler::list_permissions),
+        )
+        .route(
+            "/shares/{id}/permissions",
+            post(permission_handler::grant_permission),
+        )
         .route(
             "/shares/{id}/permissions/{tenant_id}",
             put(permission_handler::update_permission),
@@ -132,31 +280,10 @@ pub fn create_router(state: AppState) -> Router {
             "/shares/{id}/permissions/{tenant_id}",
             delete(permission_handler::revoke_permission),
         )
-        // Tenant permissions (Admin only)
-        .route(
-            "/tenants/{id}/permissions",
-            get(permission_handler::list_tenant_permissions),
-        )
-        // Audit logs (Admin only)
-        .route("/audit-logs", get(audit_handler::list_audit_logs))
-        // Dashboard stats (Admin only)
-        .route("/dashboard/stats", get(dashboard_handler::get_stats))
-        // Legacy workspace routes (kept for backward compatibility)
-        .route("/workspaces", post(workspace::create_workspace))
-        .route("/workspaces", get(workspace::list_workspaces))
-        .route("/workspaces/{id}", get(workspace::get_workspace))
-        .route("/workspaces/{id}", delete(workspace::delete_workspace))
-        .route("/workspaces/{id}/files", get(workspace::read_file))
-        .route("/workspaces/{id}/files", put(workspace::write_file))
-        .route("/workspaces/{id}/files", delete(workspace::delete_file))
-        .route("/workspaces/{id}/files/list", get(workspace::list_files))
-        .route("/workspaces/{id}/files/mkdir", post(workspace::mkdir))
-        .route("/workspaces/{id}/files/move", post(workspace::move_file))
-        .route("/workspaces/{id}/files/copy", post(workspace::copy_file))
-        .route("/workspaces/{id}/files/info", get(workspace::get_file_info))
         // Sandbox routes
         .route("/sandboxes", post(sandbox::create_sandbox))
         .route("/sandboxes", get(sandbox::list_sandboxes))
+        .route("/sandboxes/batch-delete", post(sandbox::batch_delete_sandboxes))
         .route("/sandboxes/{id}", get(sandbox::get_sandbox))
         .route("/sandboxes/{id}", delete(sandbox::delete_sandbox))
         // Process routes
@@ -183,8 +310,14 @@ pub fn create_router(state: AppState) -> Router {
     let spa = ServeDir::new("web/dist").fallback(ServeFile::new("web/dist/index.html"));
 
     Router::new()
-        .nest("/api/v1", public_routes.merge(authenticated_routes))
+        .nest("/api/v1", public_routes)
+        .nest("/api/v1", admin_routes)
+        .nest("/api/v1", authenticated_routes)
         .nest_service("/admin", spa)
+        .layer(middleware::from_fn_with_state(
+            global_limiter,
+            global_rate_limit,
+        ))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)

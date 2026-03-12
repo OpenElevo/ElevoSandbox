@@ -31,8 +31,8 @@ struct ShareRow {
 impl From<ShareRow> for Share {
     fn from(row: ShareRow) -> Self {
         Share {
-            id: row.id.to_string(),
-            owner_tenant_id: row.owner_tenant_id.to_string(),
+            id: row.id,
+            owner_tenant_id: row.owner_tenant_id,
             name: row.name,
             source_path: row.source_path,
             description: row.description,
@@ -56,8 +56,8 @@ impl ShareRepository {
         &self,
         params: &CreateShareParams,
     ) -> Result<Share, Error> {
-        let owner_id = Uuid::parse_str(&params.owner_tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid owner tenant ID".into()))?;
+        let owner_id = params.owner_tenant_id
+            .ok_or_else(|| Error::InvalidParameter("owner_tenant_id is required".into()))?;
         let visibility = params.visibility.as_deref().unwrap_or("private");
         let description = params.description.as_deref().unwrap_or("");
         let metadata = params
@@ -98,14 +98,11 @@ impl ShareRepository {
         Ok(row.into())
     }
 
-    pub async fn get_share(&self, id: &str) -> Result<Share, Error> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-
+    pub async fn get_share(&self, id: Uuid) -> Result<Share, Error> {
         let row = sqlx::query_as::<_, ShareRow>(
             "SELECT * FROM shares WHERE id = $1",
         )
-        .bind(uuid)
+        .bind(id)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?
@@ -125,92 +122,48 @@ impl ShareRepository {
         let per_page = pagination.page_size.min(100);
         let offset = ((page - 1) * per_page) as i64;
         let limit = per_page as i64;
+        let search_pattern = filter.search.as_ref().map(|s| format!("%{}%", s));
 
-        // Count query
-        let count: (i64,) = if let Some(ref owner) = filter.owner_tenant_id {
-            let owner_uuid = Uuid::parse_str(owner).map_err(|_| {
-                Error::InvalidParameter("Invalid owner ID".into())
-            })?;
-            sqlx::query_as(
-                "SELECT COUNT(*) FROM shares WHERE owner_tenant_id = $1",
-            )
-            .bind(owner_uuid)
-            .fetch_one(&self.pool)
-            .await
-        } else {
-            sqlx::query_as("SELECT COUNT(*) FROM shares")
-                .fetch_one(&self.pool)
-                .await
-        }
+        // Use parameterized queries that support all filter combinations
+        let count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM shares
+               WHERE ($1::uuid IS NULL OR owner_tenant_id = $1)
+                 AND ($2::text IS NULL OR visibility = $2)
+                 AND ($3::text IS NULL OR name ILIKE $3 OR description ILIKE $3)"#,
+        )
+        .bind(filter.owner_tenant_id)
+        .bind(filter.visibility.as_deref())
+        .bind(search_pattern.as_deref())
+        .fetch_one(&self.pool)
+        .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
-        // Data query
-        let rows: Vec<ShareRow> = if let Some(ref owner) = filter.owner_tenant_id
-        {
-            let owner_uuid = Uuid::parse_str(owner).unwrap();
-            if let Some(ref search) = filter.search {
-                let pattern = format!("%{}%", search);
-                sqlx::query_as::<_, ShareRow>(
-                    r#"SELECT * FROM shares
-                       WHERE owner_tenant_id = $1
-                         AND (name ILIKE $2 OR description ILIKE $3)
-                       ORDER BY created_at DESC LIMIT $4 OFFSET $5"#,
-                )
-                .bind(owner_uuid)
-                .bind(&pattern)
-                .bind(&pattern)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await
-            } else {
-                sqlx::query_as::<_, ShareRow>(
-                    r#"SELECT * FROM shares
-                       WHERE owner_tenant_id = $1
-                       ORDER BY created_at DESC LIMIT $2 OFFSET $3"#,
-                )
-                .bind(owner_uuid)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&self.pool)
-                .await
-            }
-        } else if let Some(ref search) = filter.search {
-            let pattern = format!("%{}%", search);
-            sqlx::query_as::<_, ShareRow>(
-                r#"SELECT * FROM shares
-                   WHERE name ILIKE $1 OR description ILIKE $2
-                   ORDER BY created_at DESC LIMIT $3 OFFSET $4"#,
-            )
-            .bind(&pattern)
-            .bind(&pattern)
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await
-        } else {
-            sqlx::query_as::<_, ShareRow>(
-                "SELECT * FROM shares ORDER BY created_at DESC LIMIT $1 OFFSET $2",
-            )
-            .bind(limit)
-            .bind(offset)
-            .fetch_all(&self.pool)
-            .await
-        }
+        let rows = sqlx::query_as::<_, ShareRow>(
+            r#"SELECT * FROM shares
+               WHERE ($1::uuid IS NULL OR owner_tenant_id = $1)
+                 AND ($2::text IS NULL OR visibility = $2)
+                 AND ($3::text IS NULL OR name ILIKE $3 OR description ILIKE $3)
+               ORDER BY created_at DESC
+               LIMIT $4 OFFSET $5"#,
+        )
+        .bind(filter.owner_tenant_id)
+        .bind(filter.visibility.as_deref())
+        .bind(search_pattern.as_deref())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         let shares = rows.into_iter().map(Share::from).collect();
-        Ok((shares, count.0))
+        Ok((shares, count))
     }
 
     pub async fn update_share(
         &self,
-        id: &str,
+        id: Uuid,
         params: UpdateShareParams,
     ) -> Result<Share, Error> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-
         // Get current share
         let current = self.get_share(id).await?;
 
@@ -233,7 +186,7 @@ impl ShareRepository {
         .bind(&description)
         .bind(&visibility)
         .bind(&metadata)
-        .bind(uuid)
+        .bind(id)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("Failed to update share: {}", e)))?;
@@ -241,33 +194,44 @@ impl ShareRepository {
         Ok(row.into())
     }
 
-    pub async fn delete_share(&self, id: &str) -> Result<(), Error> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::InvalidParameter("Invalid share ID".into()))?;
-
-        // Check for active sandbox mounts
-        let mount_count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM sandbox_mounts WHERE share_id = $1",
+    pub async fn delete_share(&self, id: Uuid) -> Result<(), Error> {
+        // Only block on active sandbox mounts (running, starting, stopping)
+        let active_mount_count: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM sandbox_mounts sm
+               JOIN sandboxes s ON s.id = sm.sandbox_id
+               WHERE sm.share_id = $1 AND s.state IN ('running', 'starting', 'stopping')"#,
         )
-        .bind(uuid)
+        .bind(id)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
-        if mount_count.0 > 0 {
+        if active_mount_count > 0 {
             return Err(Error::WorkspaceHasActiveSandboxes);
         }
 
-        // Delete permissions first, then the share
-        sqlx::query("DELETE FROM share_permissions WHERE share_id = $1")
-            .bind(uuid)
-            .execute(&self.pool)
+        // Delete in a transaction: clean up mounts, permissions, then the share
+        let mut tx = self.pool.begin().await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        // Delete all sandbox mounts for this share (including stopped/error ones)
+        sqlx::query("DELETE FROM sandbox_mounts WHERE share_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
             .await
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
+        // Delete permissions
+        sqlx::query("DELETE FROM share_permissions WHERE share_id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        // Delete the share itself
         let result = sqlx::query("DELETE FROM shares WHERE id = $1")
-            .bind(uuid)
-            .execute(&self.pool)
+            .bind(id)
+            .execute(&mut *tx)
             .await
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
@@ -278,26 +242,29 @@ impl ShareRepository {
             )));
         }
 
+        tx.commit().await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
         Ok(())
     }
 
-    /// List shares accessible by a specific tenant
+    /// List shares accessible by a specific tenant.
+    /// Excludes shares owned by deactivated tenants.
     pub async fn list_accessible_shares(
         &self,
-        tenant_id: &str,
+        tenant_id: Uuid,
     ) -> Result<Vec<Share>, Error> {
-        let uuid = Uuid::parse_str(tenant_id)
-            .map_err(|_| Error::InvalidParameter("Invalid tenant ID".into()))?;
-
         let rows = sqlx::query_as::<_, ShareRow>(
             r#"SELECT DISTINCT s.* FROM shares s
+               JOIN tenants t ON t.id = s.owner_tenant_id
                LEFT JOIN share_permissions sp ON s.id = sp.share_id
-               WHERE s.owner_tenant_id = $1
-                  OR sp.tenant_id = $1
-                  OR s.visibility = 'public'
+               WHERE t.is_active = true
+                 AND (s.owner_tenant_id = $1
+                      OR sp.tenant_id = $1
+                      OR s.visibility = 'public')
                ORDER BY s.created_at DESC"#,
         )
-        .bind(uuid)
+        .bind(tenant_id)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;

@@ -1,4 +1,4 @@
-import { Layout, Button, Space, Typography } from 'antd';
+import { Layout, Button, Space, Typography, App } from 'antd';
 import { MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -11,6 +11,17 @@ interface TopBarProps {
 
 export default function TopBar({ collapsed, onToggle }: TopBarProps) {
   const { logout } = useAuth();
+  const { modal } = App.useApp();
+
+  const handleLogout = () => {
+    modal.confirm({
+      title: '确认退出',
+      content: '确定要退出登录吗？',
+      okText: '退出',
+      cancelText: '取消',
+      onOk: logout,
+    });
+  };
 
   return (
     <Header style={{
@@ -27,13 +38,13 @@ export default function TopBar({ collapsed, onToggle }: TopBarProps) {
         onClick={onToggle}
       />
       <Space>
-        <Typography.Text type="secondary">Admin</Typography.Text>
+        <Typography.Text type="secondary">管理员</Typography.Text>
         <Button
           type="text"
           icon={<LogoutOutlined />}
-          onClick={logout}
+          onClick={handleLogout}
         >
-          Logout
+          退出
         </Button>
       </Space>
     </Header>

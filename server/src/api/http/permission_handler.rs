@@ -7,6 +7,7 @@ use axum::{
     Json,
 };
 use serde::Deserialize;
+use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
@@ -34,14 +35,19 @@ pub async fn list_permissions(
         None => return unauthorized(),
     };
 
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
     // Only share owner or admin can view permissions
-    if let Err(e) = check_share_admin(&state, &auth, &share_id).await {
+    if let Err(e) = check_share_admin(&state, &auth, share_uuid).await {
         return e;
     }
 
     match state
         .share_permission_repository
-        .list_by_share(&share_id)
+        .list_by_share(share_uuid)
         .await
     {
         Ok(permissions) => (
@@ -64,7 +70,12 @@ pub async fn grant_permission(
         None => return unauthorized(),
     };
 
-    if let Err(e) = check_share_admin(&state, &auth, &share_id).await {
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+
+    if let Err(e) = check_share_admin(&state, &auth, share_uuid).await {
         return e;
     }
 
@@ -82,24 +93,29 @@ pub async fn grant_permission(
         None => return bad_request("Invalid permission level. Must be: read, write, execute, admin"),
     };
 
+    let tenant_uuid = match Uuid::parse_str(&req.tenant_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid tenant_id"),
+    };
+
     // Cannot grant permission to the share owner
-    let share = match state.share_repository.get_share(&share_id).await {
+    let share = match state.share_repository.get_share(share_uuid).await {
         Ok(s) => s,
         Err(e) => return super::tenant_handler::error_response(e),
     };
-    if share.owner_tenant_id == req.tenant_id {
+    if share.owner_tenant_id == tenant_uuid {
         return bad_request("Cannot grant permission to the share owner");
     }
 
     match state
         .share_permission_repository
-        .grant_permission(&share_id, &req.tenant_id, level)
+        .grant_permission(share_uuid, tenant_uuid, level)
         .await
     {
         Ok(perm) => {
             state.audit_service.log(
-                &auth, "permission.grant", "share", &share_id, "",
-                serde_json::json!({"tenant_id": req.tenant_id, "permission": req.permission}),
+                &auth, "permission.grant", "permission", share_uuid, &share.name,
+                serde_json::json!({"share_id": share_uuid, "tenant_id": req.tenant_id, "permission": req.permission}),
             );
             (
                 StatusCode::CREATED,
@@ -122,7 +138,16 @@ pub async fn update_permission(
         None => return unauthorized(),
     };
 
-    if let Err(e) = check_share_admin(&state, &auth, &share_id).await {
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+    let tenant_uuid = match Uuid::parse_str(&tenant_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid tenant ID"),
+    };
+
+    if let Err(e) = check_share_admin(&state, &auth, share_uuid).await {
         return e;
     }
 
@@ -140,15 +165,21 @@ pub async fn update_permission(
         None => return bad_request("Invalid permission level"),
     };
 
+    // Fetch share name for audit
+    let share_name = match state.share_repository.get_share(share_uuid).await {
+        Ok(s) => s.name,
+        Err(_) => String::new(),
+    };
+
     match state
         .share_permission_repository
-        .grant_permission(&share_id, &tenant_id, level)
+        .update_permission(share_uuid, tenant_uuid, level)
         .await
     {
         Ok(perm) => {
             state.audit_service.log(
-                &auth, "permission.update", "share", &share_id, "",
-                serde_json::json!({"tenant_id": tenant_id, "permission": req.permission}),
+                &auth, "permission.update", "permission", share_uuid, &share_name,
+                serde_json::json!({"share_id": share_uuid, "tenant_id": tenant_id, "permission": req.permission}),
             );
             (
                 StatusCode::OK,
@@ -171,19 +202,34 @@ pub async fn revoke_permission(
         None => return unauthorized(),
     };
 
-    if let Err(e) = check_share_admin(&state, &auth, &share_id).await {
+    let share_uuid = match Uuid::parse_str(&share_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid share ID"),
+    };
+    let tenant_uuid = match Uuid::parse_str(&tenant_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid tenant ID"),
+    };
+
+    if let Err(e) = check_share_admin(&state, &auth, share_uuid).await {
         return e;
     }
 
+    // Fetch share name for audit
+    let share_name = match state.share_repository.get_share(share_uuid).await {
+        Ok(s) => s.name,
+        Err(_) => String::new(),
+    };
+
     match state
         .share_permission_repository
-        .revoke_permission(&share_id, &tenant_id)
+        .revoke_permission(share_uuid, tenant_uuid)
         .await
     {
         Ok(()) => {
             state.audit_service.log(
-                &auth, "permission.revoke", "share", &share_id, "",
-                serde_json::json!({"tenant_id": tenant_id}),
+                &auth, "permission.revoke", "permission", share_uuid, &share_name,
+                serde_json::json!({"share_id": share_uuid, "tenant_id": tenant_id}),
             );
             StatusCode::NO_CONTENT.into_response()
         }
@@ -210,9 +256,14 @@ pub async fn list_tenant_permissions(
             .into_response();
     }
 
+    let tenant_uuid = match Uuid::parse_str(&tenant_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid tenant ID"),
+    };
+
     match state
         .share_permission_repository
-        .list_by_tenant(&tenant_id)
+        .list_by_tenant(tenant_uuid)
         .await
     {
         Ok(permissions) => (
@@ -224,12 +275,14 @@ pub async fn list_tenant_permissions(
     }
 }
 
-/// Check if the caller is the share owner or admin
+/// Check if the caller is the share owner, a system admin, or has explicit admin
+/// permission on this share.
 async fn check_share_admin(
     state: &AppState,
     auth: &AuthContext,
-    share_id: &str,
+    share_id: Uuid,
 ) -> Result<(), axum::response::Response> {
+    // System admin can always manage shares
     if auth.is_admin() {
         return Ok(());
     }
@@ -238,11 +291,23 @@ async fn check_share_admin(
         .share_repository
         .get_share(share_id)
         .await
-        .map_err(|e| super::tenant_handler::error_response(e))?;
+        .map_err(super::tenant_handler::error_response)?;
 
     if let Some(tid) = auth.tenant_id() {
-        if share.owner_tenant_id == tid.to_string() {
+        // Share owner has full admin access
+        if share.owner_tenant_id == tid {
             return Ok(());
+        }
+
+        // Also allow tenants who have been explicitly granted admin permission
+        if let Ok(Some(level)) = state
+            .share_permission_repository
+            .get_permission(share_id, tid)
+            .await
+        {
+            if level == crate::domain::permission::PermissionLevel::Admin {
+                return Ok(());
+            }
         }
     }
 

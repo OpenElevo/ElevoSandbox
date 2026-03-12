@@ -6,7 +6,7 @@ import { getShare, updateShare, deleteShare, listSharePermissions, grantPermissi
 import { listTenants } from '@/api/tenants';
 import type { SharePermission, PermissionLevel } from '@/types';
 import { formatTime } from '@/utils/time';
-import { PERMISSION_LEVELS } from '@/utils/constants';
+import { PERMISSION_LEVELS, PERMISSION_LABELS } from '@/utils/constants';
 import FileBrowser from '@/components/FileBrowser/FileBrowser';
 
 export default function ShareDetail() {
@@ -44,7 +44,7 @@ export default function ShareDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['share', id] });
       setEditOpen(false);
-      message.success('Share updated');
+      message.success('共享已更新');
     },
   });
 
@@ -55,10 +55,10 @@ export default function ShareDetail() {
       queryClient.invalidateQueries({ queryKey: ['share-permissions', id] });
       setGrantOpen(false);
       grantForm.resetFields();
-      message.success('Permission granted');
+      message.success('权限已授予');
     },
     onError: (err: { response?: { data?: { error?: { message?: string } } } }) => {
-      message.error(err.response?.data?.error?.message || 'Failed to grant permission');
+      message.error(err.response?.data?.error?.message || '授予权限失败');
     },
   });
 
@@ -70,31 +70,64 @@ export default function ShareDetail() {
 
   const handleDelete = () => {
     if (!share) return;
+    let inputName = '';
     modal.confirm({
-      title: `Delete share "${share.name}"?`,
+      title: `删除共享「${share.name}」？`,
+      content: (
+        <div>
+          <Input placeholder="请输入共享名称确认" style={{ marginTop: 8 }} onChange={(e) => { inputName = e.target.value; }} />
+        </div>
+      ),
+      okText: '删除',
       okButtonProps: { danger: true },
+      cancelText: '取消',
       onOk: async () => {
+        if (inputName !== share.name) {
+          message.error('名称不匹配');
+          throw new Error('mismatch');
+        }
         await deleteShare(id!);
-        message.success('Share deleted');
+        message.success('共享已删除');
         navigate('/admin/shares');
       },
     });
   };
 
-  const handleUpdatePermission = (tenantId: string, level: PermissionLevel) => {
-    updatePermission(id!, tenantId, level).then(() => {
-      queryClient.invalidateQueries({ queryKey: ['share-permissions', id] });
-      message.success('Permission updated');
-    });
+  const handleUpdatePermission = (tenantId: string, currentLevel: PermissionLevel, newLevel: PermissionLevel) => {
+    const levelOrder = PERMISSION_LEVELS;
+    const isDowngrade = levelOrder.indexOf(newLevel) < levelOrder.indexOf(currentLevel);
+
+    const doUpdate = () => {
+      updatePermission(id!, tenantId, newLevel).then(() => {
+        queryClient.invalidateQueries({ queryKey: ['share-permissions', id] });
+        message.success('权限已更新');
+      });
+    };
+
+    if (isDowngrade) {
+      modal.confirm({
+        title: '确认降级权限？',
+        content: `将从「${PERMISSION_LABELS[currentLevel]}」降级为「${PERMISSION_LABELS[newLevel]}」，可能导致正在使用的挂载变为只读或不可用。`,
+        okText: '确认降级',
+        cancelText: '取消',
+        onOk: doUpdate,
+      });
+    } else {
+      doUpdate();
+    }
   };
 
   const handleRevokePermission = (tenantId: string) => {
     modal.confirm({
-      title: 'Revoke permission?',
+      title: '撤销权限？',
+      content: '撤销后该租户将无法访问此共享。',
+      okText: '撤销',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
       onOk: async () => {
         await revokePermission(id!, tenantId);
         queryClient.invalidateQueries({ queryKey: ['share-permissions', id] });
-        message.success('Permission revoked');
+        message.success('权限已撤销');
       },
     });
   };
@@ -104,23 +137,23 @@ export default function ShareDetail() {
   const tenantMap = new Map((tenantsData?.tenants ?? []).map((t) => [t.id, t.name]));
 
   const permColumns = [
-    { title: 'Tenant', dataIndex: 'tenant_id', key: 'tenant',
+    { title: '租户', dataIndex: 'tenant_id', key: 'tenant',
       render: (tid: string) => tenantMap.get(tid) || tid.slice(0, 8) },
-    { title: 'Permission', dataIndex: 'permission', key: 'perm',
+    { title: '权限', dataIndex: 'permission', key: 'perm',
       render: (perm: PermissionLevel, record: SharePermission) => (
         <Select
           size="small"
           value={perm}
-          onChange={(v) => handleUpdatePermission(record.tenant_id, v)}
+          onChange={(v) => handleUpdatePermission(record.tenant_id, perm, v)}
           style={{ width: 120 }}
-          options={PERMISSION_LEVELS.map((l) => ({ label: l, value: l }))}
+          options={PERMISSION_LEVELS.map((l) => ({ label: PERMISSION_LABELS[l], value: l }))}
         />
       ),
     },
-    { title: 'Granted', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
-    { title: 'Actions', key: 'actions',
+    { title: '授予时间', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
+    { title: '操作', key: 'actions',
       render: (_: unknown, record: SharePermission) => (
-        <Button size="small" danger onClick={() => handleRevokePermission(record.tenant_id)}>Revoke</Button>
+        <Button size="small" danger onClick={() => handleRevokePermission(record.tenant_id)}>撤销</Button>
       ),
     },
   ];
@@ -132,31 +165,31 @@ export default function ShareDetail() {
   return (
     <div>
       <Button type="link" onClick={() => navigate('/admin/shares')} style={{ padding: 0, marginBottom: 8 }}>
-        &larr; Back to Shares
+        &larr; 返回共享列表
       </Button>
       <Card
         title={share.name}
         extra={
           <Space>
-            <Button onClick={handleEdit}>Edit</Button>
-            <Button danger onClick={handleDelete}>Delete</Button>
+            <Button onClick={handleEdit}>编辑</Button>
+            <Button danger onClick={handleDelete}>删除</Button>
           </Space>
         }
       >
         <Descriptions column={2}>
           <Descriptions.Item label="ID">{share.id}</Descriptions.Item>
-          <Descriptions.Item label="Visibility">
-            <Tag color={share.visibility === 'public' ? 'blue' : 'default'}>{share.visibility}</Tag>
+          <Descriptions.Item label="可见性">
+            <Tag color={share.visibility === 'public' ? 'blue' : 'default'}>{share.visibility === 'public' ? '公开' : '私有'}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Owner">
+          <Descriptions.Item label="所属租户">
             <a onClick={() => navigate(`/admin/tenants/${share.owner_tenant_id}`)}>
               {tenantMap.get(share.owner_tenant_id) || share.owner_tenant_id}
             </a>
           </Descriptions.Item>
-          <Descriptions.Item label="Source Path">{share.source_path}</Descriptions.Item>
-          <Descriptions.Item label="Description" span={2}>{share.description || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Created">{formatTime(share.created_at)}</Descriptions.Item>
-          <Descriptions.Item label="Updated">{formatTime(share.updated_at)}</Descriptions.Item>
+          <Descriptions.Item label="源路径">{share.source_path}</Descriptions.Item>
+          <Descriptions.Item label="描述" span={2}>{share.description || '-'}</Descriptions.Item>
+          <Descriptions.Item label="创建时间">{formatTime(share.created_at)}</Descriptions.Item>
+          <Descriptions.Item label="更新时间">{formatTime(share.updated_at)}</Descriptions.Item>
         </Descriptions>
       </Card>
 
@@ -165,39 +198,39 @@ export default function ShareDetail() {
         onChange={(key) => setSearchParams({ tab: key })}
         style={{ marginTop: 16 }}
         items={[
-          { key: 'permissions', label: 'Permissions', children: (
+          { key: 'permissions', label: '权限', children: (
             <div>
               <Button type="primary" size="small" onClick={() => setGrantOpen(true)} style={{ marginBottom: 12 }}>
-                Grant Permission
+                授予权限
               </Button>
               <Table dataSource={permissions ?? []} columns={permColumns} rowKey="tenant_id" size="small" pagination={false} />
             </div>
           )},
-          { key: 'files', label: 'Files', children: (
+          { key: 'files', label: '文件', children: (
             <FileBrowser shareId={id!} />
           )},
         ]}
       />
 
-      <Drawer title="Edit Share" open={editOpen} onClose={() => setEditOpen(false)} width={400}
-        extra={<Button type="primary" onClick={() => editForm.validateFields().then((v) => updateMutation.mutate(v))} loading={updateMutation.isPending}>Save</Button>}>
+      <Drawer title="编辑共享" open={editOpen} onClose={() => setEditOpen(false)} width={400}
+        extra={<Button type="primary" onClick={() => editForm.validateFields().then((v) => updateMutation.mutate(v))} loading={updateMutation.isPending}>保存</Button>}>
         <Form form={editForm} layout="vertical">
-          <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="description" label="Description"><Input.TextArea rows={3} /></Form.Item>
-          <Form.Item name="visibility" label="Visibility">
-            <Select options={[{ label: 'Private', value: 'private' }, { label: 'Public', value: 'public' }]} />
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="visibility" label="可见性">
+            <Select options={[{ label: '私有', value: 'private' }, { label: '公开', value: 'public' }]} />
           </Form.Item>
         </Form>
       </Drawer>
 
-      <Drawer title="Grant Permission" open={grantOpen} onClose={() => setGrantOpen(false)} width={400}
-        extra={<Button type="primary" onClick={() => grantForm.validateFields().then((v) => grantMutation.mutate(v))} loading={grantMutation.isPending}>Grant</Button>}>
+      <Drawer title="授予权限" open={grantOpen} onClose={() => setGrantOpen(false)} width={400}
+        extra={<Button type="primary" onClick={() => grantForm.validateFields().then((v) => grantMutation.mutate(v))} loading={grantMutation.isPending}>授予</Button>}>
         <Form form={grantForm} layout="vertical">
-          <Form.Item name="tenant_id" label="Tenant" rules={[{ required: true }]}>
-            <Select showSearch optionFilterProp="label" options={tenantOptions} placeholder="Select tenant" />
+          <Form.Item name="tenant_id" label="租户" rules={[{ required: true, message: '请选择租户' }]}>
+            <Select showSearch optionFilterProp="label" options={tenantOptions} placeholder="选择租户" />
           </Form.Item>
-          <Form.Item name="permission" label="Permission Level" rules={[{ required: true }]}>
-            <Select options={PERMISSION_LEVELS.map((l) => ({ label: l, value: l }))} />
+          <Form.Item name="permission" label="权限级别" rules={[{ required: true, message: '请选择权限级别' }]}>
+            <Select options={PERMISSION_LEVELS.map((l) => ({ label: PERMISSION_LABELS[l], value: l }))} />
           </Form.Item>
         </Form>
       </Drawer>

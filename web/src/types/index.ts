@@ -108,7 +108,7 @@ export interface AuditLog {
 }
 
 export interface AuditFilter {
-  action?: string;
+  action?: string[];
   actor_type?: string;
   actor_id?: string;
   resource_type?: string;

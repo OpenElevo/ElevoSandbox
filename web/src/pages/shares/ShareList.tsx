@@ -7,6 +7,7 @@ import { listShares, createShare, deleteShare } from '@/api/shares';
 import { listTenants } from '@/api/tenants';
 import type { Share, CreateShareParams } from '@/types';
 import { formatTime } from '@/utils/time';
+import { useDebounce } from '@/hooks/useDebounce';
 
 export default function ShareList() {
   const navigate = useNavigate();
@@ -20,13 +21,15 @@ export default function ShareList() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm();
 
+  const debouncedSearch = useDebounce(search);
+
   const queryParams = useMemo(() => {
     const p: Record<string, string | number> = { page, page_size: pageSize };
-    if (search) p.search = search;
+    if (debouncedSearch) p.search = debouncedSearch;
     if (visFilter) p.visibility = visFilter;
     if (ownerFilter) p.owner_tenant_id = ownerFilter;
     return p;
-  }, [search, visFilter, ownerFilter, page, pageSize]);
+  }, [debouncedSearch, visFilter, ownerFilter, page, pageSize]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['shares', queryParams],
@@ -44,10 +47,10 @@ export default function ShareList() {
       queryClient.invalidateQueries({ queryKey: ['shares'] });
       setDrawerOpen(false);
       form.resetFields();
-      message.success('Share created');
+      message.success('共享已创建');
     },
     onError: (err: { response?: { data?: { error?: { message?: string } } } }) => {
-      message.error(err.response?.data?.error?.message || 'Failed to create share');
+      message.error(err.response?.data?.error?.message || '创建共享失败');
     },
   });
 
@@ -58,13 +61,30 @@ export default function ShareList() {
   };
 
   const handleDelete = (share: Share) => {
+    let inputName = '';
     modal.confirm({
-      title: `Delete share "${share.name}"?`,
+      title: `删除共享「${share.name}」？`,
+      content: (
+        <div>
+          <Typography.Text type="danger">删除后无法恢复，所有关联权限也将被清除。</Typography.Text>
+          <Input
+            placeholder="请输入共享名称确认"
+            style={{ marginTop: 8 }}
+            onChange={(e) => { inputName = e.target.value; }}
+          />
+        </div>
+      ),
+      okText: '删除',
       okButtonProps: { danger: true },
+      cancelText: '取消',
       onOk: async () => {
+        if (inputName !== share.name) {
+          message.error('名称不匹配');
+          throw new Error('mismatch');
+        }
         await deleteShare(share.id);
         queryClient.invalidateQueries({ queryKey: ['shares'] });
-        message.success('Share deleted');
+        message.success('共享已删除');
       },
     });
   };
@@ -75,27 +95,27 @@ export default function ShareList() {
   }));
 
   const columns = [
-    { title: 'Name', dataIndex: 'name', key: 'name',
+    { title: '名称', dataIndex: 'name', key: 'name',
       render: (name: string, r: Share) => (
         <a onClick={() => navigate(`/admin/shares/${r.id}`)}>{name}</a>
       ),
     },
-    { title: 'Owner', dataIndex: 'owner_tenant_id', key: 'owner', width: 200,
+    { title: '所属租户', dataIndex: 'owner_tenant_id', key: 'owner', width: 200,
       render: (tid: string) => {
         const t = tenantsData?.tenants.find((x) => x.id === tid);
         return t ? <a onClick={() => navigate(`/admin/tenants/${tid}`)}>{t.name}</a> : tid.slice(0, 8);
       },
     },
-    { title: 'Source Path', dataIndex: 'source_path', key: 'path' },
-    { title: 'Visibility', dataIndex: 'visibility', key: 'vis', width: 100,
-      render: (v: string) => <Tag color={v === 'public' ? 'blue' : 'default'}>{v}</Tag>,
+    { title: '源路径', dataIndex: 'source_path', key: 'path' },
+    { title: '可见性', dataIndex: 'visibility', key: 'vis', width: 100,
+      render: (v: string) => <Tag color={v === 'public' ? 'blue' : 'default'}>{v === 'public' ? '公开' : '私有'}</Tag>,
     },
-    { title: 'Created', dataIndex: 'created_at', key: 'created', width: 180,
+    { title: '创建时间', dataIndex: 'created_at', key: 'created', width: 180,
       render: (v: string) => formatTime(v),
     },
-    { title: 'Actions', key: 'actions', width: 100,
+    { title: '操作', key: 'actions', width: 100,
       render: (_: unknown, record: Share) => (
-        <Button size="small" danger onClick={() => handleDelete(record)}>Delete</Button>
+        <Button size="small" danger onClick={() => handleDelete(record)}>删除</Button>
       ),
     },
   ];
@@ -103,14 +123,14 @@ export default function ShareList() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-        <Typography.Title level={4} style={{ margin: 0 }}>Shares</Typography.Title>
+        <Typography.Title level={4} style={{ margin: 0 }}>共享管理</Typography.Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerOpen(true)}>
-          Create Share
+          创建共享
         </Button>
       </div>
       <Space style={{ marginBottom: 16 }} wrap>
         <Input
-          placeholder="Search by name"
+          placeholder="搜索名称"
           prefix={<SearchOutlined />}
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -118,18 +138,18 @@ export default function ShareList() {
           style={{ width: 240 }}
         />
         <Select
-          placeholder="Visibility"
+          placeholder="可见性"
           allowClear
           value={visFilter}
           onChange={(v) => { setVisFilter(v); setPage(1); }}
           style={{ width: 120 }}
           options={[
-            { label: 'Public', value: 'public' },
-            { label: 'Private', value: 'private' },
+            { label: '公开', value: 'public' },
+            { label: '私有', value: 'private' },
           ]}
         />
         <Select
-          placeholder="Owner"
+          placeholder="所属租户"
           allowClear
           showSearch
           optionFilterProp="label"
@@ -147,37 +167,37 @@ export default function ShareList() {
         pagination={{
           current: page, pageSize, total: data?.total ?? 0,
           onChange: (p, ps) => { setPage(p); setPageSize(ps); },
-          showSizeChanger: true, showTotal: (t) => `${t} shares`,
+          showSizeChanger: true, showTotal: (t) => `共 ${t} 个共享`,
         }}
       />
       <Drawer
-        title="Create Share"
+        title="创建共享"
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         width={480}
         extra={
           <Button type="primary" onClick={handleCreate} loading={createMutation.isPending}>
-            Create
+            创建
           </Button>
         }
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="owner_tenant_id" label="Owner Tenant" rules={[{ required: true }]}>
-            <Select showSearch optionFilterProp="label" placeholder="Select tenant" options={tenantOptions} />
+          <Form.Item name="owner_tenant_id" label="所属租户" rules={[{ required: true, message: '请选择租户' }]}>
+            <Select showSearch optionFilterProp="label" placeholder="选择租户" options={tenantOptions} />
           </Form.Item>
-          <Form.Item name="name" label="Share Name" rules={[{ required: true }]}>
-            <Input placeholder="e.g. shared-models" />
+          <Form.Item name="name" label="共享名称" rules={[{ required: true, message: '请输入共享名称' }]}>
+            <Input placeholder="例如 shared-models" />
           </Form.Item>
-          <Form.Item name="source_path" label="Source Path" rules={[{ required: true }]}>
-            <Input placeholder="e.g. data/shared" />
+          <Form.Item name="source_path" label="源路径" rules={[{ required: true, message: '请输入源路径' }]}>
+            <Input placeholder="例如 data/shared" />
           </Form.Item>
-          <Form.Item name="description" label="Description">
+          <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} />
           </Form.Item>
-          <Form.Item name="visibility" label="Visibility" initialValue="private">
+          <Form.Item name="visibility" label="可见性" initialValue="private">
             <Select options={[
-              { label: 'Private', value: 'private' },
-              { label: 'Public', value: 'public' },
+              { label: '私有', value: 'private' },
+              { label: '公开', value: 'public' },
             ]} />
           </Form.Item>
         </Form>
