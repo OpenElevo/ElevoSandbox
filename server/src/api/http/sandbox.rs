@@ -2,29 +2,37 @@
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
+    response::IntoResponse,
     Json,
 };
 use serde::{Deserialize, Serialize};
 
+use crate::domain::auth::AuthContext;
 use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
+use crate::domain::share::MountRequest;
 use crate::{AppState, Result};
 
 /// Create sandbox request
 #[derive(Debug, Deserialize)]
 pub struct CreateSandboxRequest {
-    pub workspace_id: String,
+    pub namespace_id: Option<String>,
+    pub root_path: Option<String>,
     pub template: Option<String>,
     pub name: Option<String>,
     pub env: Option<std::collections::HashMap<String, String>>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
     pub timeout: Option<u64>,
+    #[serde(default)]
+    pub mounts: Vec<MountRequest>,
 }
 
 /// Sandbox response
 #[derive(Debug, Serialize)]
 pub struct SandboxResponse {
     pub id: String,
-    pub workspace_id: String,
+    pub namespace_id: Option<String>,
+    pub root_path: String,
     pub name: Option<String>,
     pub template: String,
     pub state: String,
@@ -58,32 +66,98 @@ pub struct DeleteQuery {
 /// Create a new sandbox
 pub async fn create_sandbox(
     State(state): State<AppState>,
-    Json(req): Json<CreateSandboxRequest>,
-) -> Result<Json<SandboxResponse>> {
+    request: axum::extract::Request,
+) -> impl IntoResponse {
+    let auth = match request.extensions().get::<AuthContext>() {
+        Some(a) => a.clone(),
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED"}})),
+            )
+                .into_response()
+        }
+    };
+
+    let body = match axum::body::to_bytes(request.into_body(), 1024 * 64).await {
+        Ok(b) => b,
+        Err(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
+            )
+                .into_response()
+        }
+    };
+
+    let req: CreateSandboxRequest = match serde_json::from_slice(&body) {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}})),
+            )
+                .into_response()
+        }
+    };
+
+    // Determine namespace_id: tenant uses own ID, admin must specify
+    let namespace_id = if let Some(tid) = auth.tenant_id() {
+        tid.to_string()
+    } else if auth.is_admin() {
+        match &req.namespace_id {
+            Some(nid) => nid.clone(),
+            None => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Admin must specify namespace_id"}})),
+                )
+                    .into_response()
+            }
+        }
+    } else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": {"code": "FORBIDDEN"}})),
+        )
+            .into_response();
+    };
+
     let params = CreateSandboxParams {
-        workspace_id: req.workspace_id,
+        workspace_id: None,
+        namespace_id: Some(namespace_id),
+        root_path: req.root_path.unwrap_or_else(|| "/".to_string()),
         template: req.template,
         name: req.name,
         env: req.env,
         metadata: req.metadata,
         timeout: req.timeout,
+        mounts: req.mounts,
     };
 
-    let sandbox = state.sandbox_service.create(params).await?;
-
-    Ok(Json(SandboxResponse {
-        id: sandbox.id,
-        workspace_id: sandbox.workspace_id,
-        name: sandbox.name,
-        template: sandbox.template,
-        state: sandbox.state.as_str().to_string(),
-        env: Some(sandbox.env),
-        metadata: Some(sandbox.metadata),
-        created_at: sandbox.created_at.to_rfc3339(),
-        updated_at: sandbox.updated_at.to_rfc3339(),
-        timeout: Some(sandbox.timeout),
-        error_message: sandbox.error_message,
-    }))
+    match state.sandbox_service.create(params).await {
+        Ok(sandbox) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "sandbox": SandboxResponse {
+                    id: sandbox.id,
+                    namespace_id: sandbox.namespace_id,
+                    root_path: sandbox.root_path,
+                    name: sandbox.name,
+                    template: sandbox.template,
+                    state: sandbox.state.as_str().to_string(),
+                    env: Some(sandbox.env),
+                    metadata: Some(sandbox.metadata),
+                    created_at: sandbox.created_at.to_rfc3339(),
+                    updated_at: sandbox.updated_at.to_rfc3339(),
+                    timeout: Some(sandbox.timeout),
+                    error_message: sandbox.error_message,
+                }
+            })),
+        )
+            .into_response(),
+        Err(e) => super::tenant_handler::error_response(e),
+    }
 }
 
 /// Get a sandbox by ID
@@ -95,7 +169,8 @@ pub async fn get_sandbox(
 
     Ok(Json(SandboxResponse {
         id: sandbox.id,
-        workspace_id: sandbox.workspace_id,
+        namespace_id: sandbox.namespace_id,
+        root_path: sandbox.root_path,
         name: sandbox.name,
         template: sandbox.template,
         state: sandbox.state.as_str().to_string(),
@@ -129,7 +204,8 @@ pub async fn list_sandboxes(
         .into_iter()
         .map(|s| SandboxResponse {
             id: s.id,
-            workspace_id: s.workspace_id,
+            namespace_id: s.namespace_id,
+            root_path: s.root_path,
             name: s.name,
             template: s.template,
             state: s.state.as_str().to_string(),
