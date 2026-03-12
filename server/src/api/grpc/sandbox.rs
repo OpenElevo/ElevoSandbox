@@ -75,6 +75,9 @@ fn sandbox_to_proto(sb: DomainSandbox) -> ProtoSandbox {
         }),
         timeout: sb.timeout,
         error_message: sb.error_message,
+        namespace_id: sb.namespace_id,
+        root_path: sb.root_path,
+        mounts: vec![],
     }
 }
 
@@ -98,8 +101,17 @@ impl SandboxService for GrpcSandboxService {
         let req = request.into_inner();
         debug!(workspace_id = %req.workspace_id, template = ?req.template, "create_sandbox");
 
+        // workspace_id in proto is used as namespace_id
+        let namespace_id = if req.workspace_id.is_empty() {
+            None
+        } else {
+            Some(req.workspace_id)
+        };
+
         let params = CreateSandboxParams {
-            workspace_id: req.workspace_id,
+            workspace_id: None,
+            namespace_id,
+            root_path: "/".to_string(),
             template: req.template,
             name: req.name,
             env: if req.env.is_empty() {
@@ -113,6 +125,7 @@ impl SandboxService for GrpcSandboxService {
                 Some(req.metadata)
             },
             timeout: req.timeout,
+            mounts: vec![],
         };
 
         let sandbox = self.service.create(params).await.map_err(error_to_status)?;
