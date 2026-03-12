@@ -7,6 +7,12 @@ from typing import Optional, Dict, List, Literal, Callable, Awaitable, Union
 from enum import Enum
 
 
+class StorageType(str, Enum):
+    """Storage type for a workspace"""
+    MANAGED = "managed"
+    REMOTE = "remote"
+
+
 class SandboxState(str, Enum):
     """Sandbox state enum"""
     UNKNOWN = "unknown"
@@ -28,6 +34,8 @@ class Workspace:
     updated_at: Optional[str] = None
     name: Optional[str] = None
     nfs_url: Optional[str] = None
+    storage_type: Optional[str] = None
+    storage_config: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
 
 
@@ -35,6 +43,7 @@ class Workspace:
 class CreateWorkspaceParams:
     """Parameters for creating a workspace"""
     name: Optional[str] = None
+    storage_type: Optional[str] = None
     metadata: Optional[Dict[str, str]] = None
 
 

@@ -95,6 +95,16 @@ class WorkspaceServiceStub(object):
                 request_serializer=workspace_dot_v1_dot_workspace__pb2.GetFileInfoRequest.SerializeToString,
                 response_deserializer=workspace_dot_v1_dot_workspace__pb2.GetFileInfoResponse.FromString,
                 _registered_method=True)
+        self.RegisterNfsTransport = channel.unary_unary(
+                '/workspace.v1.WorkspaceService/RegisterNfsTransport',
+                request_serializer=workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportRequest.SerializeToString,
+                response_deserializer=workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportResponse.FromString,
+                _registered_method=True)
+        self.UnregisterNfsTransport = channel.unary_unary(
+                '/workspace.v1.WorkspaceService/UnregisterNfsTransport',
+                request_serializer=workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportRequest.SerializeToString,
+                response_deserializer=workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportResponse.FromString,
+                _registered_method=True)
 
 
 class WorkspaceServiceServicer(object):
@@ -178,6 +188,20 @@ class WorkspaceServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RegisterNfsTransport(self, request, context):
+        """Register NFS transport (switch remote workspace from gRPC to NFS)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def UnregisterNfsTransport(self, request, context):
+        """Unregister NFS transport (switch back to gRPC)
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_WorkspaceServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -240,6 +264,16 @@ def add_WorkspaceServiceServicer_to_server(servicer, server):
                     servicer.GetFileInfo,
                     request_deserializer=workspace_dot_v1_dot_workspace__pb2.GetFileInfoRequest.FromString,
                     response_serializer=workspace_dot_v1_dot_workspace__pb2.GetFileInfoResponse.SerializeToString,
+            ),
+            'RegisterNfsTransport': grpc.unary_unary_rpc_method_handler(
+                    servicer.RegisterNfsTransport,
+                    request_deserializer=workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportRequest.FromString,
+                    response_serializer=workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportResponse.SerializeToString,
+            ),
+            'UnregisterNfsTransport': grpc.unary_unary_rpc_method_handler(
+                    servicer.UnregisterNfsTransport,
+                    request_deserializer=workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportRequest.FromString,
+                    response_serializer=workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -567,6 +601,60 @@ class WorkspaceService(object):
             '/workspace.v1.WorkspaceService/GetFileInfo',
             workspace_dot_v1_dot_workspace__pb2.GetFileInfoRequest.SerializeToString,
             workspace_dot_v1_dot_workspace__pb2.GetFileInfoResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def RegisterNfsTransport(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/workspace.v1.WorkspaceService/RegisterNfsTransport',
+            workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportRequest.SerializeToString,
+            workspace_dot_v1_dot_workspace__pb2.RegisterNfsTransportResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def UnregisterNfsTransport(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/workspace.v1.WorkspaceService/UnregisterNfsTransport',
+            workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportRequest.SerializeToString,
+            workspace_dot_v1_dot_workspace__pb2.UnregisterNfsTransportResponse.FromString,
             options,
             channel_credentials,
             insecure,

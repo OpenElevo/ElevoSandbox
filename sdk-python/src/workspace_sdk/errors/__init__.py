@@ -84,6 +84,18 @@ class PtyNotFoundError(WorkspaceError):
         self.pty_id = pty_id
 
 
+class ProcessError(WorkspaceError):
+    """Process execution error (non-zero exit code)"""
+
+    def __init__(self, sandbox_id: str, command: str, message: str):
+        super().__init__(
+            f"process error in sandbox {sandbox_id} running '{command}': {message}",
+            4001,
+        )
+        self.sandbox_id = sandbox_id
+        self.command = command
+
+
 class AgentNotConnectedError(WorkspaceError):
     """Agent not connected error"""
 

@@ -3,6 +3,11 @@
  */
 
 /**
+ * Storage type for a workspace
+ */
+export type StorageType = 'managed' | 'remote';
+
+/**
  * Workspace resource
  */
 export interface Workspace {
@@ -12,6 +17,10 @@ export interface Workspace {
   name?: string;
   /** NFS mount URL */
   nfsUrl?: string;
+  /** Storage type: "managed" (server-managed) or "remote" (client-provided) */
+  storageType?: StorageType;
+  /** Storage configuration (JSON string, meaningful for remote workspaces) */
+  storageConfig?: string;
   /** Custom metadata */
   metadata?: Record<string, string>;
   /** Creation timestamp */
@@ -30,6 +39,8 @@ export interface Workspace {
 export interface CreateWorkspaceParams {
   /** Optional name */
   name?: string;
+  /** Storage type: "managed" (default) or "remote" */
+  storageType?: StorageType;
   /** Custom metadata */
   metadata?: Record<string, string>;
   /** Storage type: "managed" (default) or "remote" (Client-provided storage) */

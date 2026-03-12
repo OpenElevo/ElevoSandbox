@@ -5,10 +5,11 @@ A Python SDK for interacting with the Workspace service via gRPC.
 """
 
 from workspace_sdk.client import WorkspaceClient
-from workspace_sdk.async_client import AsyncWorkspaceClient
+from workspace_sdk.async_client import AsyncWorkspaceClient, AsyncPtySession
 from workspace_sdk.types import (
     Workspace,
     CreateWorkspaceParams,
+    StorageType,
     Sandbox,
     SandboxState,
     CreateSandboxParams,
@@ -29,6 +30,7 @@ from workspace_sdk.errors import (
     FileNotFoundError,
     PermissionDeniedError,
     ProcessTimeoutError,
+    ProcessError,
     PtyNotFoundError,
     AgentNotConnectedError,
 )
@@ -43,6 +45,7 @@ __all__ = [
     # Types
     "Workspace",
     "CreateWorkspaceParams",
+    "StorageType",
     "Sandbox",
     "SandboxState",
     "CreateSandboxParams",
@@ -52,6 +55,7 @@ __all__ = [
     "PtyOptions",
     "PtyHandle",
     "PtySession",
+    "AsyncPtySession",
     "FileInfo",
     "FileType",
     # Errors
@@ -63,6 +67,7 @@ __all__ = [
     "FileNotFoundError",
     "PermissionDeniedError",
     "ProcessTimeoutError",
+    "ProcessError",
     "PtyNotFoundError",
     "AgentNotConnectedError",
 ]

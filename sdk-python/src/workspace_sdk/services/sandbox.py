@@ -2,12 +2,13 @@
 Sandbox service for managing sandbox lifecycle via gRPC
 """
 
+import time
 from typing import Optional, List
 
 import grpc
 
 from workspace_sdk.types import Sandbox, SandboxState, CreateSandboxParams
-from workspace_sdk.errors import convert_grpc_error
+from workspace_sdk.errors import convert_grpc_error, NotFoundError, WorkspaceError
 from workspace_sdk.proto.workspace.v1 import sandbox_pb2, sandbox_pb2_grpc
 
 
@@ -36,7 +37,8 @@ class SandboxService:
 
     def create(self, params: CreateSandboxParams) -> Sandbox:
         """Create a new sandbox bound to a workspace"""
-        req = sandbox_pb2.CreateSandboxRequest(workspace_id=params.workspace_id)
+        ns_id = params.namespace_id or params.workspace_id
+        req = sandbox_pb2.CreateSandboxRequest(workspace_id=ns_id)
         if params.template:
             req.template = params.template
         if params.name:
@@ -91,6 +93,42 @@ class SandboxService:
         except grpc.RpcError as e:
             raise convert_grpc_error(e)
 
+    def exists(self, sandbox_id: str) -> bool:
+        """Check if a sandbox exists"""
+        try:
+            self.get(sandbox_id)
+            return True
+        except NotFoundError:
+            return False
+
+    def wait_for_state(
+        self,
+        sandbox_id: str,
+        target_state: SandboxState,
+        timeout: float = 60.0,
+    ) -> Sandbox:
+        """Wait for a sandbox to reach a specific state, polling at 100ms intervals"""
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            sandbox = self.get(sandbox_id)
+
+            if sandbox.state == target_state:
+                return sandbox
+
+            if sandbox.state == SandboxState.FAILED:
+                raise WorkspaceError(
+                    f"Sandbox failed: {sandbox.error_message or 'unknown error'}",
+                    500,
+                )
+
+            time.sleep(0.1)
+
+        raise WorkspaceError(
+            f"Timeout waiting for sandbox {sandbox_id} to reach state '{target_state.value}'",
+            408,
+        )
+
     def _transform_sandbox(self, sb) -> Sandbox:
         """Transform proto Sandbox to SDK Sandbox type"""
         created_at = None
@@ -103,6 +141,7 @@ class SandboxService:
         return Sandbox(
             id=sb.id,
             workspace_id=sb.workspace_id,
+            namespace_id=sb.workspace_id,
             name=sb.name if sb.HasField("name") else None,
             template=sb.template,
             state=self._proto_to_state(sb.state),

@@ -2,7 +2,8 @@
 Async Workspace Client - Main entry point for async SDK usage with gRPC
 """
 
-from typing import Optional, List, AsyncIterator
+import asyncio
+from typing import Optional, List, AsyncIterator, Callable
 
 import grpc
 import grpc.aio
@@ -24,7 +25,7 @@ from workspace_sdk.types import (
     PtyHandle,
     FileInfo,
 )
-from workspace_sdk.errors import convert_grpc_error
+from workspace_sdk.errors import convert_grpc_error, NotFoundError, WorkspaceError
 from workspace_sdk.proto.workspace.v1 import (
     workspace_pb2,
     workspace_pb2_grpc,
@@ -45,7 +46,7 @@ def _create_metadata(api_key: Optional[str]) -> List[tuple]:
 
 
 class AsyncWorkspaceService:
-    """Async service for managing workspaces via gRPC"""
+    """Async service for managing workspaces and file operations via gRPC"""
 
     def __init__(
         self,
@@ -60,12 +61,16 @@ class AsyncWorkspaceService:
     def _metadata(self) -> List[tuple]:
         return _create_metadata(self._api_key)
 
+    # ==================== Workspace CRUD ====================
+
     async def create(self, params: Optional[CreateWorkspaceParams] = None) -> Workspace:
         """Create a new workspace"""
         req = workspace_pb2.CreateWorkspaceRequest()
         if params:
             if params.name:
                 req.name = params.name
+            if params.storage_type:
+                req.storage_type = params.storage_type
             if params.metadata:
                 req.metadata.update(params.metadata)
 
@@ -109,6 +114,154 @@ class AsyncWorkspaceService:
         except grpc.RpcError as e:
             raise convert_grpc_error(e)
 
+    # ==================== File Operations ====================
+
+    async def read_file(self, workspace_id: str, path: str) -> str:
+        """Read a file from workspace"""
+        req = workspace_pb2.ReadFileRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = await self._stub.ReadFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return resp.content.decode("utf-8") if isinstance(resp.content, bytes) else resp.content
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def read_file_bytes(self, workspace_id: str, path: str) -> bytes:
+        """Read a file as bytes from workspace"""
+        req = workspace_pb2.ReadFileRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = await self._stub.ReadFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return resp.content if isinstance(resp.content, bytes) else resp.content.encode("utf-8")
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def write_file(self, workspace_id: str, path: str, content: str | bytes) -> None:
+        """Write a file to workspace"""
+        if isinstance(content, str):
+            content = content.encode("utf-8")
+        req = workspace_pb2.WriteFileRequest(
+            workspace_id=workspace_id, path=path, content=content
+        )
+        try:
+            await self._stub.WriteFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def mkdir(self, workspace_id: str, path: str) -> None:
+        """Create a directory in workspace"""
+        req = workspace_pb2.MkdirRequest(
+            workspace_id=workspace_id, path=path
+        )
+        try:
+            await self._stub.Mkdir(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def list_files(self, workspace_id: str, path: str) -> List[FileInfo]:
+        """List directory contents in workspace"""
+        req = workspace_pb2.ListFilesRequest(workspace_id=workspace_id, path=path)
+        try:
+            resp = await self._stub.ListFiles(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return [self._transform_file_info(f) for f in resp.files]
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def delete_file(self, workspace_id: str, path: str, recursive: bool = False) -> None:
+        """Delete a file or directory in workspace"""
+        req = workspace_pb2.DeleteFileRequest(
+            workspace_id=workspace_id, path=path, recursive=recursive
+        )
+        try:
+            await self._stub.DeleteFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def move_file(self, workspace_id: str, source: str, destination: str) -> None:
+        """Move/rename a file or directory in workspace"""
+        req = workspace_pb2.MoveFileRequest(
+            workspace_id=workspace_id, source=source, destination=destination
+        )
+        try:
+            await self._stub.MoveFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def copy_file(self, workspace_id: str, source: str, destination: str) -> None:
+        """Copy a file or directory in workspace"""
+        req = workspace_pb2.CopyFileRequest(
+            workspace_id=workspace_id, source=source, destination=destination
+        )
+        try:
+            await self._stub.CopyFile(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def get_file_info(self, workspace_id: str, path: str) -> FileInfo:
+        """Get file information in workspace"""
+        req = workspace_pb2.GetFileInfoRequest(
+            workspace_id=workspace_id, path=path
+        )
+        try:
+            resp = await self._stub.GetFileInfo(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return self._transform_file_info(resp.file)
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def exists(self, workspace_id: str, path: str) -> bool:
+        """Check if a file or directory exists in workspace"""
+        try:
+            await self.get_file_info(workspace_id, path)
+            return True
+        except NotFoundError:
+            return False
+
+    # ==================== NFS Transport ====================
+
+    async def register_nfs_transport(self, workspace_id: str, nfs_url: str) -> Workspace:
+        """Register NFS transport for a workspace (switch from gRPC to NFS)"""
+        req = workspace_pb2.RegisterNfsTransportRequest(
+            workspace_id=workspace_id, nfs_url=nfs_url
+        )
+        try:
+            resp = await self._stub.RegisterNfsTransport(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return self._transform_workspace(resp.workspace)
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def unregister_nfs_transport(self, workspace_id: str) -> Workspace:
+        """Unregister NFS transport for a workspace (switch back to gRPC)"""
+        req = workspace_pb2.UnregisterNfsTransportRequest(
+            workspace_id=workspace_id
+        )
+        try:
+            resp = await self._stub.UnregisterNfsTransport(
+                req, metadata=self._metadata(), timeout=self._timeout
+            )
+            return self._transform_workspace(resp.workspace)
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    # ==================== Transform Helpers ====================
+
     def _transform_workspace(self, ws) -> Workspace:
         """Transform proto Workspace to SDK Workspace type"""
         created_at = None
@@ -122,9 +275,25 @@ class AsyncWorkspaceService:
             id=ws.id,
             name=ws.name if ws.HasField("name") else None,
             nfs_url=ws.nfs_url if ws.HasField("nfs_url") else None,
+            storage_type=ws.storage_type if ws.storage_type else None,
+            storage_config=ws.storage_config if ws.storage_config else None,
             metadata=dict(ws.metadata) if ws.metadata else None,
             created_at=created_at,
             updated_at=updated_at,
+        )
+
+    def _transform_file_info(self, f) -> FileInfo:
+        """Transform proto FileInfo to SDK FileInfo type"""
+        modified_at = None
+        if f.modified_at:
+            modified_at = f.modified_at.ToDatetime().isoformat()
+
+        return FileInfo(
+            name=f.name,
+            path=f.path,
+            type=f.type,
+            size=f.size,
+            modified_at=modified_at,
         )
 
 
@@ -146,7 +315,8 @@ class AsyncSandboxService:
 
     async def create(self, params: CreateSandboxParams) -> Sandbox:
         """Create a new sandbox"""
-        req = sandbox_pb2.CreateSandboxRequest(workspace_id=params.workspace_id)
+        ns_id = params.namespace_id or params.workspace_id
+        req = sandbox_pb2.CreateSandboxRequest(workspace_id=ns_id)
         if params.template:
             req.template = params.template
         if params.name:
@@ -201,6 +371,43 @@ class AsyncSandboxService:
         except grpc.RpcError as e:
             raise convert_grpc_error(e)
 
+    async def exists(self, sandbox_id: str) -> bool:
+        """Check if a sandbox exists"""
+        try:
+            await self.get(sandbox_id)
+            return True
+        except NotFoundError:
+            return False
+
+    async def wait_for_state(
+        self,
+        sandbox_id: str,
+        target_state: SandboxState,
+        timeout: float = 60.0,
+    ) -> Sandbox:
+        """Wait for a sandbox to reach a specific state, polling at 100ms intervals"""
+        import time
+        deadline = time.monotonic() + timeout
+
+        while time.monotonic() < deadline:
+            sandbox = await self.get(sandbox_id)
+
+            if sandbox.state == target_state:
+                return sandbox
+
+            if sandbox.state == SandboxState.FAILED:
+                raise WorkspaceError(
+                    f"Sandbox failed: {sandbox.error_message or 'unknown error'}",
+                    500,
+                )
+
+            await asyncio.sleep(0.1)
+
+        raise WorkspaceError(
+            f"Timeout waiting for sandbox {sandbox_id} to reach state '{target_state.value}'",
+            408,
+        )
+
     def _transform_sandbox(self, sb) -> Sandbox:
         """Transform proto Sandbox to SDK Sandbox type"""
         created_at = None
@@ -213,6 +420,7 @@ class AsyncSandboxService:
         return Sandbox(
             id=sb.id,
             workspace_id=sb.workspace_id,
+            namespace_id=sb.workspace_id,
             name=sb.name if sb.HasField("name") else None,
             template=sb.template,
             state=self._proto_to_state(sb.state),
@@ -341,6 +549,36 @@ class AsyncProcessService:
         except grpc.RpcError as e:
             raise convert_grpc_error(e)
 
+    async def shell(
+        self,
+        sandbox_id: str,
+        script: str,
+        env: Optional[dict] = None,
+    ) -> CommandResult:
+        """Run a shell script using bash -c"""
+        return await self.run(
+            sandbox_id,
+            "bash",
+            RunCommandOptions(args=["-c", script], env=env or {}),
+        )
+
+    async def exec(
+        self,
+        sandbox_id: str,
+        command: str,
+        *args: str,
+    ) -> str:
+        """Execute a command and return stdout, raising on non-zero exit"""
+        from workspace_sdk.errors import ProcessError
+        result = await self.run(sandbox_id, command, RunCommandOptions(args=list(args)))
+        if result.exit_code != 0:
+            raise ProcessError(
+                sandbox_id=sandbox_id,
+                command=command,
+                message=f"exit code {result.exit_code}: {result.stderr}",
+            )
+        return result.stdout
+
     def _parse_event(self, event) -> Optional[ProcessEvent]:
         """Parse proto ProcessEvent into SDK ProcessEvent"""
         which = event.WhichOneof("event")
@@ -353,6 +591,116 @@ class AsyncProcessService:
         elif which == "error":
             return ErrorEvent(type="error", message=event.error.message)
         return None
+
+
+class AsyncPtySession:
+    """Represents an active async PTY session with gRPC bidirectional stream"""
+
+    def __init__(
+        self,
+        handle: PtyHandle,
+        stream,
+        sandbox_id: str,
+    ):
+        self.handle = handle
+        self._stream = stream
+        self._sandbox_id = sandbox_id
+        self._closed = False
+        self._data_callback: Optional[Callable[[bytes], None]] = None
+        self._close_callback: Optional[Callable[[], None]] = None
+        self._error_callback: Optional[Callable[[Exception], None]] = None
+        self._outgoing: asyncio.Queue = asyncio.Queue()
+        self._read_task: Optional[asyncio.Task] = None
+        self._write_task: Optional[asyncio.Task] = None
+
+    def start(self) -> None:
+        """Start the read/write loops as async tasks"""
+        self._read_task = asyncio.ensure_future(self._read_loop())
+        self._write_task = asyncio.ensure_future(self._write_loop())
+
+    async def write(self, data: bytes) -> None:
+        """Send data to the PTY"""
+        if self._closed:
+            raise RuntimeError("Session is closed")
+        await self._outgoing.put(("input", data))
+
+    async def resize(self, cols: int, rows: int) -> None:
+        """Resize the PTY"""
+        if self._closed:
+            raise RuntimeError("Session is closed")
+        await self._outgoing.put(("resize", (cols, rows)))
+
+    async def close(self) -> None:
+        """Close the PTY session"""
+        if self._closed:
+            return
+        self._closed = True
+        await self._outgoing.put(("close", None))
+
+    def on_data(self, callback: Callable[[bytes], None]) -> None:
+        """Set callback for incoming data"""
+        self._data_callback = callback
+
+    def on_close(self, callback: Callable[[], None]) -> None:
+        """Set callback for session close"""
+        self._close_callback = callback
+
+    def on_error(self, callback: Callable[[Exception], None]) -> None:
+        """Set callback for errors"""
+        self._error_callback = callback
+
+    async def _read_loop(self) -> None:
+        """Read messages from gRPC stream"""
+        try:
+            async for resp in self._stream:
+                which = resp.WhichOneof("response")
+                if which == "output":
+                    if self._data_callback:
+                        self._data_callback(resp.output)
+                elif which == "exit_code":
+                    break
+                elif which == "error":
+                    if self._error_callback:
+                        self._error_callback(RuntimeError(resp.error))
+                    break
+        except grpc.RpcError as e:
+            if not self._closed and self._error_callback:
+                self._error_callback(convert_grpc_error(e))
+        finally:
+            self._closed = True
+            if self._close_callback:
+                self._close_callback()
+
+    async def _write_loop(self) -> None:
+        """Write messages to gRPC stream"""
+        try:
+            while not self._closed:
+                try:
+                    msg_type, data = await asyncio.wait_for(
+                        self._outgoing.get(), timeout=0.1
+                    )
+                except asyncio.TimeoutError:
+                    continue
+
+                if msg_type == "close":
+                    break
+                elif msg_type == "input":
+                    req = pty_pb2.PtyStreamRequest(input=data)
+                    await self._stream.write(req)
+                elif msg_type == "resize":
+                    cols, rows = data
+                    req = pty_pb2.PtyStreamRequest(
+                        resize=pty_pb2.PtyResizeEvent(cols=cols, rows=rows)
+                    )
+                    await self._stream.write(req)
+        except grpc.RpcError as e:
+            if not self._closed and self._error_callback:
+                self._error_callback(convert_grpc_error(e))
+        finally:
+            try:
+                await self._stream.done_writing()
+            except Exception:
+                pass
 
 
 class AsyncPtyService:
@@ -398,6 +746,32 @@ class AsyncPtyService:
                 cols=resp.pty.cols,
                 rows=resp.pty.rows,
             )
+        except grpc.RpcError as e:
+            raise convert_grpc_error(e)
+
+    async def connect(
+        self,
+        sandbox_id: str,
+        options: Optional[PtyOptions] = None,
+    ) -> AsyncPtySession:
+        """Create a PTY and establish a bidirectional stream"""
+        handle = await self.create(sandbox_id, options)
+
+        try:
+            stream = self._stub.PtyStream(metadata=self._metadata())
+
+            # Send init message
+            init_req = pty_pb2.PtyStreamRequest(
+                init=pty_pb2.PtyStreamInit(
+                    sandbox_id=sandbox_id,
+                    pty_id=handle.id,
+                )
+            )
+            await stream.write(init_req)
+
+            session = AsyncPtySession(handle, stream, sandbox_id)
+            session.start()
+            return session
         except grpc.RpcError as e:
             raise convert_grpc_error(e)
 

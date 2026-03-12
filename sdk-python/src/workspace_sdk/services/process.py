@@ -15,7 +15,7 @@ from workspace_sdk.types import (
     ExitEvent,
     ErrorEvent,
 )
-from workspace_sdk.errors import convert_grpc_error
+from workspace_sdk.errors import convert_grpc_error, ProcessError
 from workspace_sdk.proto.workspace.v1 import process_pb2, process_pb2_grpc
 
 
@@ -142,8 +142,10 @@ class ProcessService:
         """Execute a command and return stdout, raising on non-zero exit"""
         result = self.run(sandbox_id, command, RunCommandOptions(args=list(args)))
         if result.exit_code != 0:
-            raise RuntimeError(
-                f"Command failed with exit code {result.exit_code}: {result.stderr}"
+            raise ProcessError(
+                sandbox_id=sandbox_id,
+                command=command,
+                message=f"exit code {result.exit_code}: {result.stderr}",
             )
         return result.stdout
 
