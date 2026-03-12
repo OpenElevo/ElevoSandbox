@@ -77,11 +77,18 @@ pub async fn read_share_file(
     let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .read_file_string(&storage_id, &effective_path)
+        .storage()
+        .read_file(&storage_id, &effective_path)
         .await
     {
-        Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": {"code": "INTERNAL_ERROR", "message": format!("Invalid UTF-8: {}", e)}})),
+            ).into_response(),
+        },
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -141,6 +148,7 @@ pub async fn write_share_file(
     let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
+        .storage()
         .write_file(&storage_id, &effective_path, req.content.as_bytes())
         .await
     {
@@ -149,7 +157,7 @@ pub async fn write_share_file(
             Json(serde_json::json!({"success": true, "path": query.path})),
         )
             .into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -187,17 +195,23 @@ pub async fn delete_share_file(
     let recursive = query.recursive.as_deref() == Some("true");
 
     let storage_id = format!("namespaces/{}", share.owner_tenant_id);
-    match state
-        .workspace_service
-        .delete_file(&storage_id, &effective_path, recursive)
-        .await
-    {
+    let storage = state.workspace_service.storage();
+
+    let result = match storage.stat(&storage_id, &effective_path).await {
+        Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {
+            storage.remove_dir(&storage_id, &effective_path, recursive).await
+        }
+        Ok(_) => storage.remove_file(&storage_id, &effective_path).await,
+        Err(e) => Err(e),
+    };
+
+    match result {
         Ok(()) => (
             StatusCode::OK,
             Json(serde_json::json!({"success": true, "path": query.path})),
         )
             .into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -236,23 +250,27 @@ pub async fn list_share_files(
     let storage_id = format!("namespaces/{}", share.owner_tenant_id);
     match state
         .workspace_service
-        .list_files(&storage_id, &effective_path)
+        .storage()
+        .list_dir(&storage_id, &effective_path)
         .await
     {
-        Ok(files) => {
-            let responses: Vec<FileInfoResponse> = files
+        Ok(entries) => {
+            let files: Vec<FileInfoResponse> = entries
                 .into_iter()
-                .map(|f| FileInfoResponse {
-                    name: f.name,
-                    path: f.path,
-                    file_type: f.file_type,
-                    size: f.size,
-                    modified_at: f.modified_at.map(|t| t.to_rfc3339()),
+                .map(|s| {
+                    let info = crate::service::workspace::FileInfo::from(s);
+                    FileInfoResponse {
+                        name: info.name,
+                        path: info.path,
+                        file_type: info.file_type,
+                        size: info.size,
+                        modified_at: info.modified_at.map(|t| t.to_rfc3339()),
+                    }
                 })
                 .collect();
-            (StatusCode::OK, Json(ListFilesResponse { files: responses })).into_response()
+            (StatusCode::OK, Json(ListFilesResponse { files })).into_response()
         }
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 

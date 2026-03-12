@@ -2,6 +2,9 @@
 //!
 //! These endpoints operate on files within a tenant's namespace directory.
 //! Access: Namespace owner (tenant) or Admin.
+//!
+//! Unlike sandbox file operations, namespace files bypass the legacy
+//! workspace DB table — they use the storage backend directly.
 
 use axum::{
     extract::{Path, Query, State},
@@ -12,7 +15,9 @@ use axum::{
 use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
+use crate::infra::storage::{FileType, StorageError};
 use crate::service::path_security;
+use crate::service::workspace::FileInfo;
 use crate::AppState;
 
 use super::workspace::{
@@ -22,8 +27,10 @@ use super::workspace::{
 
 /// Check namespace access (owner or admin)
 #[allow(clippy::result_large_err)]
-fn check_namespace_access(auth: &AuthContext, namespace_id: &str) -> Result<(), axum::response::Response> {
-    // Admin can access any namespace
+fn check_namespace_access(
+    auth: &AuthContext,
+    namespace_id: &str,
+) -> Result<(), axum::response::Response> {
     if auth.is_admin() {
         return Ok(());
     }
@@ -68,6 +75,22 @@ fn safe_path_string(raw: &str) -> Result<String, axum::response::Response> {
         .map_err(|e| super::tenant_handler::error_response(e))
 }
 
+/// Convert a StorageError into an HTTP response
+pub(super) fn storage_error_response(err: StorageError) -> axum::response::Response {
+    let (status, code, message) = match &err {
+        StorageError::NotFound(p) => (StatusCode::NOT_FOUND, "NOT_FOUND", format!("Not found: {}", p)),
+        StorageError::AlreadyExists(p) => (StatusCode::CONFLICT, "ALREADY_EXISTS", format!("Already exists: {}", p)),
+        StorageError::PermissionDenied(p) => (StatusCode::FORBIDDEN, "PERMISSION_DENIED", format!("Permission denied: {}", p)),
+        StorageError::PathTraversalDenied(p) => (StatusCode::FORBIDDEN, "PATH_NOT_ALLOWED", format!("Path traversal denied: {}", p)),
+        StorageError::IsADirectory(p) => (StatusCode::BAD_REQUEST, "IS_A_DIRECTORY", format!("Is a directory: {}", p)),
+        StorageError::NotADirectory(p) => (StatusCode::BAD_REQUEST, "NOT_A_DIRECTORY", format!("Not a directory: {}", p)),
+        StorageError::NotAFile(p) => (StatusCode::BAD_REQUEST, "NOT_A_FILE", format!("Not a file: {}", p)),
+        StorageError::DirectoryNotEmpty(p) => (StatusCode::CONFLICT, "DIRECTORY_NOT_EMPTY", format!("Directory not empty: {}", p)),
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", err.to_string()),
+    };
+    (status, Json(serde_json::json!({"error": {"code": code, "message": message}}))).into_response()
+}
+
 /// GET /api/v1/namespaces/:id/files
 pub async fn read_file(
     State(state): State<AppState>,
@@ -88,9 +111,13 @@ pub async fn read_file(
         Err(e) => return e,
     };
 
-    match state.workspace_service.read_file_string(&storage_id(&namespace_id), &safe_path).await {
-        Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().read_file(&sid, &safe_path).await {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": {"code": "INTERNAL_ERROR", "message": format!("Invalid UTF-8: {}", e)}}))).into_response(),
+        },
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -123,9 +150,10 @@ pub async fn write_file(
         Err(e) => return e,
     };
 
-    match state.workspace_service.write_file(&storage_id(&namespace_id), &safe_path, req.content.as_bytes()).await {
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().write_file(&sid, &safe_path, req.content.as_bytes()).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -149,9 +177,20 @@ pub async fn delete_file(
         Err(e) => return e,
     };
     let recursive = query.recursive.as_deref() == Some("true");
-    match state.workspace_service.delete_file(&storage_id(&namespace_id), &safe_path, recursive).await {
+    let sid = storage_id(&namespace_id);
+    let storage = state.workspace_service.storage();
+
+    let result = match storage.stat(&sid, &safe_path).await {
+        Ok(stat) if stat.file_type == FileType::Directory => {
+            storage.remove_dir(&sid, &safe_path, recursive).await
+        }
+        Ok(_) => storage.remove_file(&sid, &safe_path).await,
+        Err(e) => Err(e),
+    };
+
+    match result {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -175,21 +214,25 @@ pub async fn list_files(
         Err(e) => return e,
     };
 
-    match state.workspace_service.list_files(&storage_id(&namespace_id), &safe_path).await {
-        Ok(files) => {
-            let responses: Vec<FileInfoResponse> = files
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().list_dir(&sid, &safe_path).await {
+        Ok(entries) => {
+            let files: Vec<FileInfoResponse> = entries
                 .into_iter()
-                .map(|f| FileInfoResponse {
-                    name: f.name,
-                    path: f.path,
-                    file_type: f.file_type,
-                    size: f.size,
-                    modified_at: f.modified_at.map(|t| t.to_rfc3339()),
+                .map(|s| {
+                    let info = FileInfo::from(s);
+                    FileInfoResponse {
+                        name: info.name,
+                        path: info.path,
+                        file_type: info.file_type,
+                        size: info.size,
+                        modified_at: info.modified_at.map(|t| t.to_rfc3339()),
+                    }
                 })
                 .collect();
-            (StatusCode::OK, Json(ListFilesResponse { files: responses })).into_response()
+            (StatusCode::OK, Json(ListFilesResponse { files })).into_response()
         }
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -221,9 +264,10 @@ pub async fn mkdir(
         Err(e) => return e,
     };
 
-    match state.workspace_service.mkdir(&storage_id(&namespace_id), &safe_path).await {
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().mkdir(&sid, &safe_path, true).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -254,14 +298,25 @@ pub async fn move_file(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let safe_destination = match safe_path_string(&req.destination) {
+    let safe_dest = match safe_path_string(&req.destination) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
-    match state.workspace_service.move_file(&storage_id(&namespace_id), &safe_source, &safe_destination).await {
+    let sid = storage_id(&namespace_id);
+    let storage = state.workspace_service.storage();
+
+    // Ensure parent directory exists (convenience for users)
+    if let Some(parent) = std::path::Path::new(&safe_dest).parent() {
+        let ps = parent.to_string_lossy();
+        if !ps.is_empty() && ps != "." {
+            let _ = storage.mkdir(&sid, &ps, true).await;
+        }
+    }
+
+    match storage.rename(&sid, &safe_source, &safe_dest).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -292,14 +347,15 @@ pub async fn copy_file(
         Ok(p) => p,
         Err(e) => return e,
     };
-    let safe_destination = match safe_path_string(&req.destination) {
+    let safe_dest = match safe_path_string(&req.destination) {
         Ok(p) => p,
         Err(e) => return e,
     };
 
-    match state.workspace_service.copy_file(&storage_id(&namespace_id), &safe_source, &safe_destination).await {
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().copy(&sid, &safe_source, &safe_dest).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => storage_error_response(e),
     }
 }
 
@@ -323,14 +379,18 @@ pub async fn get_file_info(
         Err(e) => return e,
     };
 
-    match state.workspace_service.get_file_info(&storage_id(&namespace_id), &safe_path).await {
-        Ok(info) => (StatusCode::OK, Json(FileInfoResponse {
-            name: info.name,
-            path: info.path,
-            file_type: info.file_type,
-            size: info.size,
-            modified_at: info.modified_at.map(|t| t.to_rfc3339()),
-        })).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+    let sid = storage_id(&namespace_id);
+    match state.workspace_service.storage().stat(&sid, &safe_path).await {
+        Ok(stat) => {
+            let info = FileInfo::from(stat);
+            (StatusCode::OK, Json(FileInfoResponse {
+                name: info.name,
+                path: info.path,
+                file_type: info.file_type,
+                size: info.size,
+                modified_at: info.modified_at.map(|t| t.to_rfc3339()),
+            })).into_response()
+        }
+        Err(e) => storage_error_response(e),
     }
 }

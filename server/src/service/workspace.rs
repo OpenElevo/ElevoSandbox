@@ -80,6 +80,14 @@ impl WorkspaceService {
         }
     }
 
+    /// Expose the underlying storage backend for direct operations (e.g. namespace files).
+    ///
+    /// This bypasses workspace DB checks and lease management. Callers are
+    /// responsible for their own access control and path security.
+    pub fn storage(&self) -> &dyn StorageBackend {
+        &*self.storage
+    }
+
     /// Check if this server instance holds the lease for a workspace.
     /// Used to ensure write operations only proceed if we have the lease.
     async fn ensure_lease_held(&self, workspace_id: &str) -> Result<()> {

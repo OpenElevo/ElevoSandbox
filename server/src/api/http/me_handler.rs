@@ -88,18 +88,22 @@ pub async fn list_my_files(
     let storage_id = format!("namespaces/{}", tenant_id);
     match state
         .workspace_service
-        .list_files(&storage_id, &safe_path)
+        .storage()
+        .list_dir(&storage_id, &safe_path)
         .await
     {
-        Ok(files) => {
-            let responses: Vec<FileInfoResponse> = files
+        Ok(entries) => {
+            let responses: Vec<FileInfoResponse> = entries
                 .into_iter()
-                .map(|f| FileInfoResponse {
-                    name: f.name,
-                    path: f.path,
-                    file_type: f.file_type,
-                    size: f.size,
-                    modified_at: f.modified_at.map(|t| t.to_rfc3339()),
+                .map(|s| {
+                    let f = crate::service::workspace::FileInfo::from(s);
+                    FileInfoResponse {
+                        name: f.name,
+                        path: f.path,
+                        file_type: f.file_type,
+                        size: f.size,
+                        modified_at: f.modified_at.map(|t| t.to_rfc3339()),
+                    }
                 })
                 .collect();
             (
@@ -108,7 +112,7 @@ pub async fn list_my_files(
             )
                 .into_response()
         }
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -238,9 +242,15 @@ pub async fn read_my_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    match state.workspace_service.read_file_string(&storage_id, &safe_path).await {
-        Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+    match state.workspace_service.storage().read_file(&storage_id, &safe_path).await {
+        Ok(bytes) => match String::from_utf8(bytes) {
+            Ok(content) => (StatusCode::OK, Json(ReadFileResponse { content })).into_response(),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": {"code": "INTERNAL_ERROR", "message": format!("Invalid UTF-8: {}", e)}})),
+            ).into_response(),
+        },
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -293,9 +303,9 @@ pub async fn write_my_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    match state.workspace_service.write_file(&storage_id, &safe_path, req.content.as_bytes()).await {
+    match state.workspace_service.storage().write_file(&storage_id, &safe_path, req.content.as_bytes()).await {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
@@ -347,11 +357,13 @@ pub async fn create_my_file(
         content: Option<String>,
     }
 
+    let storage = state.workspace_service.storage();
+
     if body.is_empty() {
         // Empty body → create directory
-        match state.workspace_service.mkdir(&storage_id, &safe_path).await {
+        match storage.mkdir(&storage_id, &safe_path, true).await {
             Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-            Err(e) => super::tenant_handler::error_response(e),
+            Err(e) => super::namespace_handler::storage_error_response(e),
         }
     } else {
         let req: CreateRequest = match serde_json::from_slice(&body) {
@@ -366,15 +378,15 @@ pub async fn create_my_file(
         };
 
         if req.directory {
-            match state.workspace_service.mkdir(&storage_id, &safe_path).await {
+            match storage.mkdir(&storage_id, &safe_path, true).await {
                 Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-                Err(e) => super::tenant_handler::error_response(e),
+                Err(e) => super::namespace_handler::storage_error_response(e),
             }
         } else {
             let content = req.content.unwrap_or_default();
-            match state.workspace_service.write_file(&storage_id, &safe_path, content.as_bytes()).await {
+            match storage.write_file(&storage_id, &safe_path, content.as_bytes()).await {
                 Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-                Err(e) => super::tenant_handler::error_response(e),
+                Err(e) => super::namespace_handler::storage_error_response(e),
             }
         }
     }
@@ -415,10 +427,19 @@ pub async fn delete_my_file(
     };
 
     let recursive = query.recursive.as_deref() == Some("true");
+    let storage = state.workspace_service.storage();
 
-    match state.workspace_service.delete_file(&storage_id, &safe_path, recursive).await {
+    let result = match storage.stat(&storage_id, &safe_path).await {
+        Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {
+            storage.remove_dir(&storage_id, &safe_path, recursive).await
+        }
+        Ok(_) => storage.remove_file(&storage_id, &safe_path).await,
+        Err(e) => Err(e),
+    };
+
+    match result {
         Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
-        Err(e) => super::tenant_handler::error_response(e),
+        Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
 
