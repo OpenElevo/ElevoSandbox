@@ -154,6 +154,27 @@ pub struct Config {
     /// FUSE attr timeout for remote workspace mounts (seconds)
     #[serde(default = "default_fuse_attr_timeout_secs")]
     pub fuse_attr_timeout_secs: u64,
+
+    // ── Auth & Admin Configuration ──
+    /// Admin password for JWT login (if unset, dev mode: all requests treated as admin)
+    #[serde(default)]
+    pub admin_password: Option<String>,
+
+    /// JWT secret key (≥32 bytes, required in production)
+    #[serde(default)]
+    pub jwt_secret: Option<String>,
+
+    /// JWT token expiration in hours
+    #[serde(default = "default_jwt_expiration_hours")]
+    pub jwt_expiration_hours: u64,
+
+    /// Global rate limit: requests per second per IP
+    #[serde(default = "default_rate_limit_rps")]
+    pub rate_limit_rps: u32,
+
+    /// Namespace trash retention period in days
+    #[serde(default = "default_namespace_trash_retention_days")]
+    pub namespace_trash_retention_days: u64,
 }
 
 /// Storage backend configuration
@@ -313,6 +334,18 @@ fn default_fuse_attr_timeout_secs() -> u64 {
     1
 }
 
+fn default_jwt_expiration_hours() -> u64 {
+    24
+}
+
+fn default_rate_limit_rps() -> u32 {
+    100
+}
+
+fn default_namespace_trash_retention_days() -> u64 {
+    7
+}
+
 impl Config {
     /// Load configuration from environment variables
     pub fn load() -> anyhow::Result<Self> {
@@ -456,6 +489,29 @@ impl Config {
             }
         }
 
+        // Auth & Admin configuration
+        if let Ok(val) = std::env::var("ADMIN_PASSWORD") {
+            config.admin_password = Some(val);
+        }
+        if let Ok(val) = std::env::var("JWT_SECRET") {
+            config.jwt_secret = Some(val);
+        }
+        if let Ok(val) = std::env::var("JWT_EXPIRATION_HOURS") {
+            if let Ok(n) = val.parse() {
+                config.jwt_expiration_hours = n;
+            }
+        }
+        if let Ok(val) = std::env::var("WORKSPACE_RATE_LIMIT_RPS") {
+            if let Ok(n) = val.parse() {
+                config.rate_limit_rps = n;
+            }
+        }
+        if let Ok(val) = std::env::var("NAMESPACE_TRASH_RETENTION_DAYS") {
+            if let Ok(n) = val.parse() {
+                config.namespace_trash_retention_days = n;
+            }
+        }
+
         // Build StorageConfig from environment variables
         config.storage = Self::load_storage_config(&config.workspace_dir)?;
 
@@ -548,6 +604,31 @@ impl Config {
         format!("{}/{}", base, sandbox_id)
     }
 
+    /// Get the host path for a namespace workspace directory
+    /// Used when sandbox is created within a namespace
+    pub fn get_namespace_workspace_host_path(&self, namespace_id: &str, root_path: &str) -> String {
+        let base = self
+            .workspace_host_dir
+            .as_deref()
+            .unwrap_or(&self.workspace_dir);
+        let trimmed = root_path.trim_start_matches('/');
+        if trimmed.is_empty() {
+            format!("{}/namespaces/{}", base, namespace_id)
+        } else {
+            format!("{}/namespaces/{}/{}", base, namespace_id, trimmed)
+        }
+    }
+
+    /// Get the host path for a share's source directory
+    pub fn get_share_host_path(&self, owner_tenant_id: &str, source_path: &str) -> String {
+        let base = self
+            .workspace_host_dir
+            .as_deref()
+            .unwrap_or(&self.workspace_dir);
+        let trimmed = source_path.trim_start_matches('/');
+        format!("{}/namespaces/{}/{}", base, owner_tenant_id, trimmed)
+    }
+
     /// Get the NFS host address for external access
     pub fn get_nfs_host(&self) -> &str {
         self.nfs_host.as_deref().unwrap_or("127.0.0.1")
@@ -590,6 +671,11 @@ impl Default for Config {
             nfs_allowed_cidrs: Vec::new(),
             fuse_entry_timeout_secs: default_fuse_entry_timeout_secs(),
             fuse_attr_timeout_secs: default_fuse_attr_timeout_secs(),
+            admin_password: None,
+            jwt_secret: None,
+            jwt_expiration_hours: default_jwt_expiration_hours(),
+            rate_limit_rps: default_rate_limit_rps(),
+            namespace_trash_retention_days: default_namespace_trash_retention_days(),
         }
     }
 }
