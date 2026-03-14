@@ -5,7 +5,6 @@
 import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import * as path from 'path';
-import { fileURLToPath } from 'url';
 
 // Proto loader options
 const PROTO_LOADER_OPTIONS: protoLoader.Options = {
@@ -16,12 +15,24 @@ const PROTO_LOADER_OPTIONS: protoLoader.Options = {
   oneofs: true,
 };
 
-// Get directory name for ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Get directory name - use process.cwd() based resolution for proto files
+// This works in both ESM and CJS environments
+const SDK_ROOT = path.resolve(process.cwd(), 'node_modules/@openelevo/workspace-sdk');
+const PROTO_DIR_FALLBACK = path.resolve(SDK_ROOT, '../../proto/workspace/v1');
 
-// Proto file paths (relative to package root)
-const PROTO_DIR = path.resolve(__dirname, '../../proto/workspace/v1');
+// Try to find proto directory
+function getProtoDir(): string {
+  // First try relative to this module (works when SDK is in node_modules)
+  try {
+    // Use require.resolve to find this module's location
+    const modulePath = require.resolve('@openelevo/workspace-sdk');
+    const moduleDir = path.dirname(modulePath);
+    const protoDir = path.resolve(moduleDir, '../../proto/workspace/v1');
+    return protoDir;
+  } catch {
+    return PROTO_DIR_FALLBACK;
+  }
+}
 
 // Service client types
 // Helper type for unary gRPC method signature
@@ -98,18 +109,19 @@ export function loadProtos(): any {
     return loadedProtos;
   }
 
+  const protoDir = getProtoDir();
   const protoFiles = [
-    path.join(PROTO_DIR, 'workspace.proto'),
-    path.join(PROTO_DIR, 'sandbox.proto'),
-    path.join(PROTO_DIR, 'process.proto'),
-    path.join(PROTO_DIR, 'pty.proto'),
-    path.join(PROTO_DIR, 'client_storage.proto'),
-    path.join(PROTO_DIR, 'filesystem.proto'),
+    path.join(protoDir, 'workspace.proto'),
+    path.join(protoDir, 'sandbox.proto'),
+    path.join(protoDir, 'process.proto'),
+    path.join(protoDir, 'pty.proto'),
+    path.join(protoDir, 'client_storage.proto'),
+    path.join(protoDir, 'filesystem.proto'),
   ];
 
   const packageDefinition = protoLoader.loadSync(protoFiles, {
     ...PROTO_LOADER_OPTIONS,
-    includeDirs: [path.resolve(__dirname, '../../proto')],
+    includeDirs: [path.resolve(protoDir, '../..')],
   });
 
   loadedProtos = grpc.loadPackageDefinition(packageDefinition);
