@@ -69,6 +69,9 @@ pub enum LeaseError {
     #[error("lease holder mismatch: expected '{expected}', got '{actual}'")]
     HolderMismatch { expected: String, actual: String },
 
+    #[error("invalid workspace ID '{0}': expected UUID format")]
+    InvalidWorkspaceId(String),
+
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),
 }
@@ -102,6 +105,8 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         workspace_id: &str,
         holder_id: &str,
     ) -> Result<WorkspaceLease, LeaseError> {
+        let namespace_id = uuid::Uuid::parse_str(workspace_id)
+            .map_err(|_| LeaseError::InvalidWorkspaceId(workspace_id.to_string()))?;
         let now = Utc::now();
         let expires_at = self.compute_expires_at();
 
@@ -116,7 +121,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
             ON CONFLICT (namespace_id) DO NOTHING
             "#,
         )
-        .bind(workspace_id)
+        .bind(namespace_id)
         .bind(holder_id)
         .bind(now)
         .bind(expires_at)
@@ -152,7 +157,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         .bind(now)
         .bind(expires_at)
         .bind(now)
-        .bind(workspace_id)
+        .bind(namespace_id)
         .bind(holder_id)
         .bind(now)
         .execute(&mut *tx)
@@ -177,7 +182,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         let (existing_holder, existing_expires): (String, DateTime<Utc>) = sqlx::query_as(
             "SELECT holder_id, expires_at FROM namespace_leases WHERE namespace_id = $1",
         )
-        .bind(workspace_id)
+        .bind(namespace_id)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -195,13 +200,15 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         workspace_id: &str,
         holder_id: &str,
     ) -> Result<WorkspaceLease, LeaseError> {
+        let namespace_id = uuid::Uuid::parse_str(workspace_id)
+            .map_err(|_| LeaseError::InvalidWorkspaceId(workspace_id.to_string()))?;
         let now = Utc::now();
         let expires_at = self.compute_expires_at();
 
         let result = sqlx::query_as::<_, (String,)>(
             "SELECT holder_id FROM namespace_leases WHERE namespace_id = $1",
         )
-        .bind(workspace_id)
+        .bind(namespace_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -224,14 +231,14 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         )
         .bind(expires_at)
         .bind(now)
-        .bind(workspace_id)
+        .bind(namespace_id)
         .bind(holder_id)
         .execute(&self.pool)
         .await?;
 
         let (acquired_at,): (DateTime<Utc>,) =
             sqlx::query_as("SELECT acquired_at FROM namespace_leases WHERE namespace_id = $1")
-                .bind(workspace_id)
+                .bind(namespace_id)
                 .fetch_one(&self.pool)
                 .await?;
 
@@ -245,10 +252,13 @@ impl WorkspaceLeaseManager for PgLeaseManager {
     }
 
     async fn release(&self, workspace_id: &str, holder_id: &str) -> Result<(), LeaseError> {
+        let namespace_id = uuid::Uuid::parse_str(workspace_id)
+            .map_err(|_| LeaseError::InvalidWorkspaceId(workspace_id.to_string()))?;
+
         let result = sqlx::query_as::<_, (String,)>(
             "SELECT holder_id FROM namespace_leases WHERE namespace_id = $1",
         )
-        .bind(workspace_id)
+        .bind(namespace_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -263,7 +273,7 @@ impl WorkspaceLeaseManager for PgLeaseManager {
         }
 
         sqlx::query("DELETE FROM namespace_leases WHERE namespace_id = $1 AND holder_id = $2")
-            .bind(workspace_id)
+            .bind(namespace_id)
             .bind(holder_id)
             .execute(&self.pool)
             .await?;
@@ -277,10 +287,13 @@ impl WorkspaceLeaseManager for PgLeaseManager {
     }
 
     async fn check(&self, workspace_id: &str) -> Result<Option<WorkspaceLease>, LeaseError> {
+        let namespace_id = uuid::Uuid::parse_str(workspace_id)
+            .map_err(|_| LeaseError::InvalidWorkspaceId(workspace_id.to_string()))?;
+
         let row = sqlx::query_as::<_, (String, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>)>(
             "SELECT holder_id, acquired_at, expires_at, renewed_at FROM namespace_leases WHERE namespace_id = $1",
         )
-        .bind(workspace_id)
+        .bind(namespace_id)
         .fetch_optional(&self.pool)
         .await?;
 
