@@ -169,7 +169,7 @@ func testWorkspaceFiles(ctx context.Context, client *workspace.Client, workspace
 	}
 	fmt.Println("   Delete OK")
 
-	fmt.Println("   File operations OK\n")
+	fmt.Println("   File operations OK")
 }
 
 func testSandbox(ctx context.Context, client *workspace.Client, workspaceID string) string {
