@@ -65,6 +65,22 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: elevo
+          POSTGRES_PASSWORD: elevo
+          POSTGRES_DB: elevo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - uses: actions/checkout@v4
 
@@ -84,6 +100,8 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
+        env:
+          WORKSPACE_DATABASE_URL: postgres://elevo:elevo@localhost:5432/elevo
         run: cargo test --workspace --lib --bins
 
   sdk-python:
