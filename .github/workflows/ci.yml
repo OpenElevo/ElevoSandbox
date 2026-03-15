@@ -101,6 +101,7 @@ jobs:
 
       - name: Run tests
         env:
+          DATABASE_URL: postgres://elevo:elevo@localhost:5432/elevo
           WORKSPACE_DATABASE_URL: postgres://elevo:elevo@localhost:5432/elevo
         run: cargo test --workspace --lib --bins
 
