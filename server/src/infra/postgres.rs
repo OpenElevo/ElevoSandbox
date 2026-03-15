@@ -144,9 +144,9 @@ impl SandboxRepository {
         let id = Uuid::new_v4();
         let now = Utc::now();
         let template = params.template.unwrap_or_else(|| "default".to_string());
-        let env = serde_json::to_value(&params.env.unwrap_or_default())
+        let env = serde_json::to_value(params.env.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
-        let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
+        let metadata = serde_json::to_value(params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
         let timeout = params.timeout.unwrap_or(0);
 

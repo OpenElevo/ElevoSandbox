@@ -68,11 +68,12 @@ fn storage_id(namespace_id: &str) -> String {
 }
 
 /// Normalize a user-provided path and convert it to an owned String, returning
+#[allow(clippy::result_large_err)]
 /// an error response if the path contains `..` components or is otherwise invalid.
 fn safe_path_string(raw: &str) -> Result<String, axum::response::Response> {
     path_security::normalize_path(raw)
         .map(|p| p.to_string_lossy().into_owned())
-        .map_err(|e| super::tenant_handler::error_response(e))
+        .map_err(super::tenant_handler::error_response)
 }
 
 /// Convert a StorageError into an HTTP response

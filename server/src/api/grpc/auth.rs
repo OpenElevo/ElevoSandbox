@@ -30,6 +30,7 @@ pub enum GrpcIdentity {
     /// Admin (JWT authenticated)
     Admin,
     /// Tenant (API Key authenticated)
+    #[allow(dead_code)]
     Tenant { tenant_id: Uuid },
     /// Dev mode (no auth required)
     DevMode,

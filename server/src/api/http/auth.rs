@@ -279,7 +279,7 @@ pub(crate) fn extract_client_ip(
     } else {
         // Only trust proxy headers when the direct connection comes from a
         // configured trusted proxy IP.
-        direct_ip.map_or(false, |ip| {
+        direct_ip.is_some_and(|ip| {
             trusted_proxy_ips
                 .iter()
                 .any(|trusted| trusted.trim().parse::<std::net::IpAddr>().ok() == Some(ip))

@@ -218,6 +218,7 @@ pub async fn list_my_shares(
 }
 
 /// Helper: resolve tenant namespace storage ID from auth, or return FORBIDDEN response
+#[allow(clippy::result_large_err)]
 fn resolve_tenant_storage_id(auth: &AuthContext) -> Result<String, axum::response::Response> {
     match auth.tenant_id() {
         Some(id) => Ok(format!("namespaces/{}", id)),

@@ -73,12 +73,12 @@ impl WorkspaceRepository {
     pub async fn create(&self, params: CreateWorkspaceParams) -> Result<Workspace> {
         let id = Uuid::new_v4();
         let now = Utc::now();
-        let metadata = serde_json::to_value(&params.metadata.unwrap_or_default())
+        let metadata = serde_json::to_value(params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;
 
         let storage_type = params.storage_type.unwrap_or(StorageType::Managed);
         let storage_config = if storage_type == StorageType::Remote {
-            serde_json::to_value(&RemoteStorageConfig::default())
+            serde_json::to_value(RemoteStorageConfig::default())
                 .map_err(|e| Error::Internal(e.to_string()))?
         } else {
             serde_json::json!({})
