@@ -20,13 +20,13 @@ use crate::infra::storage::router::StorageRouter;
 use crate::infra::storage::StorageBackend;
 use crate::infra::tenant_repository::TenantRepository;
 use crate::infra::workspace_repository::WorkspaceRepository;
-use crate::service::api_key_usage::ApiKeyUsageTracker;
 use crate::proto::{
     client_message, client_storage_service_server::ClientStorageService, read_file_stream_request,
     server_storage_message, write_file_stream_response, ClientMessage, ReadFileStreamRequest,
     ReadFileStreamResponse, ServerStorageMessage, StorageHandshakeAck, StoragePing,
     WriteFileStreamDone, WriteFileStreamRequest, WriteFileStreamResponse,
 };
+use crate::service::api_key_usage::ApiKeyUsageTracker;
 
 /// gRPC ClientStorageService implementation
 pub struct ClientStorageServiceImpl {
@@ -187,15 +187,15 @@ impl ClientStorageService for ClientStorageServiceImpl {
             };
 
             // ── Step 2: Authenticate token (API Key) ──
-            let auth_result =
-                match verify_token(&tenant_repository, &api_key_usage, &token).await {
-                    Ok(result) => result,
-                    Err(msg) => {
-                        send_handshake_error(&out_tx_clone, format!("authentication failed: {}", msg)).await;
-                        warn!(workspace_id = %workspace_id, "Client storage authentication failed");
-                        return;
-                    }
-                };
+            let auth_result = match verify_token(&tenant_repository, &api_key_usage, &token).await {
+                Ok(result) => result,
+                Err(msg) => {
+                    send_handshake_error(&out_tx_clone, format!("authentication failed: {}", msg))
+                        .await;
+                    warn!(workspace_id = %workspace_id, "Client storage authentication failed");
+                    return;
+                }
+            };
 
             // Verify the tenant owns this workspace/namespace
             let AuthResult::ApiKey { ref tenant_id } = auth_result;
@@ -241,7 +241,10 @@ impl ClientStorageService for ClientStorageServiceImpl {
             if tenant.storage_type != crate::domain::workspace::StorageType::Remote {
                 send_handshake_error(
                     &out_tx_clone,
-                    format!("namespace '{}' is not configured for remote storage", workspace_id),
+                    format!(
+                        "namespace '{}' is not configured for remote storage",
+                        workspace_id
+                    ),
                 )
                 .await;
                 return;

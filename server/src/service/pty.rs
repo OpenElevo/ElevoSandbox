@@ -12,8 +12,7 @@ use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::postgres::SandboxRepository;
 
 fn parse_sandbox_id(sandbox_id: &str) -> Result<Uuid> {
-    Uuid::parse_str(sandbox_id)
-        .map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))
+    Uuid::parse_str(sandbox_id).map_err(|_| Error::InvalidParameter("Invalid sandbox ID".into()))
 }
 
 /// PTY service for managing interactive terminals

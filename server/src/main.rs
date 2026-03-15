@@ -34,6 +34,8 @@ use infra::fuse::mount::FuseMountManager;
 use infra::metrics;
 use infra::nfs::{NfsManager, NfsMode};
 use infra::postgres::SandboxRepository;
+use infra::share_permission_repository::SharePermissionRepository;
+use infra::share_repository::ShareRepository;
 use infra::storage::lease::PgLeaseManager;
 use infra::storage::local::LocalStorageBackend;
 use infra::storage::nfs_remote::RemoteNfsMountManager;
@@ -41,8 +43,6 @@ use infra::storage::remote::RemoteStoragePool;
 use infra::storage::router::StorageRouter;
 use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonitor};
 use infra::storage::StorageBackend;
-use infra::share_permission_repository::SharePermissionRepository;
-use infra::share_repository::ShareRepository;
 use infra::tenant_repository::TenantRepository;
 use infra::workspace_repository::WorkspaceRepository;
 use proto::client_storage_service_server::ClientStorageServiceServer;
@@ -347,7 +347,9 @@ async fn main() -> anyhow::Result<()> {
     // Initialize auth config
     let auth_config = AuthConfig::from_config(&config);
     if auth_config.dev_mode {
-        tracing::warn!("⚠️  ADMIN_PASSWORD not set — running in DEV MODE (all requests treated as admin)");
+        tracing::warn!(
+            "⚠️  ADMIN_PASSWORD not set — running in DEV MODE (all requests treated as admin)"
+        );
     }
 
     // Initialize namespace service

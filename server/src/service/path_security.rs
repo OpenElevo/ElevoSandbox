@@ -117,9 +117,18 @@ mod tests {
     #[test]
     fn test_normalize_path_basic() {
         assert_eq!(normalize_path("foo/bar").unwrap(), PathBuf::from("foo/bar"));
-        assert_eq!(normalize_path("./foo/bar").unwrap(), PathBuf::from("foo/bar"));
-        assert_eq!(normalize_path("/foo/bar").unwrap(), PathBuf::from("foo/bar"));
-        assert_eq!(normalize_path("foo//bar").unwrap(), PathBuf::from("foo/bar"));
+        assert_eq!(
+            normalize_path("./foo/bar").unwrap(),
+            PathBuf::from("foo/bar")
+        );
+        assert_eq!(
+            normalize_path("/foo/bar").unwrap(),
+            PathBuf::from("foo/bar")
+        );
+        assert_eq!(
+            normalize_path("foo//bar").unwrap(),
+            PathBuf::from("foo/bar")
+        );
     }
 
     #[test]
@@ -144,14 +153,20 @@ mod tests {
     fn test_sanitize_path_normal() {
         let root = Path::new("/data/namespaces/tenant1");
         let result = sanitize_path(root, "foo/bar.txt").unwrap();
-        assert_eq!(result, PathBuf::from("/data/namespaces/tenant1/foo/bar.txt"));
+        assert_eq!(
+            result,
+            PathBuf::from("/data/namespaces/tenant1/foo/bar.txt")
+        );
     }
 
     #[test]
     fn test_sanitize_path_with_leading_slash() {
         let root = Path::new("/data/namespaces/tenant1");
         let result = sanitize_path(root, "/foo/bar.txt").unwrap();
-        assert_eq!(result, PathBuf::from("/data/namespaces/tenant1/foo/bar.txt"));
+        assert_eq!(
+            result,
+            PathBuf::from("/data/namespaces/tenant1/foo/bar.txt")
+        );
     }
 
     #[test]

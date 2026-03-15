@@ -64,24 +64,17 @@ impl SharePermissionRepository {
     }
 
     /// Revoke permission for a tenant on a share
-    pub async fn revoke_permission(
-        &self,
-        share_id: Uuid,
-        tenant_id: Uuid,
-    ) -> Result<(), Error> {
-        let result = sqlx::query(
-            "DELETE FROM share_permissions WHERE share_id = $1 AND tenant_id = $2",
-        )
-        .bind(share_id)
-        .bind(tenant_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+    pub async fn revoke_permission(&self, share_id: Uuid, tenant_id: Uuid) -> Result<(), Error> {
+        let result =
+            sqlx::query("DELETE FROM share_permissions WHERE share_id = $1 AND tenant_id = $2")
+                .bind(share_id)
+                .bind(tenant_id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::WorkspaceNotFound(
-                "Permission not found".into(),
-            ));
+            return Err(Error::WorkspaceNotFound("Permission not found".into()));
         }
 
         Ok(())
@@ -109,10 +102,7 @@ impl SharePermissionRepository {
     }
 
     /// List all permissions for a share
-    pub async fn list_by_share(
-        &self,
-        share_id: Uuid,
-    ) -> Result<Vec<SharePermission>, Error> {
+    pub async fn list_by_share(&self, share_id: Uuid) -> Result<Vec<SharePermission>, Error> {
         let rows = sqlx::query_as::<_, PermissionRow>(
             "SELECT * FROM share_permissions WHERE share_id = $1 ORDER BY created_at",
         )
@@ -125,10 +115,7 @@ impl SharePermissionRepository {
     }
 
     /// List all permissions for a tenant
-    pub async fn list_by_tenant(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<SharePermission>, Error> {
+    pub async fn list_by_tenant(&self, tenant_id: Uuid) -> Result<Vec<SharePermission>, Error> {
         let rows = sqlx::query_as::<_, PermissionRow>(
             "SELECT * FROM share_permissions WHERE tenant_id = $1 ORDER BY created_at",
         )
@@ -167,9 +154,7 @@ impl SharePermissionRepository {
 
         match row {
             Some(r) => Ok(r.into()),
-            None => Err(Error::WorkspaceNotFound(
-                "Permission not found".to_string(),
-            )),
+            None => Err(Error::WorkspaceNotFound("Permission not found".to_string())),
         }
     }
 }

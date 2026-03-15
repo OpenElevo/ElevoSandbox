@@ -27,12 +27,8 @@ impl AuditService {
         detail: serde_json::Value,
     ) {
         let (actor_type, actor_id) = match &auth.identity {
-            crate::domain::auth::Identity::Admin { .. } => {
-                ("admin".to_string(), None)
-            }
-            crate::domain::auth::Identity::Tenant { id, .. } => {
-                ("tenant".to_string(), Some(*id))
-            }
+            crate::domain::auth::Identity::Admin { .. } => ("admin".to_string(), None),
+            crate::domain::auth::Identity::Tenant { id, .. } => ("tenant".to_string(), Some(*id)),
         };
 
         let ip_address = auth.ip_address.map(|ip| ip.to_string());

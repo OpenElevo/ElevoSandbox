@@ -36,9 +36,7 @@ fn resolve_share_path(
     let full_path = path_security::sanitize_share_path(namespace_root, source_path, user_path)?;
     // Strip the namespace_root prefix to get the path relative to the namespace,
     // which is what workspace_service expects.
-    let relative = full_path
-        .strip_prefix(namespace_root)
-        .unwrap_or(&full_path);
+    let relative = full_path.strip_prefix(namespace_root).unwrap_or(&full_path);
     Ok(relative.to_string_lossy().into_owned())
 }
 
@@ -68,7 +66,9 @@ pub async fn read_share_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let ns_root = state
+        .namespace_service
+        .namespace_path(share.owner_tenant_id);
     let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
         Ok(p) => p,
         Err(e) => return super::tenant_handler::error_response(e),
@@ -120,26 +120,28 @@ pub async fn write_share_file(
 
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 1024 * 10).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
     let req: WriteFileRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}})),
-            )
-                .into_response()
-        }
+        Err(e) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}}),
+            ),
+        )
+            .into_response(),
     };
 
-    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let ns_root = state
+        .namespace_service
+        .namespace_path(share.owner_tenant_id);
     let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
         Ok(p) => p,
         Err(e) => return super::tenant_handler::error_response(e),
@@ -187,7 +189,9 @@ pub async fn delete_share_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let ns_root = state
+        .namespace_service
+        .namespace_path(share.owner_tenant_id);
     let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
         Ok(p) => p,
         Err(e) => return super::tenant_handler::error_response(e),
@@ -199,7 +203,9 @@ pub async fn delete_share_file(
 
     let result = match storage.stat(&storage_id, &effective_path).await {
         Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {
-            storage.remove_dir(&storage_id, &effective_path, recursive).await
+            storage
+                .remove_dir(&storage_id, &effective_path, recursive)
+                .await
         }
         Ok(_) => storage.remove_file(&storage_id, &effective_path).await,
         Err(e) => Err(e),
@@ -241,7 +247,9 @@ pub async fn list_share_files(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let ns_root = state.namespace_service.namespace_path(share.owner_tenant_id);
+    let ns_root = state
+        .namespace_service
+        .namespace_path(share.owner_tenant_id);
     let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
         Ok(p) => p,
         Err(e) => return super::tenant_handler::error_response(e),

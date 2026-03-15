@@ -35,9 +35,7 @@ pub struct ApiKey {
 impl ApiKey {
     /// Check if this key has expired
     pub fn is_expired(&self) -> bool {
-        self.expires_at
-            .map(|exp| exp < Utc::now())
-            .unwrap_or(false)
+        self.expires_at.map(|exp| exp < Utc::now()).unwrap_or(false)
     }
 
     /// Check if this key is usable (active and not expired)

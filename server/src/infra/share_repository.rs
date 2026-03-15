@@ -4,10 +4,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::share::{
-    CreateShareParams, Share, ShareFilter, UpdateShareParams,
-};
-use crate::domain::tenant::{Pagination, PaginatedResult};
+use crate::domain::share::{CreateShareParams, Share, ShareFilter, UpdateShareParams};
+use crate::domain::tenant::{PaginatedResult, Pagination};
 use crate::error::Error;
 
 #[derive(Clone)]
@@ -36,10 +34,8 @@ impl From<ShareRow> for Share {
             name: row.name,
             source_path: row.source_path,
             description: row.description,
-            visibility: crate::domain::share::Visibility::from_str_value(
-                &row.visibility,
-            )
-            .unwrap_or(crate::domain::share::Visibility::Private),
+            visibility: crate::domain::share::Visibility::from_str_value(&row.visibility)
+                .unwrap_or(crate::domain::share::Visibility::Private),
             metadata: row.metadata,
             created_at: row.created_at,
             updated_at: row.updated_at,
@@ -52,11 +48,9 @@ impl ShareRepository {
         Self { pool }
     }
 
-    pub async fn create_share(
-        &self,
-        params: &CreateShareParams,
-    ) -> Result<Share, Error> {
-        let owner_id = params.owner_tenant_id
+    pub async fn create_share(&self, params: &CreateShareParams) -> Result<Share, Error> {
+        let owner_id = params
+            .owner_tenant_id
             .ok_or_else(|| Error::InvalidParameter("owner_tenant_id is required".into()))?;
         let visibility = params.visibility.as_deref().unwrap_or("private");
         let description = params.description.as_deref().unwrap_or("");
@@ -84,12 +78,9 @@ impl ShareRepository {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| match e {
-            sqlx::Error::Database(ref db_err)
-                if db_err.constraint().is_some() =>
-            {
+            sqlx::Error::Database(ref db_err) if db_err.constraint().is_some() => {
                 Error::InvalidParameter(
-                    "Share with this name or path already exists for this tenant"
-                        .into(),
+                    "Share with this name or path already exists for this tenant".into(),
                 )
             }
             _ => Error::Internal(format!("Failed to create share: {}", e)),
@@ -99,16 +90,12 @@ impl ShareRepository {
     }
 
     pub async fn get_share(&self, id: Uuid) -> Result<Share, Error> {
-        let row = sqlx::query_as::<_, ShareRow>(
-            "SELECT * FROM shares WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?
-        .ok_or_else(|| {
-            Error::WorkspaceNotFound(format!("Share {} not found", id))
-        })?;
+        let row = sqlx::query_as::<_, ShareRow>("SELECT * FROM shares WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| Error::Internal(format!("DB error: {}", e)))?
+            .ok_or_else(|| Error::WorkspaceNotFound(format!("Share {} not found", id)))?;
 
         Ok(row.into())
     }
@@ -157,14 +144,15 @@ impl ShareRepository {
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         let items = rows.into_iter().map(Share::from).collect();
-        Ok(PaginatedResult { items, total, page, page_size: per_page })
+        Ok(PaginatedResult {
+            items,
+            total,
+            page,
+            page_size: per_page,
+        })
     }
 
-    pub async fn update_share(
-        &self,
-        id: Uuid,
-        params: UpdateShareParams,
-    ) -> Result<Share, Error> {
+    pub async fn update_share(&self, id: Uuid, params: UpdateShareParams) -> Result<Share, Error> {
         // Get current share
         let current = self.get_share(id).await?;
 
@@ -212,7 +200,10 @@ impl ShareRepository {
         }
 
         // Delete in a transaction: clean up mounts, permissions, then the share
-        let mut tx = self.pool.begin().await
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         // Delete all sandbox mounts for this share (including stopped/error ones)
@@ -237,13 +228,11 @@ impl ShareRepository {
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::WorkspaceNotFound(format!(
-                "Share {} not found",
-                id
-            )));
+            return Err(Error::WorkspaceNotFound(format!("Share {} not found", id)));
         }
 
-        tx.commit().await
+        tx.commit()
+            .await
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         Ok(())
@@ -251,10 +240,7 @@ impl ShareRepository {
 
     /// List shares accessible by a specific tenant.
     /// Excludes shares owned by deactivated tenants.
-    pub async fn list_accessible_shares(
-        &self,
-        tenant_id: Uuid,
-    ) -> Result<Vec<Share>, Error> {
+    pub async fn list_accessible_shares(&self, tenant_id: Uuid) -> Result<Vec<Share>, Error> {
         let rows = sqlx::query_as::<_, ShareRow>(
             r#"SELECT DISTINCT s.* FROM shares s
                JOIN tenants t ON t.id = s.owner_tenant_id
@@ -315,6 +301,11 @@ impl ShareRepository {
             .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         let items = rows.into_iter().map(Share::from).collect();
-        Ok(PaginatedResult { items, total, page, page_size: per_page })
+        Ok(PaginatedResult {
+            items,
+            total,
+            page,
+            page_size: per_page,
+        })
     }
 }

@@ -90,7 +90,9 @@ pub async fn grant_permission(
 
     let level = match PermissionLevel::from_str_value(&req.permission) {
         Some(l) => l,
-        None => return bad_request("Invalid permission level. Must be: read, write, execute, admin"),
+        None => {
+            return bad_request("Invalid permission level. Must be: read, write, execute, admin")
+        }
     };
 
     let tenant_uuid = match Uuid::parse_str(&req.tenant_id) {
@@ -228,7 +230,11 @@ pub async fn revoke_permission(
     {
         Ok(()) => {
             state.audit_service.log(
-                &auth, "permission.revoke", "permission", share_uuid, &share_name,
+                &auth,
+                "permission.revoke",
+                "permission",
+                share_uuid,
+                &share_name,
                 serde_json::json!({"share_id": share_uuid, "tenant_id": tenant_id}),
             );
             StatusCode::NO_CONTENT.into_response()

@@ -73,23 +73,18 @@ impl SandboxService {
             let share = self.share_repo.get_share(mount.share_id).await?;
 
             // Permission check: caller must have at least Read on the share
-            let perm_level = self
-                .resolve_mount_permission(namespace_id, &share)
-                .await?;
+            let perm_level = self.resolve_mount_permission(namespace_id, &share).await?;
 
-            let host_path = self.config.get_share_host_path(
-                &share.owner_tenant_id.to_string(),
-                &share.source_path,
-            );
+            let host_path = self
+                .config
+                .get_share_host_path(&share.owner_tenant_id.to_string(), &share.source_path);
             // Validate mount_path is absolute and doesn't conflict with /workspace
             if !mount.mount_path.starts_with('/') {
                 return Err(Error::InvalidParameter(
                     "mount_path must be an absolute path".into(),
                 ));
             }
-            if mount.mount_path == "/workspace"
-                || mount.mount_path.starts_with("/workspace/")
-            {
+            if mount.mount_path == "/workspace" || mount.mount_path.starts_with("/workspace/") {
                 return Err(Error::InvalidParameter(
                     "mount_path cannot overlap with /workspace".into(),
                 ));
@@ -112,17 +107,19 @@ impl SandboxService {
         let mut env = params.env.unwrap_or_default();
 
         env.insert("WORKSPACE_SANDBOX_ID".to_string(), sandbox_id_str.clone());
-        env.insert("WORKSPACE_NAMESPACE_ID".to_string(), namespace_id.to_string());
+        env.insert(
+            "WORKSPACE_NAMESPACE_ID".to_string(),
+            namespace_id.to_string(),
+        );
         env.insert(
             "WORKSPACE_SERVER_ADDR".to_string(),
             self.config.agent_server_addr.clone(),
         );
 
         // Primary volume: namespace root_path → /workspace
-        let volume_host_path = self.config.get_namespace_workspace_host_path(
-            &namespace_id.to_string(),
-            &params.root_path,
-        );
+        let volume_host_path = self
+            .config
+            .get_namespace_workspace_host_path(&namespace_id.to_string(), &params.root_path);
         let mut volumes = HashMap::new();
         volumes.insert(volume_host_path, "/workspace".to_string());
 
@@ -138,7 +135,10 @@ impl SandboxService {
 
         let mut labels = HashMap::new();
         labels.insert(SANDBOX_LABEL_KEY.to_string(), sandbox_id_str.clone());
-        labels.insert("workspace.namespace.id".to_string(), namespace_id.to_string());
+        labels.insert(
+            "workspace.namespace.id".to_string(),
+            namespace_id.to_string(),
+        );
 
         let network_mode = self
             .config

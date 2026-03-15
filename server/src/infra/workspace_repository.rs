@@ -34,14 +34,12 @@ impl TryFrom<WorkspaceRow> for Workspace {
         let storage_type = StorageType::from_str(&row.storage_type)
             .map_err(|e| Error::Internal(format!("Failed to parse storage_type: {}", e)))?;
 
-        let storage_config: RemoteStorageConfig =
-            if row.storage_config == serde_json::json!({}) {
-                RemoteStorageConfig::default()
-            } else {
-                serde_json::from_value(row.storage_config).map_err(|e| {
-                    Error::Internal(format!("Failed to parse storage_config: {}", e))
-                })?
-            };
+        let storage_config: RemoteStorageConfig = if row.storage_config == serde_json::json!({}) {
+            RemoteStorageConfig::default()
+        } else {
+            serde_json::from_value(row.storage_config)
+                .map_err(|e| Error::Internal(format!("Failed to parse storage_config: {}", e)))?
+        };
 
         if let Err(e) = storage_config.validate() {
             return Err(Error::Internal(format!("Invalid storage_config: {}", e)));
@@ -107,8 +105,7 @@ impl WorkspaceRepository {
 
     /// Get a workspace by ID
     pub async fn get(&self, id: &str) -> Result<Workspace> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+        let uuid = Uuid::parse_str(id).map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
 
         let row: WorkspaceRow = sqlx::query_as(
             r#"
@@ -142,8 +139,7 @@ impl WorkspaceRepository {
 
     /// Update workspace NFS URL
     pub async fn update_nfs_url(&self, id: &str, nfs_url: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+        let uuid = Uuid::parse_str(id).map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
         let now = Utc::now();
 
         let result = sqlx::query(
@@ -168,8 +164,7 @@ impl WorkspaceRepository {
 
     /// Delete a workspace
     pub async fn delete(&self, id: &str) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+        let uuid = Uuid::parse_str(id).map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
 
         let result = sqlx::query("DELETE FROM workspaces WHERE id = $1")
             .bind(uuid)
@@ -189,8 +184,7 @@ impl WorkspaceRepository {
         id: &str,
         config: &RemoteStorageConfig,
     ) -> Result<()> {
-        let uuid = Uuid::parse_str(id)
-            .map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
+        let uuid = Uuid::parse_str(id).map_err(|_| Error::WorkspaceNotFound(id.to_string()))?;
         let config_json = serde_json::to_value(config)
             .map_err(|e| Error::Internal(format!("Failed to serialize storage_config: {}", e)))?;
         let now = Utc::now();

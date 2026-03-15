@@ -104,7 +104,9 @@ impl SandboxService for GrpcSandboxService {
 
         // workspace_id in proto is used as namespace_id
         let namespace_id = if req.workspace_id.is_empty() {
-            return Err(Status::invalid_argument("workspace_id (namespace_id) is required"));
+            return Err(Status::invalid_argument(
+                "workspace_id (namespace_id) is required",
+            ));
         } else {
             Uuid::parse_str(&req.workspace_id)
                 .map_err(|_| Status::invalid_argument("invalid workspace_id (namespace_id)"))?
@@ -143,9 +145,13 @@ impl SandboxService for GrpcSandboxService {
         let req = request.into_inner();
         debug!(id = %req.id, "get_sandbox");
 
-        let sandbox_id = Uuid::parse_str(&req.id)
-            .map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
-        let sandbox = self.service.get(sandbox_id).await.map_err(error_to_status)?;
+        let sandbox_id =
+            Uuid::parse_str(&req.id).map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
+        let sandbox = self
+            .service
+            .get(sandbox_id)
+            .await
+            .map_err(error_to_status)?;
 
         Ok(Response::new(GetSandboxResponse {
             sandbox: Some(sandbox_to_proto(sandbox)),
@@ -181,8 +187,8 @@ impl SandboxService for GrpcSandboxService {
         let req = request.into_inner();
         debug!(id = %req.id, force = req.force, "delete_sandbox");
 
-        let sandbox_id = Uuid::parse_str(&req.id)
-            .map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
+        let sandbox_id =
+            Uuid::parse_str(&req.id).map_err(|_| Status::invalid_argument("invalid sandbox ID"))?;
         self.service
             .delete(sandbox_id, req.force)
             .await

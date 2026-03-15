@@ -21,10 +21,7 @@ pub struct LoginResponse {
 }
 
 /// POST /api/v1/auth/login
-pub async fn login(
-    State(state): State<AppState>,
-    request: Request,
-) -> impl IntoResponse {
+pub async fn login(State(state): State<AppState>, request: Request) -> impl IntoResponse {
     // Extract client IP for JWT claims, honouring the trusted-proxy allowlist
     let ip = super::auth::extract_client_ip(&request, &state.config.trusted_proxy_ips)
         .map(|addr| addr.to_string());

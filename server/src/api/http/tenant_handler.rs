@@ -10,9 +10,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
-use crate::domain::tenant::{
-    CreateTenantParams, Pagination, TenantFilter, UpdateTenantParams,
-};
+use crate::domain::tenant::{CreateTenantParams, Pagination, TenantFilter, UpdateTenantParams};
 use crate::AppState;
 
 /// Helper to extract AuthContext from request extensions
@@ -54,7 +52,11 @@ pub async fn list_tenants(
         return e.into_response();
     }
 
-    match state.tenant_repository.list_tenants(filter, pagination).await {
+    match state
+        .tenant_repository
+        .list_tenants(filter, pagination)
+        .await
+    {
         Ok(result) => (StatusCode::OK, Json(result)).into_response(),
         Err(e) => error_response(e),
     }
@@ -89,8 +91,16 @@ pub async fn create_tenant(
     match state.tenant_repository.create_tenant(params).await {
         Ok((tenant, api_key)) => {
             // Create namespace directory — roll back tenant on failure
-            if let Err(e) = state.namespace_service.create_namespace_dir(tenant.id).await {
-                tracing::error!("Failed to create namespace dir for tenant {}: {}", tenant.id, e);
+            if let Err(e) = state
+                .namespace_service
+                .create_namespace_dir(tenant.id)
+                .await
+            {
+                tracing::error!(
+                    "Failed to create namespace dir for tenant {}: {}",
+                    tenant.id,
+                    e
+                );
                 if let Err(del_err) = state.tenant_repository.delete_tenant(tenant.id, true).await {
                     tracing::error!("Failed to roll back tenant creation: {}", del_err);
                 }
@@ -102,7 +112,11 @@ pub async fn create_tenant(
             }
 
             state.audit_service.log(
-                &auth, "tenant.create", "tenant", tenant.id, &tenant.name,
+                &auth,
+                "tenant.create",
+                "tenant",
+                tenant.id,
+                &tenant.name,
                 serde_json::json!({}),
             );
 
@@ -142,7 +156,11 @@ pub async fn get_tenant(
     };
 
     match state.tenant_repository.get_tenant(tenant_id).await {
-        Ok(tenant) => (StatusCode::OK, Json(serde_json::json!({ "tenant": tenant }))).into_response(),
+        Ok(tenant) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "tenant": tenant })),
+        )
+            .into_response(),
         Err(e) => error_response(e),
     }
 }
@@ -175,13 +193,25 @@ pub async fn update_tenant(
         Err(e) => return bad_request(&format!("Invalid JSON: {}", e)),
     };
 
-    match state.tenant_repository.update_tenant(tenant_id, params).await {
+    match state
+        .tenant_repository
+        .update_tenant(tenant_id, params)
+        .await
+    {
         Ok(tenant) => {
             state.audit_service.log(
-                &auth, "tenant.update", "tenant", tenant.id, &tenant.name,
+                &auth,
+                "tenant.update",
+                "tenant",
+                tenant.id,
+                &tenant.name,
                 serde_json::json!({}),
             );
-            (StatusCode::OK, Json(serde_json::json!({ "tenant": tenant }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "tenant": tenant })),
+            )
+                .into_response()
         }
         Err(e) => error_response(e),
     }
@@ -209,10 +239,18 @@ pub async fn activate_tenant(
     match state.tenant_repository.activate_tenant(tenant_id).await {
         Ok(tenant) => {
             state.audit_service.log(
-                &auth, "tenant.update", "tenant", tenant.id, &tenant.name,
+                &auth,
+                "tenant.update",
+                "tenant",
+                tenant.id,
+                &tenant.name,
                 serde_json::json!({"is_active": true}),
             );
-            (StatusCode::OK, Json(serde_json::json!({ "tenant": tenant }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "tenant": tenant })),
+            )
+                .into_response()
         }
         Err(e) => error_response(e),
     }
@@ -240,10 +278,18 @@ pub async fn deactivate_tenant(
     match state.tenant_repository.deactivate_tenant(tenant_id).await {
         Ok(tenant) => {
             state.audit_service.log(
-                &auth, "tenant.update", "tenant", tenant.id, &tenant.name,
+                &auth,
+                "tenant.update",
+                "tenant",
+                tenant.id,
+                &tenant.name,
                 serde_json::json!({"is_active": false}),
             );
-            (StatusCode::OK, Json(serde_json::json!({ "tenant": tenant }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "tenant": tenant })),
+            )
+                .into_response()
         }
         Err(e) => error_response(e),
     }
@@ -281,14 +327,30 @@ pub async fn delete_tenant(
         Err(e) => return error_response(e),
     };
 
-    match state.tenant_repository.delete_tenant(tenant_id, query.force).await {
+    match state
+        .tenant_repository
+        .delete_tenant(tenant_id, query.force)
+        .await
+    {
         Ok(()) => {
             // Soft-delete namespace directory
-            if let Err(e) = state.namespace_service.delete_namespace_dir(tenant_id).await {
-                tracing::error!("Failed to trash namespace dir for tenant {}: {}", tenant_id, e);
+            if let Err(e) = state
+                .namespace_service
+                .delete_namespace_dir(tenant_id)
+                .await
+            {
+                tracing::error!(
+                    "Failed to trash namespace dir for tenant {}: {}",
+                    tenant_id,
+                    e
+                );
             }
             state.audit_service.log(
-                &auth, "tenant.delete", "tenant", tenant_id, &tenant_name,
+                &auth,
+                "tenant.delete",
+                "tenant",
+                tenant_id,
+                &tenant_name,
                 serde_json::json!({"force": query.force}),
             );
             StatusCode::NO_CONTENT.into_response()
@@ -302,7 +364,11 @@ fn bad_request(msg: &str) -> axum::response::Response {
 }
 
 /// Build a plain error response from explicit status, code, and message strings.
-fn simple_error_response(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+fn simple_error_response(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+) -> axum::response::Response {
     (
         status,
         Json(serde_json::json!({
@@ -321,11 +387,14 @@ pub fn error_response(e: crate::error::Error) -> axum::response::Response {
         crate::error::Error::InvalidParameter(_)
         | crate::error::Error::InvalidRequest(_)
         | crate::error::Error::InvalidPath(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
-        crate::error::Error::WorkspaceHasActiveSandboxes => (StatusCode::CONFLICT, "HAS_ACTIVE_SANDBOXES"),
+        crate::error::Error::WorkspaceHasActiveSandboxes => {
+            (StatusCode::CONFLICT, "HAS_ACTIVE_SANDBOXES")
+        }
         crate::error::Error::HasActiveShares => (StatusCode::CONFLICT, "HAS_ACTIVE_SHARES"),
         crate::error::Error::HasActiveApiKeys(_) => (StatusCode::CONFLICT, "HAS_ACTIVE_API_KEYS"),
-        crate::error::Error::PermissionDenied(_)
-        | crate::error::Error::PathNotAllowed(_) => (StatusCode::FORBIDDEN, "PERMISSION_DENIED"),
+        crate::error::Error::PermissionDenied(_) | crate::error::Error::PathNotAllowed(_) => {
+            (StatusCode::FORBIDDEN, "PERMISSION_DENIED")
+        }
         crate::error::Error::FileAlreadyExists(_)
         | crate::error::Error::SandboxAlreadyExists(_) => (StatusCode::CONFLICT, "CONFLICT"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL_ERROR"),

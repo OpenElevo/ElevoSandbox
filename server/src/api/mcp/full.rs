@@ -186,12 +186,7 @@ impl FullMcpHandler {
         };
 
         let force = params.force.unwrap_or(false);
-        match self
-            .state
-            .sandbox_service
-            .delete(sandbox_uuid, force)
-            .await
-        {
+        match self.state.sandbox_service.delete(sandbox_uuid, force).await {
             Ok(_) => format!("Sandbox {} deleted successfully", params.sandbox_id),
             Err(e) => {
                 error!("MCP[full]: sandbox_delete failed: {}", e);

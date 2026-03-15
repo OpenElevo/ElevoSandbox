@@ -88,17 +88,34 @@ mod tests {
 
     #[test]
     fn test_from_str_value() {
-        assert_eq!(PermissionLevel::from_str_value("read"), Some(PermissionLevel::Read));
-        assert_eq!(PermissionLevel::from_str_value("write"), Some(PermissionLevel::Write));
-        assert_eq!(PermissionLevel::from_str_value("execute"), Some(PermissionLevel::Execute));
-        assert_eq!(PermissionLevel::from_str_value("admin"), Some(PermissionLevel::Admin));
+        assert_eq!(
+            PermissionLevel::from_str_value("read"),
+            Some(PermissionLevel::Read)
+        );
+        assert_eq!(
+            PermissionLevel::from_str_value("write"),
+            Some(PermissionLevel::Write)
+        );
+        assert_eq!(
+            PermissionLevel::from_str_value("execute"),
+            Some(PermissionLevel::Execute)
+        );
+        assert_eq!(
+            PermissionLevel::from_str_value("admin"),
+            Some(PermissionLevel::Admin)
+        );
         assert_eq!(PermissionLevel::from_str_value("unknown"), None);
         assert_eq!(PermissionLevel::from_str_value(""), None);
     }
 
     #[test]
     fn test_as_str_roundtrip() {
-        for level in [PermissionLevel::Read, PermissionLevel::Write, PermissionLevel::Execute, PermissionLevel::Admin] {
+        for level in [
+            PermissionLevel::Read,
+            PermissionLevel::Write,
+            PermissionLevel::Execute,
+            PermissionLevel::Admin,
+        ] {
             assert_eq!(PermissionLevel::from_str_value(level.as_str()), Some(level));
         }
     }

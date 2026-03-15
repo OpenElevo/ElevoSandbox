@@ -34,13 +34,13 @@ pub async fn create_share(
     // Determine owner: admin must specify, tenant uses own ID
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 64).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
 
     let mut params: CreateShareParams = match serde_json::from_slice(&body) {
@@ -101,7 +101,11 @@ pub async fn create_share(
     match state.share_repository.create_share(&params).await {
         Ok(share) => {
             state.audit_service.log(
-                &auth, "share.create", "share", share.id, &share.name,
+                &auth,
+                "share.create",
+                "share",
+                share.id,
+                &share.name,
                 serde_json::json!({"source_path": share.source_path}),
             );
             (
@@ -206,11 +210,7 @@ pub async fn get_share(
     }
 
     match state.share_repository.get_share(share_id).await {
-        Ok(share) => (
-            StatusCode::OK,
-            Json(serde_json::json!({"share": share})),
-        )
-            .into_response(),
+        Ok(share) => (StatusCode::OK, Json(serde_json::json!({"share": share}))).into_response(),
         Err(e) => super::tenant_handler::error_response(e),
     }
 }
@@ -257,26 +257,26 @@ pub async fn update_share(
     };
     let params: UpdateShareParams = match serde_json::from_slice(&body) {
         Ok(p) => p,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}})),
-            )
-                .into_response()
-        }
+        Err(e) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}}),
+            ),
+        )
+            .into_response(),
     };
 
     match state.share_repository.update_share(share_id, params).await {
         Ok(share) => {
             state.audit_service.log(
-                &auth, "share.update", "share", share.id, &share.name,
+                &auth,
+                "share.update",
+                "share",
+                share.id,
+                &share.name,
                 serde_json::json!({}),
             );
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({"share": share})),
-            )
-                .into_response()
+            (StatusCode::OK, Json(serde_json::json!({"share": share}))).into_response()
         }
         Err(e) => super::tenant_handler::error_response(e),
     }
@@ -321,7 +321,11 @@ pub async fn delete_share(
     match state.share_repository.delete_share(share_id).await {
         Ok(()) => {
             state.audit_service.log(
-                &auth, "share.delete", "share", share_id, &share_name,
+                &auth,
+                "share.delete",
+                "share",
+                share_id,
+                &share_name,
                 serde_json::json!({}),
             );
             StatusCode::NO_CONTENT.into_response()

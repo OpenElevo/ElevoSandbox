@@ -238,9 +238,9 @@ impl Error {
             | Error::PtyNotFound(_)
             | Error::TemplateNotFound(_) => StatusCode::NOT_FOUND,
 
-            Error::SandboxAlreadyExists(_)
-            | Error::FileAlreadyExists(_)
-            | Error::Conflict(_) => StatusCode::CONFLICT,
+            Error::SandboxAlreadyExists(_) | Error::FileAlreadyExists(_) | Error::Conflict(_) => {
+                StatusCode::CONFLICT
+            }
 
             Error::WorkspaceHasActiveSandboxes
             | Error::HasActiveShares

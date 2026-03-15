@@ -96,18 +96,17 @@ pub async fn create_api_key(
                 .into_response()
         }
     };
-    let params: CreateApiKeyParams = match serde_json::from_slice(&body) {
-        Ok(p) => p,
-        Err(e) => {
-            return (
+    let params: CreateApiKeyParams =
+        match serde_json::from_slice(&body) {
+            Ok(p) => p,
+            Err(e) => return (
                 StatusCode::BAD_REQUEST,
                 Json(serde_json::json!({
                     "error": { "code": "BAD_REQUEST", "message": format!("Invalid JSON: {}", e) }
                 })),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     if params.name.trim().is_empty() {
         return (
@@ -126,7 +125,11 @@ pub async fn create_api_key(
     {
         Ok((key, token)) => {
             state.audit_service.log(
-                &auth, "api_key.create", "api_key", key.id, &key.name,
+                &auth,
+                "api_key.create",
+                "api_key",
+                key.id,
+                &key.name,
                 serde_json::json!({"tenant_id": tenant_id}),
             );
             (
@@ -199,7 +202,11 @@ pub async fn revoke_api_key(
     match state.tenant_repository.revoke_api_key(key_uuid).await {
         Ok(()) => {
             state.audit_service.log(
-                &auth, "api_key.revoke", "api_key", key_uuid, &key_name,
+                &auth,
+                "api_key.revoke",
+                "api_key",
+                key_uuid,
+                &key_name,
                 serde_json::json!({"tenant_id": tenant_id}),
             );
             StatusCode::NO_CONTENT.into_response()

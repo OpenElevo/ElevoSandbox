@@ -5,7 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::audit::{AuditLog, AuditLogFilter, CreateAuditLogParams};
-use crate::domain::tenant::{Pagination, PaginatedResult};
+use crate::domain::tenant::{PaginatedResult, Pagination};
 use crate::error::Error;
 
 #[derive(Clone)]
@@ -92,11 +92,10 @@ impl AuditRepository {
             || filter.to.is_some();
 
         let (rows, total) = if !has_filters {
-            let count: (i64,) =
-                sqlx::query_as("SELECT COUNT(*) FROM audit_logs")
-                    .fetch_one(&self.pool)
-                    .await
-                    .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+            let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_logs")
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
             let rows: Vec<AuditLogRow> = sqlx::query_as(
                 "SELECT id, actor_type, actor_id, action, resource_type, resource_id, resource_name, detail, ip_address::text, created_at FROM audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2",
             )
@@ -111,7 +110,12 @@ impl AuditRepository {
         };
 
         let items = rows.into_iter().map(AuditLog::from).collect();
-        Ok(PaginatedResult { items, total, page, page_size: per_page })
+        Ok(PaginatedResult {
+            items,
+            total,
+            page,
+            page_size: per_page,
+        })
     }
 
     async fn list_filtered(

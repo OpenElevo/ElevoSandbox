@@ -47,7 +47,9 @@ impl AuthConfig {
                 if !self.dev_mode {
                     // This should not happen — config validation should catch it.
                     // Log a loud warning so operators notice immediately.
-                    warn!("JWT_SECRET is not configured in production mode! Using insecure fallback.");
+                    warn!(
+                        "JWT_SECRET is not configured in production mode! Using insecure fallback."
+                    );
                 }
                 b"dev-secret-do-not-use-in-production"
             }
@@ -241,10 +243,7 @@ fn authenticate_jwt(
     let refreshed = if config.should_refresh(&claims) {
         debug!("JWT token nearing expiry, issuing refresh");
         config
-            .create_admin_token_with_session(
-                claims.session_id,
-                ip_address.map(|ip| ip.to_string()),
-            )
+            .create_admin_token_with_session(claims.session_id, ip_address.map(|ip| ip.to_string()))
             .ok()
     } else {
         None
@@ -363,7 +362,9 @@ mod tests {
             .create_admin_token(Some("127.0.0.1".to_string()))
             .expect("Failed to create token");
 
-        let claims = config.verify_jwt_public(&token).expect("Failed to verify token");
+        let claims = config
+            .verify_jwt_public(&token)
+            .expect("Failed to verify token");
         assert_eq!(claims.sub, "admin");
         assert_eq!(claims.login_ip, Some("127.0.0.1".to_string()));
     }
@@ -371,7 +372,9 @@ mod tests {
     #[test]
     fn test_jwt_invalid_secret_fails() {
         let config = test_config();
-        let token = config.create_admin_token(None).expect("Failed to create token");
+        let token = config
+            .create_admin_token(None)
+            .expect("Failed to create token");
 
         let other_config = AuthConfig {
             jwt_secret: Some("different-secret-at-least-32-bytes-long!!".to_string()),
@@ -483,10 +486,7 @@ mod tests {
                 StatusCode::UNAUTHORIZED,
             ),
             (AuthError::TokenExpired, StatusCode::UNAUTHORIZED),
-            (
-                AuthError::Forbidden("nope".into()),
-                StatusCode::FORBIDDEN,
-            ),
+            (AuthError::Forbidden("nope".into()), StatusCode::FORBIDDEN),
             (AuthError::TenantDeactivated, StatusCode::FORBIDDEN),
             (AuthError::ApiKeyInvalid, StatusCode::UNAUTHORIZED),
             (

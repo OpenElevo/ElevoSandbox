@@ -67,23 +67,16 @@ impl AuthContext {
         if self.is_admin() {
             Ok(())
         } else {
-            Err(AuthError::Forbidden(
-                "admin access required".to_string(),
-            ))
+            Err(AuthError::Forbidden("admin access required".to_string()))
         }
     }
 
     /// Require namespace ownership or admin
-    pub fn require_namespace_access(
-        &self,
-        namespace_id: &Uuid,
-    ) -> Result<(), AuthError> {
+    pub fn require_namespace_access(&self, namespace_id: &Uuid) -> Result<(), AuthError> {
         if self.is_namespace_owner(namespace_id) {
             Ok(())
         } else {
-            Err(AuthError::Forbidden(
-                "namespace access denied".to_string(),
-            ))
+            Err(AuthError::Forbidden("namespace access denied".to_string()))
         }
     }
 }

@@ -19,16 +19,17 @@ pub async fn list_audit_logs(
     Query(pagination): Query<Pagination>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     if !auth.is_admin() {
         return (

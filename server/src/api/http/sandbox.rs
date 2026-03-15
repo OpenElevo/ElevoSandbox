@@ -96,37 +96,38 @@ pub async fn create_sandbox(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 64).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
 
     let req: CreateSandboxRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}})),
-            )
-                .into_response()
-        }
+        Err(e) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}}),
+            ),
+        )
+            .into_response(),
     };
 
     // Determine namespace_id: tenant uses own ID, admin must specify
@@ -208,16 +209,17 @@ pub async fn get_sandbox(
     Path(id): Path<String>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let sandbox_id = match Uuid::parse_str(&id) {
         Ok(u) => u,
@@ -246,7 +248,11 @@ pub async fn get_sandbox(
         }
     }
 
-    (StatusCode::OK, Json(serde_json::json!(sandbox_to_response(sandbox)))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!(sandbox_to_response(sandbox))),
+    )
+        .into_response()
 }
 
 /// List all sandboxes
@@ -255,16 +261,17 @@ pub async fn list_sandboxes(
     Query(query): Query<ListQuery>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let state_filter = query.state.as_deref().and_then(|s| match s {
         "starting" => Some(SandboxState::Starting),
@@ -380,37 +387,38 @@ pub async fn batch_delete_sandboxes(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 64).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
 
     let req: BatchDeleteRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}})),
-            )
-                .into_response()
-        }
+        Err(e) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": format!("{}", e)}}),
+            ),
+        )
+            .into_response(),
     };
 
     // Validate: ids and filter are mutually exclusive
@@ -484,7 +492,10 @@ pub async fn batch_delete_sandboxes(
                 let mut filtered: Vec<_> = sandboxes.into_iter().collect();
                 // Limit to 100
                 filtered.truncate(100);
-                filtered.iter().map(|sb| (sb.id, sb.id.to_string())).collect()
+                filtered
+                    .iter()
+                    .map(|sb| (sb.id, sb.id.to_string()))
+                    .collect()
             }
             Err(e) => {
                 return super::tenant_handler::error_response(e);
@@ -573,16 +584,17 @@ pub async fn delete_sandbox(
     Query(query): Query<DeleteQuery>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let sandbox_id = match Uuid::parse_str(&id) {
         Ok(u) => u,

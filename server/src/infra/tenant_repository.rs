@@ -7,8 +7,8 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::tenant::{
-    ApiKey, CreateApiKeyParams, CreateTenantParams, Pagination, PaginatedResult,
-    Tenant, TenantFilter, TenantListItem, UpdateTenantParams,
+    ApiKey, CreateApiKeyParams, CreateTenantParams, PaginatedResult, Pagination, Tenant,
+    TenantFilter, TenantListItem, UpdateTenantParams,
 };
 use crate::domain::workspace::StorageType;
 use crate::error::{Error, Result};
@@ -293,14 +293,18 @@ impl TenantRepository {
 
     /// Activate a tenant
     pub async fn activate_tenant(&self, id: Uuid) -> Result<Tenant> {
-        let result = sqlx::query("UPDATE tenants SET is_active = true, updated_at = $2 WHERE id = $1")
-            .bind(id)
-            .bind(Utc::now())
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE tenants SET is_active = true, updated_at = $2 WHERE id = $1")
+                .bind(id)
+                .bind(Utc::now())
+                .execute(&self.pool)
+                .await?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::WorkspaceNotFound(format!("Tenant not found: {}", id)));
+            return Err(Error::WorkspaceNotFound(format!(
+                "Tenant not found: {}",
+                id
+            )));
         }
 
         self.get_tenant(id).await
@@ -308,14 +312,18 @@ impl TenantRepository {
 
     /// Deactivate a tenant
     pub async fn deactivate_tenant(&self, id: Uuid) -> Result<Tenant> {
-        let result = sqlx::query("UPDATE tenants SET is_active = false, updated_at = $2 WHERE id = $1")
-            .bind(id)
-            .bind(Utc::now())
-            .execute(&self.pool)
-            .await?;
+        let result =
+            sqlx::query("UPDATE tenants SET is_active = false, updated_at = $2 WHERE id = $1")
+                .bind(id)
+                .bind(Utc::now())
+                .execute(&self.pool)
+                .await?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::WorkspaceNotFound(format!("Tenant not found: {}", id)));
+            return Err(Error::WorkspaceNotFound(format!(
+                "Tenant not found: {}",
+                id
+            )));
         }
 
         self.get_tenant(id).await
@@ -335,12 +343,11 @@ impl TenantRepository {
         let mut tx = self.pool.begin().await?;
 
         // Check for active shares — always blocks
-        let share_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM shares WHERE owner_tenant_id = $1",
-        )
-        .bind(id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let share_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM shares WHERE owner_tenant_id = $1")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await?;
 
         if share_count > 0 {
             return Err(Error::HasActiveShares);
@@ -442,7 +449,9 @@ impl TenantRepository {
         let _ = self.get_tenant(tenant_id).await?;
 
         let mut tx = self.pool.begin().await?;
-        let result = self.create_api_key_in_tx(&mut tx, tenant_id, params).await?;
+        let result = self
+            .create_api_key_in_tx(&mut tx, tenant_id, params)
+            .await?;
         tx.commit().await?;
         Ok(result)
     }
@@ -523,7 +532,10 @@ impl TenantRepository {
             .await?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::WorkspaceNotFound(format!("API key not found: {}", key_id)));
+            return Err(Error::WorkspaceNotFound(format!(
+                "API key not found: {}",
+                key_id
+            )));
         }
 
         Ok(())
@@ -559,5 +571,4 @@ impl TenantRepository {
 
         Ok(())
     }
-
 }

@@ -415,10 +415,11 @@ impl SandboxRepository {
         row.try_into()
     }
 
-
     /// Get mounts for a sandbox
-    pub async fn get_mounts(&self, sandbox_id: Uuid) -> Result<Vec<crate::domain::share::SandboxMount>> {
-
+    pub async fn get_mounts(
+        &self,
+        sandbox_id: Uuid,
+    ) -> Result<Vec<crate::domain::share::SandboxMount>> {
         #[derive(Debug, FromRow)]
         struct MountRow {
             sandbox_id: Uuid,

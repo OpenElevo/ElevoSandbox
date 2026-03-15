@@ -16,10 +16,7 @@ pub struct PermissionService {
 }
 
 impl PermissionService {
-    pub fn new(
-        share_repo: ShareRepository,
-        permission_repo: SharePermissionRepository,
-    ) -> Self {
+    pub fn new(share_repo: ShareRepository, permission_repo: SharePermissionRepository) -> Self {
         Self {
             share_repo,
             permission_repo,
@@ -51,9 +48,9 @@ impl PermissionService {
             return Ok(share);
         }
 
-        let tenant_id = auth.tenant_id().ok_or_else(|| {
-            Error::InvalidRequest("Authentication required".into())
-        })?;
+        let tenant_id = auth
+            .tenant_id()
+            .ok_or_else(|| Error::InvalidRequest("Authentication required".into()))?;
 
         // Owner has implicit admin
         if share.owner_tenant_id == tenant_id {
@@ -71,14 +68,11 @@ impl PermissionService {
                 return Ok(share);
             }
             // Has permission but insufficient level
-            return Err(Error::PermissionDenied(
-                "Insufficient permission".into(),
-            ));
+            return Err(Error::PermissionDenied("Insufficient permission".into()));
         }
 
         // No explicit permission — check visibility
-        let is_public = share.visibility
-            == crate::domain::share::Visibility::Public;
+        let is_public = share.visibility == crate::domain::share::Visibility::Public;
 
         if is_public && required == PermissionLevel::Read {
             // Public shares grant implicit read to all tenants
@@ -87,23 +81,16 @@ impl PermissionService {
 
         if is_public {
             // Public share but needs more than read
-            Err(Error::PermissionDenied(
-                "Insufficient permission".into(),
-            ))
+            Err(Error::PermissionDenied("Insufficient permission".into()))
         } else {
             // Private share with no permission — hide existence with a generic
             // message that does not reveal whether the share exists at all.
-            Err(Error::WorkspaceNotFound(
-                "Resource not found".into(),
-            ))
+            Err(Error::WorkspaceNotFound("Resource not found".into()))
         }
     }
 
     /// Check if the auth context is the namespace owner or admin
-    pub fn check_namespace_ownership(
-        auth: &AuthContext,
-        namespace_id: Uuid,
-    ) -> Result<(), Error> {
+    pub fn check_namespace_ownership(auth: &AuthContext, namespace_id: Uuid) -> Result<(), Error> {
         if auth.is_admin() {
             return Ok(());
         }

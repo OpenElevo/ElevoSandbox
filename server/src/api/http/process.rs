@@ -80,7 +80,9 @@ pub async fn run_command_stream(
         None => {
             return Err((
                 axum::http::StatusCode::BAD_REQUEST,
-                axum::Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "command query parameter is required"}})),
+                axum::Json(
+                    serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "command query parameter is required"}}),
+                ),
             ));
         }
     };
@@ -106,18 +108,22 @@ pub async fn run_command_stream(
     use futures::StreamExt;
     let sse_stream = event_stream.map(|event| {
         let (event_type, data) = match event {
-            crate::domain::types::ProcessEvent::Stdout { data } => {
-                ("stdout", serde_json::to_string(&ProcessEventResponse::Stdout { data }).unwrap())
-            }
-            crate::domain::types::ProcessEvent::Stderr { data } => {
-                ("stderr", serde_json::to_string(&ProcessEventResponse::Stderr { data }).unwrap())
-            }
-            crate::domain::types::ProcessEvent::Exit { code } => {
-                ("exit", serde_json::to_string(&ProcessEventResponse::Exit { code }).unwrap())
-            }
-            crate::domain::types::ProcessEvent::Error { message } => {
-                ("error", serde_json::to_string(&ProcessEventResponse::Error { message }).unwrap())
-            }
+            crate::domain::types::ProcessEvent::Stdout { data } => (
+                "stdout",
+                serde_json::to_string(&ProcessEventResponse::Stdout { data }).unwrap(),
+            ),
+            crate::domain::types::ProcessEvent::Stderr { data } => (
+                "stderr",
+                serde_json::to_string(&ProcessEventResponse::Stderr { data }).unwrap(),
+            ),
+            crate::domain::types::ProcessEvent::Exit { code } => (
+                "exit",
+                serde_json::to_string(&ProcessEventResponse::Exit { code }).unwrap(),
+            ),
+            crate::domain::types::ProcessEvent::Error { message } => (
+                "error",
+                serde_json::to_string(&ProcessEventResponse::Error { message }).unwrap(),
+            ),
         };
         Ok::<_, Infallible>(Event::default().event(event_type).data(data))
     });

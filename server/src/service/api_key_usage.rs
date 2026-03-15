@@ -54,10 +54,13 @@ impl ApiKeyUsageTracker {
         };
 
         if should_flush {
-            self.entries.insert(key_id, UsageEntry {
-                last_flushed: now,
-                dirty: false,
-            });
+            self.entries.insert(
+                key_id,
+                UsageEntry {
+                    last_flushed: now,
+                    dirty: false,
+                },
+            );
             let repo = self.repository.clone();
             tokio::spawn(async move {
                 if let Err(e) = repo.update_last_used(key_id).await {

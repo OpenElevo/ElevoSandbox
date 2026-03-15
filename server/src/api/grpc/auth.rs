@@ -121,10 +121,7 @@ fn requires_auth(path: &str) -> bool {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcAuthService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>>
-        + Clone
-        + Send
-        + 'static,
+    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>> + Clone + Send + 'static,
     S::Future: Send + 'static,
     S::Error: Into<Box<dyn std::error::Error + Send + Sync>>,
     ReqBody: Send + 'static,
@@ -165,7 +162,10 @@ where
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
 
-            let token = match auth_header.as_deref().and_then(|h| h.strip_prefix("Bearer ")) {
+            let token = match auth_header
+                .as_deref()
+                .and_then(|h| h.strip_prefix("Bearer "))
+            {
                 Some(t) => t,
                 None => {
                     return Ok(unauthenticated_response("missing authorization header"));
@@ -176,7 +176,8 @@ where
             if token.starts_with("sk_") {
                 match validate_api_key(&tenant_repo, &api_key_usage, token).await {
                     Ok(tenant_id) => {
-                        req.extensions_mut().insert(GrpcIdentity::Tenant { tenant_id });
+                        req.extensions_mut()
+                            .insert(GrpcIdentity::Tenant { tenant_id });
                         return inner.call(req).await;
                     }
                     Err(msg) => return Ok(unauthenticated_response(&msg)),

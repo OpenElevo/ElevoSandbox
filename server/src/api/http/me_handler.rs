@@ -13,23 +13,26 @@ use crate::domain::auth::AuthContext;
 use crate::service::path_security;
 use crate::AppState;
 
-use super::workspace::{FileInfoResponse, ListFilesResponse, PathQuery, ReadFileResponse, WriteFileRequest};
+use super::workspace::{
+    FileInfoResponse, ListFilesResponse, PathQuery, ReadFileResponse, WriteFileRequest,
+};
 
 /// GET /api/v1/me — current tenant info
 pub async fn get_me(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let tenant_id = match auth.tenant_id() {
         Some(id) => id,
@@ -47,7 +50,11 @@ pub async fn get_me(
     };
 
     match state.tenant_repository.get_tenant(tenant_id).await {
-        Ok(tenant) => (StatusCode::OK, Json(serde_json::json!({ "tenant": tenant }))).into_response(),
+        Ok(tenant) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "tenant": tenant })),
+        )
+            .into_response(),
         Err(e) => super::tenant_handler::error_response(e),
     }
 }
@@ -58,16 +65,17 @@ pub async fn list_my_files(
     Query(query): Query<PathQuery>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let tenant_id = match auth.tenant_id() {
         Some(id) => id,
@@ -106,11 +114,7 @@ pub async fn list_my_files(
                     }
                 })
                 .collect();
-            (
-                StatusCode::OK,
-                Json(ListFilesResponse { files: responses }),
-            )
-                .into_response()
+            (StatusCode::OK, Json(ListFilesResponse { files: responses })).into_response()
         }
         Err(e) => super::namespace_handler::storage_error_response(e),
     }
@@ -121,16 +125,17 @@ pub async fn list_my_sandboxes(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let tenant_id = match auth.tenant_id() {
         Some(id) => id,
@@ -143,10 +148,18 @@ pub async fn list_my_sandboxes(
         }
     };
 
-    match state.sandbox_service.list_by_namespace(tenant_id, None).await {
+    match state
+        .sandbox_service
+        .list_by_namespace(tenant_id, None)
+        .await
+    {
         Ok(sandboxes) => {
             let total = sandboxes.len();
-            (StatusCode::OK, Json(serde_json::json!({ "sandboxes": sandboxes, "total": total }))).into_response()
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "sandboxes": sandboxes, "total": total })),
+            )
+                .into_response()
         }
         Err(e) => super::tenant_handler::error_response(e),
     }
@@ -157,16 +170,17 @@ pub async fn list_my_shares(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let tenant_id = match auth.tenant_id() {
         Some(id) => id,
@@ -221,16 +235,17 @@ pub async fn read_my_file(
     Path(path): Path<String>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let storage_id = match resolve_tenant_storage_id(auth) {
         Ok(id) => id,
@@ -260,16 +275,17 @@ pub async fn write_my_file(
     Path(path): Path<String>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let storage_id = match resolve_tenant_storage_id(&auth) {
         Ok(id) => id,
@@ -278,13 +294,13 @@ pub async fn write_my_file(
 
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 1024 * 10).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
 
     let req: WriteFileRequest = match serde_json::from_slice(&body) {
@@ -303,8 +319,17 @@ pub async fn write_my_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    match state.workspace_service.storage().write_file(&storage_id, &safe_path, req.content.as_bytes()).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
+    match state
+        .workspace_service
+        .storage()
+        .write_file(&storage_id, &safe_path, req.content.as_bytes())
+        .await
+    {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"success": true, "path": safe_path})),
+        )
+            .into_response(),
         Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
@@ -315,16 +340,17 @@ pub async fn create_my_file(
     Path(path): Path<String>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a.clone(),
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a.clone(),
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let storage_id = match resolve_tenant_storage_id(&auth) {
         Ok(id) => id,
@@ -333,13 +359,13 @@ pub async fn create_my_file(
 
     let body = match axum::body::to_bytes(request.into_body(), 1024 * 1024 * 10).await {
         Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}})),
-            )
-                .into_response()
-        }
+        Err(_) => return (
+            StatusCode::BAD_REQUEST,
+            Json(
+                serde_json::json!({"error": {"code": "BAD_REQUEST", "message": "Body too large"}}),
+            ),
+        )
+            .into_response(),
     };
 
     let safe_path = match path_security::normalize_path(&path) {
@@ -362,7 +388,11 @@ pub async fn create_my_file(
     if body.is_empty() {
         // Empty body → create directory
         match storage.mkdir(&storage_id, &safe_path, true).await {
-            Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
+            Ok(()) => (
+                StatusCode::CREATED,
+                Json(serde_json::json!({"success": true, "path": safe_path})),
+            )
+                .into_response(),
             Err(e) => super::namespace_handler::storage_error_response(e),
         }
     } else {
@@ -379,13 +409,24 @@ pub async fn create_my_file(
 
         if req.directory {
             match storage.mkdir(&storage_id, &safe_path, true).await {
-                Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
+                Ok(()) => (
+                    StatusCode::CREATED,
+                    Json(serde_json::json!({"success": true, "path": safe_path})),
+                )
+                    .into_response(),
                 Err(e) => super::namespace_handler::storage_error_response(e),
             }
         } else {
             let content = req.content.unwrap_or_default();
-            match storage.write_file(&storage_id, &safe_path, content.as_bytes()).await {
-                Ok(()) => (StatusCode::CREATED, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
+            match storage
+                .write_file(&storage_id, &safe_path, content.as_bytes())
+                .await
+            {
+                Ok(()) => (
+                    StatusCode::CREATED,
+                    Json(serde_json::json!({"success": true, "path": safe_path})),
+                )
+                    .into_response(),
                 Err(e) => super::namespace_handler::storage_error_response(e),
             }
         }
@@ -405,16 +446,17 @@ pub async fn delete_my_file(
     Query(query): Query<RecursiveQuery>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let storage_id = match resolve_tenant_storage_id(auth) {
         Ok(id) => id,
@@ -438,7 +480,11 @@ pub async fn delete_my_file(
     };
 
     match result {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"success": true, "path": safe_path}))).into_response(),
+        Ok(()) => (
+            StatusCode::OK,
+            Json(serde_json::json!({"success": true, "path": safe_path})),
+        )
+            .into_response(),
         Err(e) => super::namespace_handler::storage_error_response(e),
     }
 }
@@ -448,16 +494,17 @@ pub async fn list_my_accessible_shares(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     let tenant_id = match auth.tenant_id() {
         Some(id) => id,

@@ -30,11 +30,7 @@ use axum::{
     routing::{delete, get, head, post, put},
     Json, Router,
 };
-use governor::{
-    clock::DefaultClock,
-    state::keyed::DashMapStateStore,
-    Quota, RateLimiter,
-};
+use governor::{clock::DefaultClock, state::keyed::DashMapStateStore, Quota, RateLimiter};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
@@ -145,18 +141,18 @@ pub fn create_router(state: AppState) -> Router {
 
     // Login-specific rate limiter: 10 requests per minute per IP
     let login_rate_state = RateLimitState {
-        limiter: Arc::new(RateLimiter::dashmap(
-            Quota::per_minute(NonZeroU32::new(10).unwrap()),
-        )),
+        limiter: Arc::new(RateLimiter::dashmap(Quota::per_minute(
+            NonZeroU32::new(10).unwrap(),
+        ))),
         trusted_proxy_ips: trusted_proxy_ips.clone(),
     };
 
     // Global per-IP rate limiter: configured RPS (default 100)
     let rps = state.config.rate_limit_rps.max(1);
     let global_rate_state = RateLimitState {
-        limiter: Arc::new(RateLimiter::dashmap(
-            Quota::per_second(NonZeroU32::new(rps).unwrap()),
-        )),
+        limiter: Arc::new(RateLimiter::dashmap(Quota::per_second(
+            NonZeroU32::new(rps).unwrap(),
+        ))),
         trusted_proxy_ips: trusted_proxy_ips.clone(),
     };
 
@@ -198,14 +194,8 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/tenants/{id}", delete(tenant_handler::delete_tenant))
         // API Key management
-        .route(
-            "/tenants/{id}/keys",
-            get(api_key_handler::list_api_keys),
-        )
-        .route(
-            "/tenants/{id}/keys",
-            post(api_key_handler::create_api_key),
-        )
+        .route("/tenants/{id}/keys", get(api_key_handler::list_api_keys))
+        .route("/tenants/{id}/keys", post(api_key_handler::create_api_key))
         .route(
             "/tenants/{id}/keys/{key_id}",
             delete(api_key_handler::revoke_api_key),
@@ -240,7 +230,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/me/files/{*path}", delete(me_handler::delete_my_file))
         .route("/me/sandboxes", get(me_handler::list_my_sandboxes))
         .route("/me/shares", get(me_handler::list_my_shares))
-        .route("/me/accessible-shares", get(me_handler::list_my_accessible_shares))
+        .route(
+            "/me/accessible-shares",
+            get(me_handler::list_my_accessible_shares),
+        )
         // Share management
         .route("/shares", post(share_handler::create_share))
         .route("/shares", get(share_handler::list_shares))
@@ -248,8 +241,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/shares/{id}", put(share_handler::update_share))
         .route("/shares/{id}", delete(share_handler::delete_share))
         // Share file operations
-        .route("/shares/{id}/files", get(share_file_handler::read_share_file))
-        .route("/shares/{id}/files", put(share_file_handler::write_share_file))
+        .route(
+            "/shares/{id}/files",
+            get(share_file_handler::read_share_file),
+        )
+        .route(
+            "/shares/{id}/files",
+            put(share_file_handler::write_share_file),
+        )
         .route(
             "/shares/{id}/files",
             post(share_file_handler::write_share_file),
@@ -313,7 +312,10 @@ pub fn create_router(state: AppState) -> Router {
         // Sandbox routes
         .route("/sandboxes", post(sandbox::create_sandbox))
         .route("/sandboxes", get(sandbox::list_sandboxes))
-        .route("/sandboxes/batch-delete", post(sandbox::batch_delete_sandboxes))
+        .route(
+            "/sandboxes/batch-delete",
+            post(sandbox::batch_delete_sandboxes),
+        )
         .route("/sandboxes/{id}", get(sandbox::get_sandbox))
         .route("/sandboxes/{id}", delete(sandbox::delete_sandbox))
         // Process routes

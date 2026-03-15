@@ -169,11 +169,7 @@ impl NamespaceService {
                 let path = entry.path();
                 info!("Removing expired trash directory: {}", path.display());
                 if let Err(e) = fs::remove_dir_all(&path).await {
-                    error!(
-                        "Failed to remove trash directory {}: {}",
-                        path.display(),
-                        e
-                    );
+                    error!("Failed to remove trash directory {}: {}", path.display(), e);
                 } else {
                     cleaned += 1;
                 }

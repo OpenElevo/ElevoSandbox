@@ -1,11 +1,6 @@
 //! Dashboard statistics API handler
 
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 
 use crate::domain::auth::AuthContext;
 use crate::AppState;
@@ -15,16 +10,17 @@ pub async fn get_stats(
     State(state): State<AppState>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
-    let auth = match request.extensions().get::<AuthContext>() {
-        Some(a) => a,
-        None => {
-            return (
+    let auth =
+        match request.extensions().get::<AuthContext>() {
+            Some(a) => a,
+            None => return (
                 StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}})),
+                Json(
+                    serde_json::json!({"error": {"code": "UNAUTHORIZED", "message": "未授权访问"}}),
+                ),
             )
-                .into_response()
-        }
-    };
+                .into_response(),
+        };
 
     if !auth.is_admin() {
         return (
