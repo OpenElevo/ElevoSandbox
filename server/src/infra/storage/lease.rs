@@ -368,13 +368,31 @@ impl LeaseRenewalTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
+
+    /// Helper: create a test tenant and return its UUID as namespace_id
+    async fn create_test_tenant(pool: &PgPool) -> Uuid {
+        let id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO tenants (id, name, description, is_active)
+            VALUES ($1, $2, $3, $4)"#,
+        )
+        .bind(id)
+        .bind(format!("test-tenant-{}", id))
+        .bind(format!("Test tenant for {}", id))
+        .bind(true)
+        .execute(pool)
+        .await
+        .unwrap();
+        id
+    }
 
     /// Helper: manually expire a lease by setting expires_at to past time
-    async fn expire_lease(pool: &PgPool, workspace_id: &str) {
+    async fn expire_lease(pool: &PgPool, namespace_id: Uuid) {
         let past = Utc::now() - chrono::Duration::seconds(10);
         sqlx::query("UPDATE namespace_leases SET expires_at = $1 WHERE namespace_id = $2")
             .bind(past)
-            .bind(workspace_id)
+            .bind(namespace_id)
             .execute(pool)
             .await
             .unwrap();
@@ -382,106 +400,132 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_and_check(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        let lease = mgr.acquire("ws1", "server-1").await.unwrap();
-        assert_eq!(lease.workspace_id, "ws1");
+        let lease = mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
+        assert_eq!(lease.workspace_id, namespace_id_str);
         assert_eq!(lease.holder_id, "server-1");
 
-        let checked = mgr.check("ws1").await.unwrap();
+        let checked = mgr.check(&namespace_id_str).await.unwrap();
         assert!(checked.is_some());
         assert_eq!(checked.unwrap().holder_id, "server-1");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_already_held(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
-        let err = mgr.acquire("ws1", "server-2").await.unwrap_err();
+        let err = mgr
+            .acquire(&namespace_id_str, "server-2")
+            .await
+            .unwrap_err();
         assert!(matches!(err, LeaseError::AlreadyHeld { .. }));
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_same_holder_re_acquire(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
-        let lease = mgr.acquire("ws1", "server-1").await.unwrap();
+        let lease = mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
         assert_eq!(lease.holder_id, "server-1");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_expired_lease(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
-        expire_lease(&pool, "ws1").await;
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
+        expire_lease(&pool, namespace_id).await;
 
-        let lease = mgr.acquire("ws1", "server-2").await.unwrap();
+        let lease = mgr.acquire(&namespace_id_str, "server-2").await.unwrap();
         assert_eq!(lease.holder_id, "server-2");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_renew(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
-        let renewed = mgr.renew("ws1", "server-1").await.unwrap();
+        let renewed = mgr.renew(&namespace_id_str, "server-1").await.unwrap();
         assert_eq!(renewed.holder_id, "server-1");
         assert!(renewed.expires_at > Utc::now());
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_renew_wrong_holder(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
-        let err = mgr.renew("ws1", "server-2").await.unwrap_err();
+        let err = mgr.renew(&namespace_id_str, "server-2").await.unwrap_err();
         assert!(matches!(err, LeaseError::HolderMismatch { .. }));
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_release(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
-        mgr.release("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
+        mgr.release(&namespace_id_str, "server-1").await.unwrap();
 
-        let checked = mgr.check("ws1").await.unwrap();
+        let checked = mgr.check(&namespace_id_str).await.unwrap();
         assert!(checked.is_none());
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_release_wrong_holder(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
-        let err = mgr.release("ws1", "server-2").await.unwrap_err();
+        let err = mgr
+            .release(&namespace_id_str, "server-2")
+            .await
+            .unwrap_err();
         assert!(matches!(err, LeaseError::HolderMismatch { .. }));
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_check_nonexistent(pool: PgPool) {
         let mgr = PgLeaseManager::new(pool);
-
-        let checked = mgr.check("ws_not_exist").await.unwrap();
+        // Use a valid UUID that doesn't exist in tenants table
+        // This will return None since no lease exists
+        let nonexistent_uuid = Uuid::new_v4();
+        let checked = mgr.check(&nonexistent_uuid.to_string()).await.unwrap();
         assert!(checked.is_none());
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_check_expired_returns_none(pool: PgPool) {
+        let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
+        let namespace_id_str = namespace_id.to_string();
 
-        mgr.acquire("ws1", "server-1").await.unwrap();
-        expire_lease(&pool, "ws1").await;
+        mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
+        expire_lease(&pool, namespace_id).await;
 
-        let checked = mgr.check("ws1").await.unwrap();
+        let checked = mgr.check(&namespace_id_str).await.unwrap();
         assert!(checked.is_none());
     }
 }
