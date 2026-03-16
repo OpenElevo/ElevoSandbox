@@ -88,6 +88,11 @@ impl WorkspaceService {
         &*self.storage
     }
 
+    /// Expose the storage router for checking backend overrides.
+    pub fn storage_router(&self) -> &StorageRouter {
+        &self.storage_router
+    }
+
     /// Check if this server instance holds the lease for a workspace.
     /// Used to ensure write operations only proceed if we have the lease.
     async fn ensure_lease_held(&self, workspace_id: &str) -> Result<()> {

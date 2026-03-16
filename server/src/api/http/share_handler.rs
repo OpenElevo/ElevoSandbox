@@ -85,17 +85,62 @@ pub async fn create_share(
     };
     params.source_path = normalized_source;
 
-    // Validate source_path exists on disk
-    let ns_dir = state.namespace_service.namespace_path(owner_id);
-    let source_dir = ns_dir.join(&params.source_path);
-    if !source_dir.exists() || !source_dir.is_dir() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": {"code": "BAD_REQUEST", "message": "source_path directory does not exist in namespace"}
-            })),
-        )
-            .into_response();
+    // Validate source_path exists: remote tenants use StorageBackend,
+    // local tenants use the namespace filesystem check.
+    let tenant = match state.tenant_repository.get_tenant(owner_id).await {
+        Ok(t) => t,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": {"code": "NOT_FOUND", "message": "Tenant not found"}
+                })),
+            )
+                .into_response()
+        }
+    };
+
+    if tenant.is_remote() {
+        // Remote tenant: check via StorageBackend (gRPC to StorageProvider)
+        match state
+            .workspace_service
+            .storage()
+            .stat(&owner_id.to_string(), &params.source_path)
+            .await
+        {
+            Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {}
+            Ok(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": {"code": "BAD_REQUEST", "message": "source_path is not a directory in remote storage"}
+                    })),
+                )
+                    .into_response()
+            }
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(serde_json::json!({
+                        "error": {"code": "BAD_REQUEST", "message": "source_path directory does not exist in remote storage"}
+                    })),
+                )
+                    .into_response()
+            }
+        }
+    } else {
+        // Local tenant: filesystem check
+        let ns_dir = state.namespace_service.namespace_path(owner_id);
+        let source_dir = ns_dir.join(&params.source_path);
+        if !source_dir.exists() || !source_dir.is_dir() {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "error": {"code": "BAD_REQUEST", "message": "source_path directory does not exist in namespace"}
+                })),
+            )
+                .into_response();
+        }
     }
 
     match state.share_repository.create_share(&params).await {

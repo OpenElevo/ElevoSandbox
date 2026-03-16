@@ -19,6 +19,13 @@ pub struct Tenant {
     pub updated_at: DateTime<Utc>,
 }
 
+impl Tenant {
+    /// Check if this tenant uses remote (client-provided) storage
+    pub fn is_remote(&self) -> bool {
+        self.storage_type == StorageType::Remote
+    }
+}
+
 /// API Key entity (token_hash is never exposed outside infra layer)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {

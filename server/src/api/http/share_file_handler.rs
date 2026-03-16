@@ -21,6 +21,18 @@ use super::workspace::{
     FileInfoResponse, ListFilesResponse, PathQuery, ReadFileResponse, WriteFileRequest,
 };
 
+/// Resolve the storage ID for a share, accounting for remote tenants.
+/// Remote backends are registered under bare `{tenant_uuid}`, while
+/// local backends use `"namespaces/{tenant_uuid}"`.
+fn resolve_storage_id(share: &crate::domain::share::Share, state: &AppState) -> String {
+    let bare_id = share.owner_tenant_id.to_string();
+    if state.workspace_service.storage_router().has_override(&bare_id) {
+        bare_id
+    } else {
+        format!("namespaces/{}", share.owner_tenant_id)
+    }
+}
+
 /// Resolve an effective relative path for the workspace service by sanitizing
 /// the user-provided path against the share's source directory.
 ///
@@ -74,7 +86,7 @@ pub async fn read_share_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
+    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()
@@ -147,7 +159,7 @@ pub async fn write_share_file(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
+    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()
@@ -198,7 +210,7 @@ pub async fn delete_share_file(
     };
     let recursive = query.recursive.as_deref() == Some("true");
 
-    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
+    let storage_id = resolve_storage_id(&share, &state);
     let storage = state.workspace_service.storage();
 
     let result = match storage.stat(&storage_id, &effective_path).await {
@@ -255,7 +267,7 @@ pub async fn list_share_files(
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = format!("namespaces/{}", share.owner_tenant_id);
+    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()
