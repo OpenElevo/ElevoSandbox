@@ -71,7 +71,7 @@ impl WorkspaceRepository {
 
     /// Create a new workspace
     pub async fn create(&self, params: CreateWorkspaceParams) -> Result<Workspace> {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let now = Utc::now();
         let metadata = serde_json::to_value(params.metadata.unwrap_or_default())
             .map_err(|e| Error::Internal(e.to_string()))?;

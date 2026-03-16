@@ -61,6 +61,7 @@ pub struct ListSandboxesResponse {
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
     pub state: Option<String>,
+    #[serde(serialize_with = "crate::domain::simple_uuid::serialize_option", deserialize_with = "crate::domain::simple_uuid::deserialize_option")]
     pub namespace_id: Option<uuid::Uuid>,
     pub name: Option<String>,
     pub page: Option<u32>,

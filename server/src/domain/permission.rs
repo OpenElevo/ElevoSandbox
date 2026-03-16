@@ -138,7 +138,9 @@ mod tests {
 /// Share permission record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharePermission {
+    #[serde(with = "super::simple_uuid")]
     pub tenant_id: uuid::Uuid,
+    #[serde(with = "super::simple_uuid")]
     pub share_id: uuid::Uuid,
     pub permission: PermissionLevel,
     pub created_at: chrono::DateTime<chrono::Utc>,

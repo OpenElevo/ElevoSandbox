@@ -124,7 +124,7 @@ impl TenantRepository {
         &self,
         params: CreateTenantParams,
     ) -> Result<(Tenant, Option<(ApiKey, String)>)> {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let now = Utc::now();
         let storage_type = params.storage_type.as_deref().unwrap_or("managed");
         let storage_config = params.storage_config.unwrap_or(serde_json::json!({}));
@@ -270,6 +270,10 @@ impl TenantRepository {
             sets.push(format!("description = ${idx}"));
             idx += 1;
         }
+        if params.storage_type.is_some() {
+            sets.push(format!("storage_type = ${idx}"));
+            idx += 1;
+        }
         sets.push(format!("updated_at = ${idx}"));
 
         if sets.len() == 1 {
@@ -286,6 +290,9 @@ impl TenantRepository {
         }
         if let Some(ref desc) = params.description {
             query = query.bind(desc);
+        }
+        if let Some(ref st) = params.storage_type {
+            query = query.bind(st);
         }
         query = query.bind(now);
 
@@ -465,7 +472,7 @@ impl TenantRepository {
         tenant_id: Uuid,
         params: CreateApiKeyParams,
     ) -> Result<(ApiKey, String)> {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let token = generate_api_token();
         let hash = hash_token(&token);
         let prefix = token_prefix(&token);

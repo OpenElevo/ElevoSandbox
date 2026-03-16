@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Descriptions, Tag, Button, Space, Tabs, App, Modal,
-  Drawer, Form, Input, Table, Checkbox, DatePicker, Alert,
+  Drawer, Form, Input, Table, Checkbox, DatePicker, Alert, Select,
 } from 'antd';
-import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
+import { CopyOutlined, CheckOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getTenant, updateTenant, activateTenant, deactivateTenant,
@@ -19,6 +19,78 @@ import DirtyFormGuard from '@/components/DirtyFormGuard';
 import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
 import { useDeleteTenant } from '@/hooks/useDeleteTenant';
 import dayjs from 'dayjs';
+
+function copyToClipboard(text: string): Promise<void> {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  return Promise.resolve();
+}
+
+function TokenCell({ tenantId, record, message }: { tenantId: string; record: ApiKey; message: ReturnType<typeof App.useApp>['message'] }) {
+  const [visible, setVisible] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleFetch = async () => {
+    if (visible || token) { setVisible(true); return; }
+    setLoading(true);
+    try {
+      const t = await getApiKeyToken(tenantId, record.id);
+      setToken(t);
+      setVisible(true);
+    } catch {
+      message.error('获取 Token 失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!token) return;
+    try {
+      await copyToClipboard(token);
+      setCopied(true);
+      message.success('Token 已复制');
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      message.error('复制失败');
+    }
+  };
+
+  return (
+    <Space size={4}>
+      <code style={{ fontSize: 12 }}>
+        {visible && token ? token : record.token_prefix}
+      </code>
+      <Button
+        type="text"
+        size="small"
+        icon={visible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+        onClick={handleFetch}
+        loading={loading}
+        style={{ padding: 0 }}
+      />
+      {visible && token && (
+        <Button
+          type="text"
+          size="small"
+          icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+          onClick={handleCopy}
+          style={{ padding: 0 }}
+        />
+      )}
+    </Space>
+  );
+}
 
 function getApiKeyStatus(key: ApiKey): { label: string; color: string } {
   if (!key.is_active) return { label: '已撤销', color: 'default' };
@@ -218,21 +290,13 @@ export default function TenantDetail() {
 
   if (isLoading || !tenant) return <Card loading />;
 
-  const handleCopyToken = async (key: ApiKey) => {
-    try {
-      const token = await getApiKeyToken(id!, key.id);
-      await navigator.clipboard.writeText(token);
-      message.success('Token 已复制到剪贴板');
-    } catch {
-      message.error('复制失败，请重试');
-    }
-  };
-
   const keyColumns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
     {
-      title: '前缀', dataIndex: 'token_prefix', key: 'prefix',
-      render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
+      title: 'Token', key: 'token',
+      render: (_: unknown, record: ApiKey) => (
+        <TokenCell tenantId={id!} record={record} message={message} />
+      ),
     },
     {
       title: '状态', key: 'status',
@@ -255,10 +319,7 @@ export default function TenantDetail() {
       render: (_: unknown, record: ApiKey) => {
         const isActive = record.is_active && (!record.expires_at || dayjs(record.expires_at).isAfter(dayjs()));
         return isActive ? (
-          <Space size={4}>
-            <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopyToken(record)}>复制</Button>
-            <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
-          </Space>
+          <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
         ) : null;
       },
     },
@@ -388,6 +449,14 @@ export default function TenantDetail() {
         <Form form={editForm} layout="vertical" onValuesChange={() => setEditDirty(true)}>
           <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="description" label="描述"><Input.TextArea rows={3} /></Form.Item>
+          <Form.Item name="storage_type" label="存储类型">
+            <Select
+              options={[
+                { value: 'managed', label: '托管 (本地存储)' },
+                { value: 'remote', label: '远程 (gRPC 存储)' },
+              ]}
+            />
+          </Form.Item>
         </Form>
       </Drawer>
 

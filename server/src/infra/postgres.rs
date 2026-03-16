@@ -141,7 +141,7 @@ impl SandboxRepository {
 
     /// Create a new sandbox
     pub async fn create(&self, params: CreateSandboxParams) -> Result<Sandbox> {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let now = Utc::now();
         let template = params.template.unwrap_or_else(|| "default".to_string());
         let env = serde_json::to_value(params.env.unwrap_or_default())
@@ -451,7 +451,7 @@ mod tests {
 
     // Helper to create a test tenant (namespace)
     async fn create_test_tenant(pool: &PgPool) -> Uuid {
-        let tenant_id = Uuid::new_v4();
+        let tenant_id = Uuid::now_v7();
         let now = Utc::now();
         sqlx::query(
             r#"INSERT INTO tenants (id, name, description, is_active, storage_type, storage_config, created_at, updated_at)

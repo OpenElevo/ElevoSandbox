@@ -50,9 +50,11 @@ impl SandboxState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sandbox {
     /// Unique identifier
+    #[serde(with = "super::simple_uuid")]
     pub id: Uuid,
 
     /// Namespace (tenant) ID this sandbox belongs to
+    #[serde(with = "super::simple_uuid")]
     pub namespace_id: Uuid,
 
     /// Namespace (tenant) name — populated via JOIN in list queries
@@ -159,6 +161,7 @@ fn default_root_path() -> String {
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSandboxParams {
     /// Namespace (tenant) ID — set from AuthContext for tenant callers
+    #[serde(with = "super::simple_uuid")]
     pub namespace_id: Uuid,
 
     /// Root path within the namespace

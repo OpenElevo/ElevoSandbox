@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_tenant_identity() {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         let ctx = tenant_ctx(id);
         assert!(!ctx.is_admin());
         assert_eq!(ctx.tenant_id(), Some(id));
@@ -140,14 +140,14 @@ mod tests {
     #[test]
     fn test_namespace_ownership_admin_always_owner() {
         let ctx = admin_ctx();
-        let any_ns = Uuid::new_v4();
+        let any_ns = Uuid::now_v7();
         assert!(ctx.is_namespace_owner(&any_ns));
         assert!(ctx.require_namespace_access(&any_ns).is_ok());
     }
 
     #[test]
     fn test_namespace_ownership_tenant_own_ns() {
-        let tenant_id = Uuid::new_v4();
+        let tenant_id = Uuid::now_v7();
         let ctx = tenant_ctx(tenant_id);
         assert!(ctx.is_namespace_owner(&tenant_id));
         assert!(ctx.require_namespace_access(&tenant_id).is_ok());
@@ -155,8 +155,8 @@ mod tests {
 
     #[test]
     fn test_namespace_ownership_tenant_other_ns() {
-        let tenant_id = Uuid::new_v4();
-        let other_ns = Uuid::new_v4();
+        let tenant_id = Uuid::now_v7();
+        let other_ns = Uuid::now_v7();
         let ctx = tenant_ctx(tenant_id);
         assert!(!ctx.is_namespace_owner(&other_ns));
         assert!(ctx.require_namespace_access(&other_ns).is_err());

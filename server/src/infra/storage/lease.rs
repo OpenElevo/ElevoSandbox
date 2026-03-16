@@ -385,7 +385,7 @@ mod tests {
 
     /// Helper: create a test tenant and return its UUID as namespace_id
     async fn create_test_tenant(pool: &PgPool) -> Uuid {
-        let id = Uuid::new_v4();
+        let id = Uuid::now_v7();
         sqlx::query(
             r#"INSERT INTO tenants (id, name, description, is_active)
             VALUES ($1, $2, $3, $4)"#,
@@ -524,7 +524,7 @@ mod tests {
         let mgr = PgLeaseManager::new(pool);
         // Use a valid UUID that doesn't exist in tenants table
         // This will return None since no lease exists
-        let nonexistent_uuid = Uuid::new_v4();
+        let nonexistent_uuid = Uuid::now_v7();
         let checked = mgr.check(&nonexistent_uuid.to_string()).await.unwrap();
         assert!(checked.is_none());
     }

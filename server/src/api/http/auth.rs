@@ -58,7 +58,7 @@ impl AuthConfig {
 
     /// Create a JWT token for admin login with a freshly generated session ID
     pub fn create_admin_token(&self, ip: Option<String>) -> Result<String, AuthError> {
-        self.create_admin_token_with_session(Uuid::new_v4(), ip)
+        self.create_admin_token_with_session(Uuid::now_v7(), ip)
     }
 
     /// Create a JWT token reusing an existing session ID (used for sliding-window renewal)
@@ -391,7 +391,7 @@ mod tests {
         // Create a token that expired 120 seconds ago (well beyond any leeway)
         let claims = JwtClaims {
             sub: "admin".to_string(),
-            session_id: Uuid::new_v4(),
+            session_id: Uuid::now_v7(),
             login_ip: None,
             iat: now - 7200,
             exp: now - 120,
@@ -423,7 +423,7 @@ mod tests {
         // Token with lots of time remaining — should NOT refresh
         let fresh_claims = JwtClaims {
             sub: "admin".to_string(),
-            session_id: Uuid::new_v4(),
+            session_id: Uuid::now_v7(),
             login_ip: None,
             iat: now,
             exp: now + total_seconds,
@@ -433,7 +433,7 @@ mod tests {
         // Token near expiry (remaining < 1/3 of total) — should refresh
         let stale_claims = JwtClaims {
             sub: "admin".to_string(),
-            session_id: Uuid::new_v4(),
+            session_id: Uuid::now_v7(),
             login_ip: None,
             iat: now - total_seconds,
             exp: now + 60, // Only 1 minute left
@@ -461,7 +461,7 @@ mod tests {
         // Create a token with sub="hacker" instead of "admin"
         let claims = JwtClaims {
             sub: "hacker".to_string(),
-            session_id: Uuid::new_v4(),
+            session_id: Uuid::now_v7(),
             login_ip: None,
             iat: now,
             exp: now + 3600,

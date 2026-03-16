@@ -38,7 +38,9 @@ impl std::fmt::Display for Visibility {
 /// Share resource
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Share {
+    #[serde(with = "super::simple_uuid")]
     pub id: Uuid,
+    #[serde(with = "super::simple_uuid")]
     pub owner_tenant_id: Uuid,
     pub name: String,
     pub source_path: String,
@@ -52,7 +54,7 @@ pub struct Share {
 /// Parameters for creating a share
 #[derive(Debug, Deserialize)]
 pub struct CreateShareParams {
-    #[serde(default)]
+    #[serde(default, serialize_with = "super::simple_uuid::serialize_option", deserialize_with = "super::simple_uuid::deserialize_option")]
     pub owner_tenant_id: Option<Uuid>,
     pub name: String,
     pub source_path: String,
@@ -76,6 +78,7 @@ pub struct UpdateShareParams {
 /// Filter for listing shares
 #[derive(Debug, Default, Deserialize)]
 pub struct ShareFilter {
+    #[serde(serialize_with = "super::simple_uuid::serialize_option", deserialize_with = "super::simple_uuid::deserialize_option")]
     pub owner_tenant_id: Option<Uuid>,
     pub visibility: Option<String>,
     pub search: Option<String>,
@@ -84,7 +87,9 @@ pub struct ShareFilter {
 /// Sandbox mount record
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SandboxMount {
+    #[serde(with = "super::simple_uuid")]
     pub sandbox_id: Uuid,
+    #[serde(with = "super::simple_uuid")]
     pub share_id: Uuid,
     pub mount_path: String,
 }
@@ -92,6 +97,7 @@ pub struct SandboxMount {
 /// Mount request when creating a sandbox
 #[derive(Debug, Clone, Deserialize)]
 pub struct MountRequest {
+    #[serde(with = "super::simple_uuid")]
     pub share_id: Uuid,
     pub mount_path: String,
 }

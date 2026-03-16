@@ -9,6 +9,7 @@ use super::workspace::StorageType;
 /// Tenant entity (also serves as Namespace, 1:1 relationship)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tenant {
+    #[serde(with = "super::simple_uuid")]
     pub id: Uuid,
     pub name: String,
     pub description: String,
@@ -29,7 +30,9 @@ impl Tenant {
 /// API Key entity (token_hash is never exposed outside infra layer)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
+    #[serde(with = "super::simple_uuid")]
     pub id: Uuid,
+    #[serde(with = "super::simple_uuid")]
     pub tenant_id: Uuid,
     pub name: String,
     pub token_prefix: String,
@@ -72,6 +75,7 @@ pub struct CreateTenantParams {
 pub struct UpdateTenantParams {
     pub name: Option<String>,
     pub description: Option<String>,
+    pub storage_type: Option<String>,
 }
 
 /// Parameters for creating an API key
