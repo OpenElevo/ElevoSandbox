@@ -11,6 +11,7 @@ import (
 	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 // StorageProviderConfig configures the StorageProvider.
@@ -104,6 +105,14 @@ func (sp *StorageProvider) Stop() {
 	sp.cancel()
 }
 
+// withAuth adds authorization metadata to the context using the configured token.
+func (sp *StorageProvider) withAuth(ctx context.Context) context.Context {
+	if sp.config.Token != "" {
+		return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+sp.config.Token)
+	}
+	return ctx
+}
+
 // Share starts the storage provider. It connects to the server, performs the
 // handshake, and serves file operations until the context is cancelled.
 // It reconnects automatically with exponential backoff on connection errors.
@@ -165,7 +174,7 @@ func (sp *StorageProvider) Share(ctx context.Context) error {
 // connection (zero if never connected).
 func (sp *StorageProvider) connectAndServe(ctx context.Context) (time.Time, error) {
 	// Establish control stream.
-	stream, err := sp.client.Connect(ctx)
+	stream, err := sp.client.Connect(sp.withAuth(ctx))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("connect: %w", err)
 	}
@@ -355,7 +364,7 @@ func (sp *StorageProvider) handleReadFileTransfer(ctx context.Context, req *pb.S
 	f := fdToFile(fd, req.Path)
 	defer f.Close()
 
-	stream, err := sp.client.ReadFileStream(ctx)
+	stream, err := sp.client.ReadFileStream(sp.withAuth(ctx))
 	if err != nil {
 		sp.sendDataTransferFailed(req.TransferId, fmt.Sprintf("open read stream: %v", err))
 		return
@@ -425,7 +434,7 @@ func (sp *StorageProvider) handleWriteFileTransfer(ctx context.Context, req *pb.
 		}
 	}()
 
-	stream, err := sp.client.WriteFileStream(ctx, &pb.WriteFileStreamRequest{
+	stream, err := sp.client.WriteFileStream(sp.withAuth(ctx), &pb.WriteFileStreamRequest{
 		TransferId:  req.TransferId,
 		WorkspaceId: sp.config.WorkspaceID,
 	})
