@@ -55,13 +55,20 @@ function TokenCell({ tenantId, record, message }: { tenantId: string; record: Ap
   };
 
   const handleCopy = async () => {
-    if (!token) return;
     try {
-      await copyToClipboard(token);
+      let t = token;
+      if (!t) {
+        setLoading(true);
+        t = await getApiKeyToken(tenantId, record.id);
+        setToken(t);
+        setLoading(false);
+      }
+      await copyToClipboard(t);
       setCopied(true);
       message.success('Token 已复制');
       setTimeout(() => setCopied(false), 2000);
     } catch {
+      setLoading(false);
       message.error('复制失败');
     }
   };
@@ -79,15 +86,14 @@ function TokenCell({ tenantId, record, message }: { tenantId: string; record: Ap
         loading={loading}
         style={{ padding: 0 }}
       />
-      {visible && token && (
-        <Button
-          type="text"
-          size="small"
-          icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
-          onClick={handleCopy}
-          style={{ padding: 0 }}
-        />
-      )}
+      <Button
+        type="text"
+        size="small"
+        icon={copied ? <CheckOutlined style={{ color: '#52c41a' }} /> : <CopyOutlined />}
+        onClick={handleCopy}
+        loading={loading}
+        style={{ padding: 0 }}
+      />
     </Space>
   );
 }

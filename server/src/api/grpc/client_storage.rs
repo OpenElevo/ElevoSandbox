@@ -13,6 +13,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{debug, error, info, warn};
 
+use uuid::Uuid;
+
 use crate::config::Config;
 use crate::infra::fuse::mount::FuseMountManager;
 use crate::infra::storage::remote::RemoteStoragePool;
@@ -77,8 +79,8 @@ async fn send_handshake_error(tx: &mpsc::Sender<ServerStorageMessage>, error_msg
 
 /// Authentication result from token verification.
 enum AuthResult {
-    /// Authenticated via API Key — contains the tenant_id
-    ApiKey { tenant_id: String },
+    /// Authenticated via API Key — contains the tenant_id as Uuid
+    ApiKey { tenant_id: Uuid },
 }
 
 /// Verify the Client token.
@@ -117,7 +119,7 @@ async fn verify_token(
     api_key_usage.update(key.id);
 
     Ok(AuthResult::ApiKey {
-        tenant_id: tenant.id.to_string(),
+        tenant_id: tenant.id,
     })
 }
 
@@ -198,8 +200,23 @@ impl ClientStorageService for ClientStorageServiceImpl {
             };
 
             // Verify the tenant owns this workspace/namespace
-            let AuthResult::ApiKey { ref tenant_id } = auth_result;
-            if *tenant_id != workspace_id {
+            let AuthResult::ApiKey { tenant_id } = auth_result;
+            let workspace_uuid = match Uuid::parse_str(&workspace_id) {
+                Ok(u) => u,
+                Err(_) => {
+                    send_handshake_error(
+                        &out_tx_clone,
+                        format!("invalid namespace ID: {}", workspace_id),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            // Normalize workspace_id to simple (no-hyphen) UUID for consistent keying
+            let workspace_id = workspace_uuid.simple().to_string();
+
+            if tenant_id != workspace_uuid {
                 send_handshake_error(
                     &out_tx_clone,
                     "API key does not have access to this workspace".to_string(),
@@ -214,19 +231,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
             }
 
             // ── Step 3: Verify tenant exists and uses remote storage ──
-            let tenant_uuid = match uuid::Uuid::parse_str(&workspace_id) {
-                Ok(u) => u,
-                Err(_) => {
-                    send_handshake_error(
-                        &out_tx_clone,
-                        format!("invalid namespace ID: {}", workspace_id),
-                    )
-                    .await;
-                    return;
-                }
-            };
-
-            let tenant = match tenant_repository.get_tenant(tenant_uuid).await {
+            let tenant = match tenant_repository.get_tenant(tenant_id).await {
                 Ok(t) => t,
                 Err(_) => {
                     send_handshake_error(

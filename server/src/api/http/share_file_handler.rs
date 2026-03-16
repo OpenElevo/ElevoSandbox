@@ -14,6 +14,7 @@ use uuid::Uuid;
 
 use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
+use crate::domain::UuidSimple;
 use crate::service::path_security;
 use crate::AppState;
 
@@ -25,11 +26,11 @@ use super::workspace::{
 /// Remote backends are registered under bare `{tenant_uuid}`, while
 /// local backends use `"namespaces/{tenant_uuid}"`.
 fn resolve_storage_id(share: &crate::domain::share::Share, state: &AppState) -> String {
-    let bare_id = share.owner_tenant_id.to_string();
+    let bare_id = share.owner_tenant_id.simple_string();
     if state.workspace_service.storage_router().has_override(&bare_id) {
         bare_id
     } else {
-        format!("namespaces/{}", share.owner_tenant_id)
+        format!("namespaces/{}", share.owner_tenant_id.simple_string())
     }
 }
 

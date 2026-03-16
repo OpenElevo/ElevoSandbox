@@ -9,6 +9,7 @@ use tokio::time::timeout;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::domain::UuidSimple;
 use crate::error::{Error, Result};
 
 /// Default timeout for agent responses
@@ -218,7 +219,7 @@ impl AgentConnPool {
             .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
 
         // Create oneshot channel for response
         let (response_tx, response_rx) = oneshot::channel();
@@ -277,7 +278,7 @@ impl AgentConnPool {
             .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
 
         let msg = AgentMessageType::KillProcess {
             correlation_id,
@@ -308,7 +309,7 @@ impl AgentConnPool {
             .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
 
         let msg = AgentMessageType::CreatePty {
             correlation_id,
@@ -340,7 +341,7 @@ impl AgentConnPool {
             .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
 
         let msg = AgentMessageType::ResizePty {
             correlation_id,
@@ -364,7 +365,7 @@ impl AgentConnPool {
             .get(sandbox_id)
             .ok_or_else(|| Error::AgentNotConnected(sandbox_id.to_string()))?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
 
         let msg = AgentMessageType::KillPty {
             correlation_id,

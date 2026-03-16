@@ -249,7 +249,7 @@ fn default_grpc_port() -> u16 {
 }
 
 fn default_database_url() -> String {
-    "postgres://elevo:elevo@localhost:5432/elevo".to_string()
+    "postgres://workspace:workspace@localhost:5432/workspace".to_string()
 }
 
 fn default_docker_socket() -> String {

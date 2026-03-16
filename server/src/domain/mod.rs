@@ -1,5 +1,19 @@
 //! Domain models
 
+use uuid::Uuid;
+
+/// Extension trait to format `Uuid` as simple string (no hyphens).
+pub trait UuidSimple {
+    /// Returns the UUID as a simple string without hyphens.
+    fn simple_string(&self) -> String;
+}
+
+impl UuidSimple for Uuid {
+    fn simple_string(&self) -> String {
+        self.simple().to_string()
+    }
+}
+
 pub mod audit;
 pub mod auth;
 pub mod permission;

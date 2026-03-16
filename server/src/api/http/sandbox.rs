@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::domain::auth::AuthContext;
 use crate::domain::sandbox::{CreateSandboxParams, SandboxState};
 use crate::domain::share::MountRequest;
+use crate::domain::UuidSimple;
 use crate::service::path_security;
 use crate::AppState;
 
@@ -76,8 +77,8 @@ pub struct DeleteQuery {
 
 fn sandbox_to_response(sandbox: crate::domain::sandbox::Sandbox) -> SandboxResponse {
     SandboxResponse {
-        id: sandbox.id.to_string(),
-        namespace_id: sandbox.namespace_id.to_string(),
+        id: sandbox.id.simple_string(),
+        namespace_id: sandbox.namespace_id.simple_string(),
         namespace_name: sandbox.namespace_name,
         root_path: sandbox.root_path,
         name: sandbox.name,
@@ -495,7 +496,7 @@ pub async fn batch_delete_sandboxes(
                 filtered.truncate(100);
                 filtered
                     .iter()
-                    .map(|sb| (sb.id, sb.id.to_string()))
+                    .map(|sb| (sb.id, sb.id.simple_string()))
                     .collect()
             }
             Err(e) => {

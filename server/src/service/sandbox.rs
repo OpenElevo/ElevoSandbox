@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::domain::permission::PermissionLevel;
 use crate::domain::sandbox::{CreateSandboxParams, Sandbox, SandboxState};
+use crate::domain::UuidSimple;
 use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::docker::{CreateContainerOpts, DockerManager};
@@ -77,7 +78,7 @@ impl SandboxService {
 
             let host_path = self
                 .config
-                .get_share_host_path(&share.owner_tenant_id.to_string(), &share.source_path);
+                .get_share_host_path(&share.owner_tenant_id.simple_string(), &share.source_path);
             // Validate mount_path is absolute and doesn't conflict with /workspace
             if !mount.mount_path.starts_with('/') {
                 return Err(Error::InvalidParameter(
@@ -98,7 +99,7 @@ impl SandboxService {
         // Create database record (includes sandbox_mounts)
         let sandbox = self.repository.create(params.clone()).await?;
         let sandbox_id = sandbox.id;
-        let sandbox_id_str = sandbox_id.to_string();
+        let sandbox_id_str = sandbox_id.simple_string();
 
         // Build container
         let template = params
@@ -109,7 +110,7 @@ impl SandboxService {
         env.insert("WORKSPACE_SANDBOX_ID".to_string(), sandbox_id_str.clone());
         env.insert(
             "WORKSPACE_NAMESPACE_ID".to_string(),
-            namespace_id.to_string(),
+            namespace_id.simple_string(),
         );
         env.insert(
             "WORKSPACE_SERVER_ADDR".to_string(),
@@ -119,7 +120,7 @@ impl SandboxService {
         // Primary volume: namespace root_path → /workspace
         let volume_host_path = self
             .config
-            .get_namespace_workspace_host_path(&namespace_id.to_string(), &params.root_path);
+            .get_namespace_workspace_host_path(&namespace_id.simple_string(), &params.root_path);
         let mut volumes = HashMap::new();
         volumes.insert(volume_host_path, "/workspace".to_string());
 
@@ -137,7 +138,7 @@ impl SandboxService {
         labels.insert(SANDBOX_LABEL_KEY.to_string(), sandbox_id_str.clone());
         labels.insert(
             "workspace.namespace.id".to_string(),
-            namespace_id.to_string(),
+            namespace_id.simple_string(),
         );
 
         let network_mode = self
@@ -322,7 +323,7 @@ impl SandboxService {
     fn get_namespace_dir(&self, namespace_id: Uuid, root_path: &str) -> PathBuf {
         let base = PathBuf::from(&self.config.workspace_dir)
             .join("namespaces")
-            .join(namespace_id.to_string());
+            .join(namespace_id.simple_string());
         let trimmed = root_path.trim_start_matches('/');
         if trimmed.is_empty() {
             base

@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::domain::sandbox::{
     CreateSandboxParams, Sandbox as DomainSandbox, SandboxState as DomainSandboxState,
 };
+use crate::domain::UuidSimple;
 use crate::error::Error;
 use crate::proto::{
     sandbox_service_server::SandboxService, CreateSandboxRequest, CreateSandboxResponse,
@@ -59,8 +60,8 @@ fn state_from_proto(state: i32) -> Option<DomainSandboxState> {
 /// Convert domain Sandbox to proto Sandbox
 fn sandbox_to_proto(sb: DomainSandbox) -> ProtoSandbox {
     ProtoSandbox {
-        id: sb.id.to_string(),
-        workspace_id: sb.namespace_id.to_string(),
+        id: sb.id.simple_string(),
+        workspace_id: sb.namespace_id.simple_string(),
         name: sb.name,
         template: sb.template,
         state: state_to_proto(sb.state),
@@ -76,7 +77,7 @@ fn sandbox_to_proto(sb: DomainSandbox) -> ProtoSandbox {
         }),
         timeout: sb.timeout as u64,
         error_message: sb.error_message,
-        namespace_id: Some(sb.namespace_id.to_string()),
+        namespace_id: Some(sb.namespace_id.simple_string()),
         root_path: sb.root_path,
         mounts: vec![],
     }

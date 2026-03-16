@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::domain::workspace::{
     CreateWorkspaceParams, RemoteStorageConfig, StorageType, Workspace,
 };
+use crate::domain::UuidSimple;
 use crate::error::{Error, Result};
 
 /// Database row for workspace
@@ -46,7 +47,7 @@ impl TryFrom<WorkspaceRow> for Workspace {
         }
 
         Ok(Workspace {
-            id: row.id.to_string(),
+            id: row.id.simple_string(),
             name: row.name,
             nfs_url: row.nfs_url,
             storage_type,
@@ -100,7 +101,7 @@ impl WorkspaceRepository {
         .execute(&self.pool)
         .await?;
 
-        self.get(&id.to_string()).await
+        self.get(&id.simple_string()).await
     }
 
     /// Get a workspace by ID

@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::domain::sandbox::SandboxState;
 use crate::domain::types::{PtyInfo, PtyOptions};
+use crate::domain::UuidSimple;
 use crate::error::{Error, Result};
 use crate::infra::agent_pool::AgentConnPool;
 use crate::infra::postgres::SandboxRepository;
@@ -46,7 +47,7 @@ impl PtyService {
             return Err(Error::AgentNotConnected(sandbox_id.to_string()));
         }
 
-        let pty_id = Uuid::now_v7().to_string();
+        let pty_id = Uuid::now_v7().simple_string();
         let cols = opts.cols.unwrap_or(80) as u32;
         let rows = opts.rows.unwrap_or(24) as u32;
 

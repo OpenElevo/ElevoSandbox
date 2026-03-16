@@ -381,6 +381,7 @@ impl LeaseRenewalTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::UuidSimple;
     use uuid::Uuid;
 
     /// Helper: create a test tenant and return its UUID as namespace_id
@@ -415,7 +416,7 @@ mod tests {
     async fn test_acquire_and_check(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         let lease = mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
         assert_eq!(lease.workspace_id, namespace_id_str);
@@ -430,7 +431,7 @@ mod tests {
     async fn test_acquire_already_held(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
@@ -445,7 +446,7 @@ mod tests {
     async fn test_acquire_same_holder_re_acquire(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
@@ -457,7 +458,7 @@ mod tests {
     async fn test_acquire_expired_lease(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
         expire_lease(&pool, namespace_id).await;
@@ -470,7 +471,7 @@ mod tests {
     async fn test_renew(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
@@ -483,7 +484,7 @@ mod tests {
     async fn test_renew_wrong_holder(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
@@ -495,7 +496,7 @@ mod tests {
     async fn test_release(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
         mgr.release(&namespace_id_str, "server-1").await.unwrap();
@@ -508,7 +509,7 @@ mod tests {
     async fn test_release_wrong_holder(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool);
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
 
@@ -525,7 +526,7 @@ mod tests {
         // Use a valid UUID that doesn't exist in tenants table
         // This will return None since no lease exists
         let nonexistent_uuid = Uuid::now_v7();
-        let checked = mgr.check(&nonexistent_uuid.to_string()).await.unwrap();
+        let checked = mgr.check(&nonexistent_uuid.simple_string()).await.unwrap();
         assert!(checked.is_none());
     }
 
@@ -533,7 +534,7 @@ mod tests {
     async fn test_check_expired_returns_none(pool: PgPool) {
         let namespace_id = create_test_tenant(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
-        let namespace_id_str = namespace_id.to_string();
+        let namespace_id_str = namespace_id.simple_string();
 
         mgr.acquire(&namespace_id_str, "server-1").await.unwrap();
         expire_lease(&pool, namespace_id).await;

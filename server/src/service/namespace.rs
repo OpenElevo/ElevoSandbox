@@ -12,6 +12,7 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::domain::UuidSimple;
 
 /// Manages physical namespace directories on the filesystem
 #[derive(Clone)]
@@ -48,7 +49,7 @@ impl NamespaceService {
 
     /// Create a namespace directory for a tenant
     pub async fn create_namespace_dir(&self, tenant_id: Uuid) -> std::io::Result<PathBuf> {
-        let dir = self.namespaces_dir.join(tenant_id.to_string());
+        let dir = self.namespaces_dir.join(tenant_id.simple_string());
         fs::create_dir_all(&dir).await?;
         info!("Created namespace directory: {}", dir.display());
         Ok(dir)
@@ -56,7 +57,7 @@ impl NamespaceService {
 
     /// Soft-delete a namespace directory by moving it to trash
     pub async fn delete_namespace_dir(&self, tenant_id: Uuid) -> std::io::Result<()> {
-        let dir = self.namespaces_dir.join(tenant_id.to_string());
+        let dir = self.namespaces_dir.join(tenant_id.simple_string());
         if !dir.exists() {
             warn!(
                 "Namespace directory does not exist, skipping delete: {}",
@@ -80,12 +81,12 @@ impl NamespaceService {
 
     /// Get the path for a namespace directory
     pub fn namespace_path(&self, tenant_id: Uuid) -> PathBuf {
-        self.namespaces_dir.join(tenant_id.to_string())
+        self.namespaces_dir.join(tenant_id.simple_string())
     }
 
     /// Get a sub-path within a namespace
     pub fn namespace_subpath(&self, tenant_id: Uuid, subpath: &str) -> PathBuf {
-        let base = self.namespaces_dir.join(tenant_id.to_string());
+        let base = self.namespaces_dir.join(tenant_id.simple_string());
         let trimmed = subpath.trim_start_matches('/');
         if trimmed.is_empty() {
             base

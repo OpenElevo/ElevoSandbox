@@ -11,6 +11,7 @@ use tokio::sync::{mpsc, oneshot, Notify, Semaphore};
 use tracing::{debug, warn};
 use uuid::Uuid;
 
+use crate::domain::UuidSimple;
 use crate::proto::{
     server_storage_message, storage_operation_request, storage_operation_response,
     storage_operation_success, CopyRequest, CreateFileRequest, DataTransferOperation,
@@ -405,7 +406,7 @@ impl RemoteStorageBackend {
         // Wait for connection (with op_timeout) instead of failing immediately
         self.ensure_connected().await?;
 
-        let correlation_id = Uuid::now_v7().to_string();
+        let correlation_id = Uuid::now_v7().simple_string();
         let (resp_tx, resp_rx) = oneshot::channel();
 
         // Register waiter
@@ -541,7 +542,7 @@ impl RemoteStorageBackend {
     async fn write_file_via_data_stream(&self, path: &str, content: &[u8]) -> StorageResult<()> {
         self.ensure_connected().await?;
 
-        let transfer_id = Uuid::now_v7().to_string();
+        let transfer_id = Uuid::now_v7().simple_string();
         let data = Arc::new(content.to_vec());
 
         // Store write data for the Client to fetch via WriteFileStream RPC
@@ -633,7 +634,7 @@ impl RemoteStorageBackend {
     async fn read_file_via_data_stream(&self, path: &str) -> StorageResult<Vec<u8>> {
         self.ensure_connected().await?;
 
-        let transfer_id = Uuid::now_v7().to_string();
+        let transfer_id = Uuid::now_v7().simple_string();
 
         // Register transfer waiter
         let rx = self.register_transfer(transfer_id.clone());

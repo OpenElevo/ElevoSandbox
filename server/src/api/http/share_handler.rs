@@ -12,6 +12,7 @@ use crate::domain::auth::AuthContext;
 use crate::domain::permission::PermissionLevel;
 use crate::domain::share::{CreateShareParams, ShareFilter, UpdateShareParams};
 use crate::domain::tenant::Pagination;
+use crate::domain::UuidSimple;
 use crate::service::path_security;
 use crate::AppState;
 
@@ -101,11 +102,23 @@ pub async fn create_share(
     };
 
     if tenant.is_remote() {
-        // Remote tenant: check via StorageBackend (gRPC to StorageProvider)
+        // Remote tenant: StorageProvider must be connected
+        let storage_id = owner_id.simple_string();
+        if !state.workspace_service.storage_router().has_override(&storage_id) {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": {"code": "SERVICE_UNAVAILABLE", "message": "远程存储未连接，StorageProvider 尚未上线"}
+                })),
+            )
+                .into_response();
+        }
+
+        // Check source_path exists via StorageBackend (gRPC to StorageProvider)
         match state
             .workspace_service
             .storage()
-            .stat(&owner_id.to_string(), &params.source_path)
+            .stat(&storage_id, &params.source_path)
             .await
         {
             Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {}
