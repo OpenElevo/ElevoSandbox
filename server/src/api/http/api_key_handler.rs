@@ -215,6 +215,73 @@ pub async fn revoke_api_key(
     }
 }
 
+/// GET /api/v1/tenants/:id/keys/:key_id/token
+pub async fn get_api_key_token(
+    State(state): State<AppState>,
+    Path((tenant_id, key_id)): Path<(String, String)>,
+    request: axum::extract::Request,
+) -> impl IntoResponse {
+    let auth = match request.extensions().get::<AuthContext>() {
+        Some(a) => a,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(serde_json::json!({
+                    "error": { "code": "UNAUTHORIZED", "message": "Not authenticated" }
+                })),
+            )
+                .into_response()
+        }
+    };
+    if !auth.is_admin() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": { "code": "FORBIDDEN", "message": "Admin access required" }
+            })),
+        )
+            .into_response();
+    }
+
+    let tenant_uuid = match Uuid::parse_str(&tenant_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid tenant ID"),
+    };
+
+    let key_uuid = match Uuid::parse_str(&key_id) {
+        Ok(u) => u,
+        Err(_) => return bad_request("Invalid key ID"),
+    };
+
+    // Verify the key belongs to this tenant
+    let key = match state.tenant_repository.get_api_key(key_uuid).await {
+        Ok(k) => k,
+        Err(e) => return super::tenant_handler::error_response(e),
+    };
+    if key.tenant_id != tenant_uuid {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({
+                "error": { "code": "NOT_FOUND", "message": "API key not found for this tenant" }
+            })),
+        )
+            .into_response();
+    }
+
+    match state
+        .tenant_repository
+        .get_api_key_plaintext(key_uuid)
+        .await
+    {
+        Ok(token) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "token": token })),
+        )
+            .into_response(),
+        Err(e) => super::tenant_handler::error_response(e),
+    }
+}
+
 fn bad_request(msg: &str) -> axum::response::Response {
     (
         StatusCode::BAD_REQUEST,

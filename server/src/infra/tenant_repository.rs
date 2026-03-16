@@ -53,6 +53,7 @@ struct ApiKeyRow {
     tenant_id: Uuid,
     name: String,
     token_prefix: String,
+    token_plaintext: Option<String>,
     is_active: bool,
     expires_at: Option<DateTime<Utc>>,
     last_used_at: Option<DateTime<Utc>>,
@@ -80,6 +81,7 @@ fn api_key_from_row(row: ApiKeyRow) -> ApiKey {
         tenant_id: row.tenant_id,
         name: row.name,
         token_prefix: row.token_prefix,
+        token_plaintext: row.token_plaintext,
         is_active: row.is_active,
         expires_at: row.expires_at,
         last_used_at: row.last_used_at,
@@ -471,8 +473,8 @@ impl TenantRepository {
 
         sqlx::query(
             r#"
-            INSERT INTO api_keys (id, tenant_id, name, token_hash, token_prefix, is_active, expires_at, created_at)
-            VALUES ($1, $2, $3, $4, $5, true, $6, $7)
+            INSERT INTO api_keys (id, tenant_id, name, token_hash, token_prefix, token_plaintext, is_active, expires_at, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8)
             "#,
         )
         .bind(id)
@@ -480,6 +482,7 @@ impl TenantRepository {
         .bind(&params.name)
         .bind(&hash)
         .bind(&prefix)
+        .bind(&token)
         .bind(params.expires_at)
         .bind(now)
         .execute(&mut **tx)
@@ -490,6 +493,7 @@ impl TenantRepository {
             tenant_id,
             name: params.name,
             token_prefix: prefix,
+            token_plaintext: Some(token.clone()),
             is_active: true,
             expires_at: params.expires_at,
             last_used_at: None,
@@ -499,10 +503,10 @@ impl TenantRepository {
         Ok((key, token))
     }
 
-    /// Get a single API key by its ID
+    /// Get a single API key by its ID (includes token_plaintext)
     pub async fn get_api_key(&self, key_id: Uuid) -> Result<ApiKey> {
         let row = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, tenant_id, name, token_prefix, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE id = $1",
+            "SELECT id, tenant_id, name, token_prefix, token_plaintext, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE id = $1",
         )
         .bind(key_id)
         .fetch_optional(&self.pool)
@@ -512,10 +516,24 @@ impl TenantRepository {
         Ok(api_key_from_row(row))
     }
 
-    /// List API keys for a tenant
+    /// Get plaintext token for an API key
+    pub async fn get_api_key_plaintext(&self, key_id: Uuid) -> Result<String> {
+        let plaintext: Option<String> =
+            sqlx::query_scalar("SELECT token_plaintext FROM api_keys WHERE id = $1")
+                .bind(key_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .flatten();
+
+        plaintext.ok_or_else(|| {
+            Error::WorkspaceNotFound(format!("API key not found: {}", key_id))
+        })
+    }
+
+    /// List API keys for a tenant (token_plaintext is excluded)
     pub async fn list_api_keys(&self, tenant_id: Uuid) -> Result<Vec<ApiKey>> {
         let rows = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, tenant_id, name, token_prefix, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC",
+            "SELECT id, tenant_id, name, token_prefix, NULL as token_plaintext, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC",
         )
         .bind(tenant_id)
         .fetch_all(&self.pool)
@@ -546,7 +564,7 @@ impl TenantRepository {
         let hash = hash_token(token);
 
         let row = sqlx::query_as::<_, ApiKeyRow>(
-            "SELECT id, tenant_id, name, token_prefix, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE token_hash = $1",
+            "SELECT id, tenant_id, name, token_prefix, NULL as token_plaintext, is_active, expires_at, last_used_at, created_at FROM api_keys WHERE token_hash = $1",
         )
         .bind(&hash)
         .fetch_optional(&self.pool)

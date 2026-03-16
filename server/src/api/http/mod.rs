@@ -200,6 +200,10 @@ pub fn create_router(state: AppState) -> Router {
             "/tenants/{id}/keys/{key_id}",
             delete(api_key_handler::revoke_api_key),
         )
+        .route(
+            "/tenants/{id}/keys/{key_id}/token",
+            get(api_key_handler::get_api_key_token),
+        )
         // Tenant permissions
         .route(
             "/tenants/{id}/permissions",

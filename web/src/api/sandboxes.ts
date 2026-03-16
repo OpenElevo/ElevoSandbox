@@ -3,7 +3,8 @@ import type { Sandbox } from '@/types';
 
 export async function listSandboxes(params?: Record<string, string | number>) {
   const res = await client.get('/sandboxes', { params });
-  return res.data as { sandboxes: Sandbox[]; total: number };
+  const raw = res.data as { sandboxes?: Sandbox[]; items?: Sandbox[]; total: number };
+  return { sandboxes: raw.sandboxes ?? raw.items ?? [], total: raw.total };
 }
 
 export async function getSandbox(id: string) {

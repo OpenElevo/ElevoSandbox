@@ -33,6 +33,8 @@ pub struct ApiKey {
     pub tenant_id: Uuid,
     pub name: String,
     pub token_prefix: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token_plaintext: Option<String>,
     pub is_active: bool,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,

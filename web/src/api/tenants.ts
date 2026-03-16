@@ -3,7 +3,8 @@ import type { Tenant, CreateTenantParams, UpdateTenantParams, ApiKey } from '@/t
 
 export async function listTenants(params?: Record<string, string | number | boolean>) {
   const res = await client.get('/tenants', { params });
-  return res.data as { tenants: Tenant[]; total: number };
+  const raw = res.data as { tenants?: Tenant[]; items?: Tenant[]; total: number };
+  return { tenants: raw.tenants ?? raw.items ?? [], total: raw.total };
 }
 
 export async function getTenant(id: string) {
@@ -47,6 +48,11 @@ export async function createApiKey(tenantId: string, params: { name: string; exp
 
 export async function revokeApiKey(tenantId: string, keyId: string) {
   await client.delete(`/tenants/${tenantId}/keys/${keyId}`);
+}
+
+export async function getApiKeyToken(tenantId: string, keyId: string) {
+  const res = await client.get(`/tenants/${tenantId}/keys/${keyId}/token`);
+  return res.data.token as string;
 }
 
 export async function listTenantPermissions(tenantId: string) {

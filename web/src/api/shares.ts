@@ -3,7 +3,8 @@ import type { Share, CreateShareParams, UpdateShareParams, SharePermission, Perm
 
 export async function listShares(params?: Record<string, string | number>) {
   const res = await client.get('/shares', { params });
-  return res.data as { shares: Share[]; total: number };
+  const raw = res.data as { shares?: Share[]; items?: Share[]; total: number };
+  return { shares: raw.shares ?? raw.items ?? [], total: raw.total };
 }
 
 export async function getShare(id: string) {

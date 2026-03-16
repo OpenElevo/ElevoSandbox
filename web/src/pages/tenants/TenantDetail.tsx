@@ -8,7 +8,7 @@ import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   getTenant, updateTenant, activateTenant, deactivateTenant,
-  listApiKeys, createApiKey, revokeApiKey, listTenantPermissions,
+  listApiKeys, createApiKey, revokeApiKey, getApiKeyToken, listTenantPermissions,
 } from '@/api/tenants';
 import { listShares } from '@/api/shares';
 import type { ApiKey, SharePermission } from '@/types';
@@ -67,7 +67,7 @@ function TokenDisplayModal({ data, acked, onAckedChange, onClose }: TokenDisplay
       <Alert
         type="warning"
         message="API Key 创建成功"
-        description="请立即复制并妥善保存以下 Token，此 Token 仅展示一次，关闭后无法再查看。"
+        description="请立即复制并妥善保存以下 Token。你也可以随时通过列表中的复制按钮再次获取。"
         showIcon
         style={{ marginBottom: 12 }}
       />
@@ -218,9 +218,22 @@ export default function TenantDetail() {
 
   if (isLoading || !tenant) return <Card loading />;
 
+  const handleCopyToken = async (key: ApiKey) => {
+    try {
+      const token = await getApiKeyToken(id!, key.id);
+      await navigator.clipboard.writeText(token);
+      message.success('Token 已复制到剪贴板');
+    } catch {
+      message.error('复制失败，请重试');
+    }
+  };
+
   const keyColumns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: '前缀', dataIndex: 'token_prefix', key: 'prefix' },
+    {
+      title: '前缀', dataIndex: 'token_prefix', key: 'prefix',
+      render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
+    },
     {
       title: '状态', key: 'status',
       render: (_: unknown, record: ApiKey) => {
@@ -239,10 +252,15 @@ export default function TenantDetail() {
     { title: '创建时间', dataIndex: 'created_at', key: 'created', render: (v: string) => formatTime(v) },
     {
       title: '操作', key: 'actions',
-      render: (_: unknown, record: ApiKey) =>
-        record.is_active && (!record.expires_at || dayjs(record.expires_at).isAfter(dayjs())) ? (
-          <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
-        ) : null,
+      render: (_: unknown, record: ApiKey) => {
+        const isActive = record.is_active && (!record.expires_at || dayjs(record.expires_at).isAfter(dayjs()));
+        return isActive ? (
+          <Space size={4}>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => handleCopyToken(record)}>复制</Button>
+            <Button size="small" danger onClick={() => handleRevokeKey(record)}>撤销</Button>
+          </Space>
+        ) : null;
+      },
     },
   ];
 
@@ -316,7 +334,10 @@ export default function TenantDetail() {
           {
             key: 'keys', label: 'API Keys', children: (
               <div>
-                <Button type="primary" size="small" onClick={() => setKeyDrawerOpen(true)} style={{ marginBottom: 12 }}>
+                <Button type="primary" size="small" onClick={() => {
+                  keyForm.setFieldsValue({ name: `key-${Date.now().toString(36)}` });
+                  setKeyDrawerOpen(true);
+                }} style={{ marginBottom: 12 }}>
                   创建 Key
                 </Button>
                 <Table dataSource={apiKeys ?? []} columns={keyColumns} rowKey="id" size="small" pagination={false} />

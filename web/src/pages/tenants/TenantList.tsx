@@ -92,7 +92,7 @@ export default function TenantList() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form] = Form.useForm();
   const [createApiKey, setCreateApiKey] = useState(false);
-  const [storageType, setStorageType] = useState<'local' | 'remote'>('local');
+  const [storageType, setStorageType] = useState<'managed' | 'remote'>('managed');
   const [tokenModal, setTokenModal] = useState<TokenModalData | null>(null);
   const [tokenAcked, setTokenAcked] = useState(false);
 
@@ -123,7 +123,7 @@ export default function TenantList() {
       setDrawerOpen(false);
       form.resetFields();
       setCreateApiKey(false);
-      setStorageType('local');
+      setStorageType('managed');
       message.success('租户已创建');
       if (result.api_key) {
         setTokenAcked(false);
@@ -259,7 +259,7 @@ export default function TenantList() {
           style={{ width: 120 }}
           options={[
             { label: '全部', value: undefined },
-            { label: '托管', value: 'local' },
+            { label: '托管', value: 'managed' },
             { label: '远程', value: 'remote' },
           ].filter((o) => o.value !== undefined)}
         />
@@ -284,7 +284,7 @@ export default function TenantList() {
           setDrawerOpen(false);
           form.resetFields();
           setCreateApiKey(false);
-          setStorageType('local');
+          setStorageType('managed');
         }}
         width={520}
         extra={
@@ -296,7 +296,7 @@ export default function TenantList() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ storage_type: 'local' }}
+          initialValues={{ storage_type: 'managed' }}
         >
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入租户名称' }]}>
             <Input placeholder="租户名称" />
@@ -308,7 +308,7 @@ export default function TenantList() {
           {/* Storage type */}
           <Form.Item name="storage_type" label="存储类型">
             <Radio.Group onChange={(e) => setStorageType(e.target.value)}>
-              <Radio value="local">托管</Radio>
+              <Radio value="managed">托管</Radio>
               <Radio value="remote">远程</Radio>
             </Radio.Group>
           </Form.Item>
@@ -337,7 +337,12 @@ export default function TenantList() {
           <Form.Item style={{ marginBottom: 0 }}>
             <Checkbox
               checked={createApiKey}
-              onChange={(e) => setCreateApiKey(e.target.checked)}
+              onChange={(e) => {
+                setCreateApiKey(e.target.checked);
+                if (e.target.checked) {
+                  form.setFieldValue('api_key_name', `key-${Date.now().toString(36)}`);
+                }
+              }}
             >
               同时创建第一个 API Key
             </Checkbox>
