@@ -1,13 +1,15 @@
 # Workspace base image with agent
 # Uses pre-built binary (compiled with docker_complie.sh for glibc compatibility)
-FROM ubuntu:24.04
+FROM docker.1ms.run/ubuntu:24.04
 
 LABEL maintainer="Elevo Team"
 LABEL org.opencontainers.image.source="https://github.com/OpenElevo/ElevoWorkspace"
 LABEL org.opencontainers.image.description="Elevo Workspace Base Image with Agent"
 
 # Install development tools commonly needed in workspaces
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true \
+    && sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true \
+    && apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     make \
