@@ -78,9 +78,11 @@ pub struct UpdateShareParams {
 /// Filter for listing shares
 #[derive(Debug, Default, Deserialize)]
 pub struct ShareFilter {
-    #[serde(serialize_with = "super::simple_uuid::serialize_option", deserialize_with = "super::simple_uuid::deserialize_option")]
+    #[serde(default, serialize_with = "super::simple_uuid::serialize_option", deserialize_with = "super::simple_uuid::deserialize_option")]
     pub owner_tenant_id: Option<Uuid>,
+    #[serde(default)]
     pub visibility: Option<String>,
+    #[serde(default)]
     pub search: Option<String>,
 }
 

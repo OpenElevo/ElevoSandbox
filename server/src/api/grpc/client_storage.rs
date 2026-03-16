@@ -213,9 +213,6 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 }
             };
 
-            // Normalize workspace_id to simple (no-hyphen) UUID for consistent keying
-            let workspace_id = workspace_uuid.simple().to_string();
-
             if tenant_id != workspace_uuid {
                 send_handshake_error(
                     &out_tx_clone,
