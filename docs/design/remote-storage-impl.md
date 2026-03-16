@@ -435,7 +435,7 @@ syntax = "proto3";
 
 package workspace.v1;
 
-option go_package = "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1";
+option go_package = "github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1";
 
 import "google/protobuf/timestamp.proto";
 
@@ -3145,7 +3145,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	pb "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1"
 )
 
 // StorageProviderConfig 配置
@@ -3561,7 +3561,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-	pb "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1"
 )
 
 // executeOperation 分发操作请求到对应的处理函数
@@ -4203,7 +4203,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	pb "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1"
 )
 
 // 默认忽略的目录

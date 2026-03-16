@@ -3510,7 +3510,7 @@ const file_workspace_v1_client_storage_proto_rawDesc = "" +
 	"\x14ClientStorageService\x12N\n" +
 	"\aConnect\x12\x1b.workspace.v1.ClientMessage\x1a\".workspace.v1.ServerStorageMessage(\x010\x01\x12]\n" +
 	"\x0eReadFileStream\x12#.workspace.v1.ReadFileStreamRequest\x1a$.workspace.v1.ReadFileStreamResponse(\x01\x12`\n" +
-	"\x0fWriteFileStream\x12$.workspace.v1.WriteFileStreamRequest\x1a%.workspace.v1.WriteFileStreamResponse0\x01B6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\x0fWriteFileStream\x12$.workspace.v1.WriteFileStreamRequest\x1a%.workspace.v1.WriteFileStreamResponse0\x01B8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_client_storage_proto_rawDescOnce sync.Once

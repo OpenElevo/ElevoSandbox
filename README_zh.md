@@ -1,9 +1,9 @@
-# ElevoSandbox
+# ElevoWorkspace
 
-[![CI](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml)
+[![CI](https://github.com/OpenElevo/ElevoWorkspace/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoWorkspace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-ElevoSandbox 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
+ElevoWorkspace 是一个统一的沙盒工作空间服务，为 AI Agent 提供安全隔离的代码执行环境。
 
 ## 特性
 
@@ -16,7 +16,7 @@ ElevoSandbox 是一个统一的沙盒工作空间服务，为 AI Agent 提供安
 ## 项目结构
 
 ```
-ElevoSandbox/
+ElevoWorkspace/
 ├── server/                 # Rust 服务端 (HTTP API + MCP)
 ├── agent/                  # Rust Agent (运行在容器内)
 ├── sdk-go/                 # Go SDK
@@ -286,7 +286,7 @@ Stdio 模式用于本地 CLI 集成，如 Claude Desktop。
 ### Go SDK
 
 ```bash
-go get github.com/OpenElevo/ElevoSandbox/sdk-go
+go get github.com/OpenElevo/ElevoWorkspace/sdk-go
 ```
 
 ```go
@@ -297,7 +297,7 @@ import (
     "fmt"
     "log"
 
-    workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
+    workspace "github.com/OpenElevo/ElevoWorkspace/sdk-go"
 )
 
 func main() {

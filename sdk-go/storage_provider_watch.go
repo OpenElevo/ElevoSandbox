@@ -13,7 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 )
 
 // Default directories to ignore when watching for file changes.

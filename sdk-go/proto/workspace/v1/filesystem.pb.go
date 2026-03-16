@@ -2363,7 +2363,7 @@ const file_workspace_v1_filesystem_proto_rawDesc = "" +
 	"\x06ReadAt\x12\x1d.workspace.v1.FsReadAtRequest\x1a\x1e.workspace.v1.FsReadAtResponse\x12J\n" +
 	"\aWriteAt\x12\x1e.workspace.v1.FsWriteAtRequest\x1a\x1f.workspace.v1.FsWriteAtResponse\x12G\n" +
 	"\x06StatFs\x12\x1d.workspace.v1.FsStatFsRequest\x1a\x1e.workspace.v1.FsStatFsResponse\x12]\n" +
-	"\x0eDownloadBinary\x12#.workspace.v1.DownloadBinaryRequest\x1a$.workspace.v1.DownloadBinaryResponse0\x01B6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\x0eDownloadBinary\x12#.workspace.v1.DownloadBinaryRequest\x1a$.workspace.v1.DownloadBinaryResponse0\x01B8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_filesystem_proto_rawDescOnce sync.Once

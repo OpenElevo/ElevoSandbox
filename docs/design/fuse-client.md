@@ -97,7 +97,7 @@ syntax = "proto3";
 
 package workspace.v1;
 
-option go_package = "github.com/OpenElevo/ElevoSandbox/proto/workspace/v1";
+option go_package = "github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1";
 
 import "google/protobuf/timestamp.proto";
 
@@ -1532,7 +1532,7 @@ Cargo.toml                          # 修改：workspace members 新增 workspac
 │      GET /api/v1/downloads/workspace-fuse/{platform}/{arch}      │
 │      ↓ (失败时)                                                  │
 │   3. 从 GitHub Releases 下载 (fallback)                          │
-│      https://github.com/OpenElevo/ElevoSandbox/releases/...      │
+│      https://github.com/OpenElevo/ElevoWorkspace/releases/...      │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```

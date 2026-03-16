@@ -816,7 +816,7 @@ const file_workspace_v1_pty_proto_rawDesc = "" +
 	"\tCreatePty\x12\x1e.workspace.v1.CreatePtyRequest\x1a\x1f.workspace.v1.CreatePtyResponse\x12L\n" +
 	"\tResizePty\x12\x1e.workspace.v1.ResizePtyRequest\x1a\x1f.workspace.v1.ResizePtyResponse\x12F\n" +
 	"\aKillPty\x12\x1c.workspace.v1.KillPtyRequest\x1a\x1d.workspace.v1.KillPtyResponse\x12P\n" +
-	"\tPtyStream\x12\x1e.workspace.v1.PtyStreamRequest\x1a\x1f.workspace.v1.PtyStreamResponse(\x010\x01B6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\tPtyStream\x12\x1e.workspace.v1.PtyStreamRequest\x1a\x1f.workspace.v1.PtyStreamResponse(\x010\x01B8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_pty_proto_rawDescOnce sync.Once

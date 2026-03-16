@@ -15,7 +15,7 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Elevo Team"]
 license = "MIT"
-repository = "https://github.com/OpenElevo/ElevoSandbox"
+repository = "https://github.com/OpenElevo/ElevoWorkspace"
 
 [workspace.dependencies]
 # Async runtime

@@ -1754,7 +1754,7 @@ const file_workspace_v1_workspace_proto_rawDesc = "" +
 	"\bCopyFile\x12\x1d.workspace.v1.CopyFileRequest\x1a\x1e.workspace.v1.CopyFileResponse\x12R\n" +
 	"\vGetFileInfo\x12 .workspace.v1.GetFileInfoRequest\x1a!.workspace.v1.GetFileInfoResponse\x12m\n" +
 	"\x14RegisterNfsTransport\x12).workspace.v1.RegisterNfsTransportRequest\x1a*.workspace.v1.RegisterNfsTransportResponse\x12s\n" +
-	"\x16UnregisterNfsTransport\x12+.workspace.v1.UnregisterNfsTransportRequest\x1a,.workspace.v1.UnregisterNfsTransportResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\x16UnregisterNfsTransport\x12+.workspace.v1.UnregisterNfsTransportRequest\x1a,.workspace.v1.UnregisterNfsTransportResponseB8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_workspace_proto_rawDescOnce sync.Once

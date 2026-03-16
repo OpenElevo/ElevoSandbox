@@ -86,7 +86,7 @@ type Sandbox struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Unique identifier
 	Id string `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	// Workspace ID this sandbox is bound to
+	// Workspace ID this sandbox is bound to (deprecated, use namespace_id)
 	WorkspaceId string `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	// Optional human-readable name
 	Name *string `protobuf:"bytes,3,opt,name=name,proto3,oneof" json:"name,omitempty"`
@@ -105,7 +105,13 @@ type Sandbox struct {
 	// Timeout in seconds (0 = no timeout)
 	Timeout uint64 `protobuf:"varint,10,opt,name=timeout,proto3" json:"timeout,omitempty"`
 	// Error message (if state is ERROR)
-	ErrorMessage  *string `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3,oneof" json:"error_message,omitempty"`
+	ErrorMessage *string `protobuf:"bytes,11,opt,name=error_message,json=errorMessage,proto3,oneof" json:"error_message,omitempty"`
+	// Namespace (tenant) ID this sandbox belongs to
+	NamespaceId *string `protobuf:"bytes,12,opt,name=namespace_id,json=namespaceId,proto3,oneof" json:"namespace_id,omitempty"`
+	// Root path within the namespace
+	RootPath string `protobuf:"bytes,13,opt,name=root_path,json=rootPath,proto3" json:"root_path,omitempty"`
+	// Share mounts attached to this sandbox
+	Mounts        []*SandboxMount `protobuf:"bytes,14,rep,name=mounts,proto3" json:"mounts,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -217,6 +223,91 @@ func (x *Sandbox) GetErrorMessage() string {
 	return ""
 }
 
+func (x *Sandbox) GetNamespaceId() string {
+	if x != nil && x.NamespaceId != nil {
+		return *x.NamespaceId
+	}
+	return ""
+}
+
+func (x *Sandbox) GetRootPath() string {
+	if x != nil {
+		return x.RootPath
+	}
+	return ""
+}
+
+func (x *Sandbox) GetMounts() []*SandboxMount {
+	if x != nil {
+		return x.Mounts
+	}
+	return nil
+}
+
+// Share mount within a sandbox
+type SandboxMount struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Share ID being mounted
+	ShareId string `protobuf:"bytes,1,opt,name=share_id,json=shareId,proto3" json:"share_id,omitempty"`
+	// Mount path inside the container
+	MountPath string `protobuf:"bytes,2,opt,name=mount_path,json=mountPath,proto3" json:"mount_path,omitempty"`
+	// Whether the mount is read-only
+	ReadOnly      bool `protobuf:"varint,3,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SandboxMount) Reset() {
+	*x = SandboxMount{}
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SandboxMount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SandboxMount) ProtoMessage() {}
+
+func (x *SandboxMount) ProtoReflect() protoreflect.Message {
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SandboxMount.ProtoReflect.Descriptor instead.
+func (*SandboxMount) Descriptor() ([]byte, []int) {
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *SandboxMount) GetShareId() string {
+	if x != nil {
+		return x.ShareId
+	}
+	return ""
+}
+
+func (x *SandboxMount) GetMountPath() string {
+	if x != nil {
+		return x.MountPath
+	}
+	return ""
+}
+
+func (x *SandboxMount) GetReadOnly() bool {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return false
+}
+
 // Create sandbox request
 type CreateSandboxRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -238,7 +329,7 @@ type CreateSandboxRequest struct {
 
 func (x *CreateSandboxRequest) Reset() {
 	*x = CreateSandboxRequest{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[1]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -250,7 +341,7 @@ func (x *CreateSandboxRequest) String() string {
 func (*CreateSandboxRequest) ProtoMessage() {}
 
 func (x *CreateSandboxRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[1]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -263,7 +354,7 @@ func (x *CreateSandboxRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSandboxRequest.ProtoReflect.Descriptor instead.
 func (*CreateSandboxRequest) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{1}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateSandboxRequest) GetWorkspaceId() string {
@@ -318,7 +409,7 @@ type CreateSandboxResponse struct {
 
 func (x *CreateSandboxResponse) Reset() {
 	*x = CreateSandboxResponse{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[2]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -330,7 +421,7 @@ func (x *CreateSandboxResponse) String() string {
 func (*CreateSandboxResponse) ProtoMessage() {}
 
 func (x *CreateSandboxResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[2]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -343,7 +434,7 @@ func (x *CreateSandboxResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSandboxResponse.ProtoReflect.Descriptor instead.
 func (*CreateSandboxResponse) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{2}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CreateSandboxResponse) GetSandbox() *Sandbox {
@@ -363,7 +454,7 @@ type GetSandboxRequest struct {
 
 func (x *GetSandboxRequest) Reset() {
 	*x = GetSandboxRequest{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[3]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -375,7 +466,7 @@ func (x *GetSandboxRequest) String() string {
 func (*GetSandboxRequest) ProtoMessage() {}
 
 func (x *GetSandboxRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[3]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -388,7 +479,7 @@ func (x *GetSandboxRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSandboxRequest.ProtoReflect.Descriptor instead.
 func (*GetSandboxRequest) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{3}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetSandboxRequest) GetId() string {
@@ -408,7 +499,7 @@ type GetSandboxResponse struct {
 
 func (x *GetSandboxResponse) Reset() {
 	*x = GetSandboxResponse{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[4]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -420,7 +511,7 @@ func (x *GetSandboxResponse) String() string {
 func (*GetSandboxResponse) ProtoMessage() {}
 
 func (x *GetSandboxResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[4]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -433,7 +524,7 @@ func (x *GetSandboxResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSandboxResponse.ProtoReflect.Descriptor instead.
 func (*GetSandboxResponse) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{4}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetSandboxResponse) GetSandbox() *Sandbox {
@@ -458,7 +549,7 @@ type ListSandboxesRequest struct {
 
 func (x *ListSandboxesRequest) Reset() {
 	*x = ListSandboxesRequest{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[5]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -470,7 +561,7 @@ func (x *ListSandboxesRequest) String() string {
 func (*ListSandboxesRequest) ProtoMessage() {}
 
 func (x *ListSandboxesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[5]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -483,7 +574,7 @@ func (x *ListSandboxesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSandboxesRequest.ProtoReflect.Descriptor instead.
 func (*ListSandboxesRequest) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{5}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ListSandboxesRequest) GetState() SandboxState {
@@ -521,7 +612,7 @@ type ListSandboxesResponse struct {
 
 func (x *ListSandboxesResponse) Reset() {
 	*x = ListSandboxesResponse{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[6]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -533,7 +624,7 @@ func (x *ListSandboxesResponse) String() string {
 func (*ListSandboxesResponse) ProtoMessage() {}
 
 func (x *ListSandboxesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[6]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -546,7 +637,7 @@ func (x *ListSandboxesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListSandboxesResponse.ProtoReflect.Descriptor instead.
 func (*ListSandboxesResponse) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{6}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListSandboxesResponse) GetSandboxes() []*Sandbox {
@@ -582,7 +673,7 @@ type DeleteSandboxRequest struct {
 
 func (x *DeleteSandboxRequest) Reset() {
 	*x = DeleteSandboxRequest{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[7]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -594,7 +685,7 @@ func (x *DeleteSandboxRequest) String() string {
 func (*DeleteSandboxRequest) ProtoMessage() {}
 
 func (x *DeleteSandboxRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[7]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -607,7 +698,7 @@ func (x *DeleteSandboxRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSandboxRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSandboxRequest) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{7}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeleteSandboxRequest) GetId() string {
@@ -634,7 +725,7 @@ type DeleteSandboxResponse struct {
 
 func (x *DeleteSandboxResponse) Reset() {
 	*x = DeleteSandboxResponse{}
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[8]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +737,7 @@ func (x *DeleteSandboxResponse) String() string {
 func (*DeleteSandboxResponse) ProtoMessage() {}
 
 func (x *DeleteSandboxResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_workspace_v1_sandbox_proto_msgTypes[8]
+	mi := &file_workspace_v1_sandbox_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +750,7 @@ func (x *DeleteSandboxResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSandboxResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSandboxResponse) Descriptor() ([]byte, []int) {
-	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{8}
+	return file_workspace_v1_sandbox_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeleteSandboxResponse) GetSuccess() bool {
@@ -673,7 +764,7 @@ var File_workspace_v1_sandbox_proto protoreflect.FileDescriptor
 
 const file_workspace_v1_sandbox_proto_rawDesc = "" +
 	"\n" +
-	"\x1aworkspace/v1/sandbox.proto\x12\fworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x04\n" +
+	"\x1aworkspace/v1/sandbox.proto\x12\fworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xea\x05\n" +
 	"\aSandbox\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -688,7 +779,10 @@ const file_workspace_v1_sandbox_proto_rawDesc = "" +
 	"updated_at\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x12\x18\n" +
 	"\atimeout\x18\n" +
 	" \x01(\x04R\atimeout\x12(\n" +
-	"\rerror_message\x18\v \x01(\tH\x01R\ferrorMessage\x88\x01\x01\x1a6\n" +
+	"\rerror_message\x18\v \x01(\tH\x01R\ferrorMessage\x88\x01\x01\x12&\n" +
+	"\fnamespace_id\x18\f \x01(\tH\x02R\vnamespaceId\x88\x01\x01\x12\x1b\n" +
+	"\troot_path\x18\r \x01(\tR\brootPath\x122\n" +
+	"\x06mounts\x18\x0e \x03(\v2\x1a.workspace.v1.SandboxMountR\x06mounts\x1a6\n" +
 	"\bEnvEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a;\n" +
@@ -696,7 +790,13 @@ const file_workspace_v1_sandbox_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\a\n" +
 	"\x05_nameB\x10\n" +
-	"\x0e_error_message\"\xb6\x03\n" +
+	"\x0e_error_messageB\x0f\n" +
+	"\r_namespace_id\"e\n" +
+	"\fSandboxMount\x12\x19\n" +
+	"\bshare_id\x18\x01 \x01(\tR\ashareId\x12\x1d\n" +
+	"\n" +
+	"mount_path\x18\x02 \x01(\tR\tmountPath\x12\x1b\n" +
+	"\tread_only\x18\x03 \x01(\bR\breadOnly\"\xb6\x03\n" +
 	"\x14CreateSandboxRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1f\n" +
 	"\btemplate\x18\x02 \x01(\tH\x00R\btemplate\x88\x01\x01\x12\x17\n" +
@@ -750,7 +850,7 @@ const file_workspace_v1_sandbox_proto_rawDesc = "" +
 	"\n" +
 	"GetSandbox\x12\x1f.workspace.v1.GetSandboxRequest\x1a .workspace.v1.GetSandboxResponse\x12X\n" +
 	"\rListSandboxes\x12\".workspace.v1.ListSandboxesRequest\x1a#.workspace.v1.ListSandboxesResponse\x12X\n" +
-	"\rDeleteSandbox\x12\".workspace.v1.DeleteSandboxRequest\x1a#.workspace.v1.DeleteSandboxResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\rDeleteSandbox\x12\".workspace.v1.DeleteSandboxRequest\x1a#.workspace.v1.DeleteSandboxResponseB8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_sandbox_proto_rawDescOnce sync.Once
@@ -765,49 +865,51 @@ func file_workspace_v1_sandbox_proto_rawDescGZIP() []byte {
 }
 
 var file_workspace_v1_sandbox_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_workspace_v1_sandbox_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_workspace_v1_sandbox_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_workspace_v1_sandbox_proto_goTypes = []any{
 	(SandboxState)(0),             // 0: workspace.v1.SandboxState
 	(*Sandbox)(nil),               // 1: workspace.v1.Sandbox
-	(*CreateSandboxRequest)(nil),  // 2: workspace.v1.CreateSandboxRequest
-	(*CreateSandboxResponse)(nil), // 3: workspace.v1.CreateSandboxResponse
-	(*GetSandboxRequest)(nil),     // 4: workspace.v1.GetSandboxRequest
-	(*GetSandboxResponse)(nil),    // 5: workspace.v1.GetSandboxResponse
-	(*ListSandboxesRequest)(nil),  // 6: workspace.v1.ListSandboxesRequest
-	(*ListSandboxesResponse)(nil), // 7: workspace.v1.ListSandboxesResponse
-	(*DeleteSandboxRequest)(nil),  // 8: workspace.v1.DeleteSandboxRequest
-	(*DeleteSandboxResponse)(nil), // 9: workspace.v1.DeleteSandboxResponse
-	nil,                           // 10: workspace.v1.Sandbox.EnvEntry
-	nil,                           // 11: workspace.v1.Sandbox.MetadataEntry
-	nil,                           // 12: workspace.v1.CreateSandboxRequest.EnvEntry
-	nil,                           // 13: workspace.v1.CreateSandboxRequest.MetadataEntry
-	(*timestamppb.Timestamp)(nil), // 14: google.protobuf.Timestamp
+	(*SandboxMount)(nil),          // 2: workspace.v1.SandboxMount
+	(*CreateSandboxRequest)(nil),  // 3: workspace.v1.CreateSandboxRequest
+	(*CreateSandboxResponse)(nil), // 4: workspace.v1.CreateSandboxResponse
+	(*GetSandboxRequest)(nil),     // 5: workspace.v1.GetSandboxRequest
+	(*GetSandboxResponse)(nil),    // 6: workspace.v1.GetSandboxResponse
+	(*ListSandboxesRequest)(nil),  // 7: workspace.v1.ListSandboxesRequest
+	(*ListSandboxesResponse)(nil), // 8: workspace.v1.ListSandboxesResponse
+	(*DeleteSandboxRequest)(nil),  // 9: workspace.v1.DeleteSandboxRequest
+	(*DeleteSandboxResponse)(nil), // 10: workspace.v1.DeleteSandboxResponse
+	nil,                           // 11: workspace.v1.Sandbox.EnvEntry
+	nil,                           // 12: workspace.v1.Sandbox.MetadataEntry
+	nil,                           // 13: workspace.v1.CreateSandboxRequest.EnvEntry
+	nil,                           // 14: workspace.v1.CreateSandboxRequest.MetadataEntry
+	(*timestamppb.Timestamp)(nil), // 15: google.protobuf.Timestamp
 }
 var file_workspace_v1_sandbox_proto_depIdxs = []int32{
 	0,  // 0: workspace.v1.Sandbox.state:type_name -> workspace.v1.SandboxState
-	10, // 1: workspace.v1.Sandbox.env:type_name -> workspace.v1.Sandbox.EnvEntry
-	11, // 2: workspace.v1.Sandbox.metadata:type_name -> workspace.v1.Sandbox.MetadataEntry
-	14, // 3: workspace.v1.Sandbox.created_at:type_name -> google.protobuf.Timestamp
-	14, // 4: workspace.v1.Sandbox.updated_at:type_name -> google.protobuf.Timestamp
-	12, // 5: workspace.v1.CreateSandboxRequest.env:type_name -> workspace.v1.CreateSandboxRequest.EnvEntry
-	13, // 6: workspace.v1.CreateSandboxRequest.metadata:type_name -> workspace.v1.CreateSandboxRequest.MetadataEntry
-	1,  // 7: workspace.v1.CreateSandboxResponse.sandbox:type_name -> workspace.v1.Sandbox
-	1,  // 8: workspace.v1.GetSandboxResponse.sandbox:type_name -> workspace.v1.Sandbox
-	0,  // 9: workspace.v1.ListSandboxesRequest.state:type_name -> workspace.v1.SandboxState
-	1,  // 10: workspace.v1.ListSandboxesResponse.sandboxes:type_name -> workspace.v1.Sandbox
-	2,  // 11: workspace.v1.SandboxService.CreateSandbox:input_type -> workspace.v1.CreateSandboxRequest
-	4,  // 12: workspace.v1.SandboxService.GetSandbox:input_type -> workspace.v1.GetSandboxRequest
-	6,  // 13: workspace.v1.SandboxService.ListSandboxes:input_type -> workspace.v1.ListSandboxesRequest
-	8,  // 14: workspace.v1.SandboxService.DeleteSandbox:input_type -> workspace.v1.DeleteSandboxRequest
-	3,  // 15: workspace.v1.SandboxService.CreateSandbox:output_type -> workspace.v1.CreateSandboxResponse
-	5,  // 16: workspace.v1.SandboxService.GetSandbox:output_type -> workspace.v1.GetSandboxResponse
-	7,  // 17: workspace.v1.SandboxService.ListSandboxes:output_type -> workspace.v1.ListSandboxesResponse
-	9,  // 18: workspace.v1.SandboxService.DeleteSandbox:output_type -> workspace.v1.DeleteSandboxResponse
-	15, // [15:19] is the sub-list for method output_type
-	11, // [11:15] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	11, // 1: workspace.v1.Sandbox.env:type_name -> workspace.v1.Sandbox.EnvEntry
+	12, // 2: workspace.v1.Sandbox.metadata:type_name -> workspace.v1.Sandbox.MetadataEntry
+	15, // 3: workspace.v1.Sandbox.created_at:type_name -> google.protobuf.Timestamp
+	15, // 4: workspace.v1.Sandbox.updated_at:type_name -> google.protobuf.Timestamp
+	2,  // 5: workspace.v1.Sandbox.mounts:type_name -> workspace.v1.SandboxMount
+	13, // 6: workspace.v1.CreateSandboxRequest.env:type_name -> workspace.v1.CreateSandboxRequest.EnvEntry
+	14, // 7: workspace.v1.CreateSandboxRequest.metadata:type_name -> workspace.v1.CreateSandboxRequest.MetadataEntry
+	1,  // 8: workspace.v1.CreateSandboxResponse.sandbox:type_name -> workspace.v1.Sandbox
+	1,  // 9: workspace.v1.GetSandboxResponse.sandbox:type_name -> workspace.v1.Sandbox
+	0,  // 10: workspace.v1.ListSandboxesRequest.state:type_name -> workspace.v1.SandboxState
+	1,  // 11: workspace.v1.ListSandboxesResponse.sandboxes:type_name -> workspace.v1.Sandbox
+	3,  // 12: workspace.v1.SandboxService.CreateSandbox:input_type -> workspace.v1.CreateSandboxRequest
+	5,  // 13: workspace.v1.SandboxService.GetSandbox:input_type -> workspace.v1.GetSandboxRequest
+	7,  // 14: workspace.v1.SandboxService.ListSandboxes:input_type -> workspace.v1.ListSandboxesRequest
+	9,  // 15: workspace.v1.SandboxService.DeleteSandbox:input_type -> workspace.v1.DeleteSandboxRequest
+	4,  // 16: workspace.v1.SandboxService.CreateSandbox:output_type -> workspace.v1.CreateSandboxResponse
+	6,  // 17: workspace.v1.SandboxService.GetSandbox:output_type -> workspace.v1.GetSandboxResponse
+	8,  // 18: workspace.v1.SandboxService.ListSandboxes:output_type -> workspace.v1.ListSandboxesResponse
+	10, // 19: workspace.v1.SandboxService.DeleteSandbox:output_type -> workspace.v1.DeleteSandboxResponse
+	16, // [16:20] is the sub-list for method output_type
+	12, // [12:16] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_workspace_v1_sandbox_proto_init() }
@@ -816,15 +918,15 @@ func file_workspace_v1_sandbox_proto_init() {
 		return
 	}
 	file_workspace_v1_sandbox_proto_msgTypes[0].OneofWrappers = []any{}
-	file_workspace_v1_sandbox_proto_msgTypes[1].OneofWrappers = []any{}
-	file_workspace_v1_sandbox_proto_msgTypes[5].OneofWrappers = []any{}
+	file_workspace_v1_sandbox_proto_msgTypes[2].OneofWrappers = []any{}
+	file_workspace_v1_sandbox_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_workspace_v1_sandbox_proto_rawDesc), len(file_workspace_v1_sandbox_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# ElevoSandbox Multi-Architecture Docker Build Script
+# ElevoWorkspace Multi-Architecture Docker Build Script
 # =============================================================================
 #
 # Builds two images:
@@ -75,7 +75,7 @@ error() { echo -e "${RED}[ERROR]${NC} $1"; }
 print_banner() {
     echo -e "${BLUE}"
     echo "=============================================="
-    echo "   ElevoSandbox Multi-Arch Build Script"
+    echo "   ElevoWorkspace Multi-Arch Build Script"
     echo "=============================================="
     echo -e "${NC}"
     echo "Architecture: ${ARCH} (${ARCH_SUFFIX})"

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"

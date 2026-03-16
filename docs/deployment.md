@@ -47,8 +47,8 @@ Elevo Workspace 是一个统一的 Sandbox/Workspace 服务，为 AI Agent 开�
 
 ```bash
 # 克隆仓库
-git clone https://github.com/OpenElevo/ElevoSandbox.git
-cd ElevoSandbox
+git clone https://github.com/OpenElevo/ElevoWorkspace.git
+cd ElevoWorkspace
 
 # 使用构建脚本（推荐）
 # 脚本会自动：

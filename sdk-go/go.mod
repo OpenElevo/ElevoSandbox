@@ -1,4 +1,4 @@
-module github.com/OpenElevo/ElevoSandbox/sdk-go
+module github.com/OpenElevo/ElevoWorkspace/sdk-go
 
 go 1.24.0
 

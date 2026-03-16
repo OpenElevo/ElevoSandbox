@@ -3,7 +3,7 @@
 import grpc
 import warnings
 
-from . import pty_pb2 as workspace_dot_v1_dot_pty__pb2
+from workspace.v1 import pty_pb2 as workspace_dot_v1_dot_pty__pb2
 
 GRPC_GENERATED_VERSION = '1.78.0'
 GRPC_VERSION = grpc.__version__

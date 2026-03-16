@@ -25,14 +25,14 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1aworkspace/v1/sandbox.proto\x12\x0cworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe4\x03\n\x07Sandbox\x12\n\n\x02id\x18\x01 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x02 \x01(\t\x12\x11\n\x04name\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08template\x18\x04 \x01(\t\x12)\n\x05state\x18\x05 \x01(\x0e\x32\x1a.workspace.v1.SandboxState\x12+\n\x03\x65nv\x18\x06 \x03(\x0b\x32\x1e.workspace.v1.Sandbox.EnvEntry\x12\x35\n\x08metadata\x18\x07 \x03(\x0b\x32#.workspace.v1.Sandbox.MetadataEntry\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0f\n\x07timeout\x18\n \x01(\x04\x12\x1a\n\rerror_message\x18\x0b \x01(\tH\x01\x88\x01\x01\x1a*\n\x08\x45nvEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x07\n\x05_nameB\x10\n\x0e_error_message\"\xe9\x02\n\x14\x43reateSandboxRequest\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\x12\x15\n\x08template\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x11\n\x04name\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x38\n\x03\x65nv\x18\x04 \x03(\x0b\x32+.workspace.v1.CreateSandboxRequest.EnvEntry\x12\x42\n\x08metadata\x18\x05 \x03(\x0b\x32\x30.workspace.v1.CreateSandboxRequest.MetadataEntry\x12\x14\n\x07timeout\x18\x06 \x01(\x04H\x02\x88\x01\x01\x1a*\n\x08\x45nvEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0b\n\t_templateB\x07\n\x05_nameB\n\n\x08_timeout\"?\n\x15\x43reateSandboxResponse\x12&\n\x07sandbox\x18\x01 \x01(\x0b\x32\x15.workspace.v1.Sandbox\"\x1f\n\x11GetSandboxRequest\x12\n\n\x02id\x18\x01 \x01(\t\"<\n\x12GetSandboxResponse\x12&\n\x07sandbox\x18\x01 \x01(\x0b\x32\x15.workspace.v1.Sandbox\"\x9e\x01\n\x14ListSandboxesRequest\x12.\n\x05state\x18\x01 \x01(\x0e\x32\x1a.workspace.v1.SandboxStateH\x00\x88\x01\x01\x12\x16\n\tpage_size\x18\x02 \x01(\x05H\x01\x88\x01\x01\x12\x17\n\npage_token\x18\x03 \x01(\tH\x02\x88\x01\x01\x42\x08\n\x06_stateB\x0c\n\n_page_sizeB\r\n\x0b_page_token\"i\n\x15ListSandboxesResponse\x12(\n\tsandboxes\x18\x01 \x03(\x0b\x32\x15.workspace.v1.Sandbox\x12\x17\n\x0fnext_page_token\x18\x02 \x01(\t\x12\r\n\x05total\x18\x03 \x01(\x05\"1\n\x14\x44\x65leteSandboxRequest\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05\x66orce\x18\x02 \x01(\x08\"(\n\x15\x44\x65leteSandboxResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08*\xb4\x01\n\x0cSandboxState\x12\x1d\n\x19SANDBOX_STATE_UNSPECIFIED\x10\x00\x12\x1a\n\x16SANDBOX_STATE_STARTING\x10\x01\x12\x19\n\x15SANDBOX_STATE_RUNNING\x10\x02\x12\x1a\n\x16SANDBOX_STATE_STOPPING\x10\x03\x12\x19\n\x15SANDBOX_STATE_STOPPED\x10\x04\x12\x17\n\x13SANDBOX_STATE_ERROR\x10\x05\x32\xef\x02\n\x0eSandboxService\x12X\n\rCreateSandbox\x12\".workspace.v1.CreateSandboxRequest\x1a#.workspace.v1.CreateSandboxResponse\x12O\n\nGetSandbox\x12\x1f.workspace.v1.GetSandboxRequest\x1a .workspace.v1.GetSandboxResponse\x12X\n\rListSandboxes\x12\".workspace.v1.ListSandboxesRequest\x1a#.workspace.v1.ListSandboxesResponse\x12X\n\rDeleteSandbox\x12\".workspace.v1.DeleteSandboxRequest\x1a#.workspace.v1.DeleteSandboxResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x1aworkspace/v1/sandbox.proto\x12\x0cworkspace.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xcf\x04\n\x07Sandbox\x12\n\n\x02id\x18\x01 \x01(\t\x12\x14\n\x0cworkspace_id\x18\x02 \x01(\t\x12\x11\n\x04name\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08template\x18\x04 \x01(\t\x12)\n\x05state\x18\x05 \x01(\x0e\x32\x1a.workspace.v1.SandboxState\x12+\n\x03\x65nv\x18\x06 \x03(\x0b\x32\x1e.workspace.v1.Sandbox.EnvEntry\x12\x35\n\x08metadata\x18\x07 \x03(\x0b\x32#.workspace.v1.Sandbox.MetadataEntry\x12.\n\ncreated_at\x18\x08 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12.\n\nupdated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x0f\n\x07timeout\x18\n \x01(\x04\x12\x1a\n\rerror_message\x18\x0b \x01(\tH\x01\x88\x01\x01\x12\x19\n\x0cnamespace_id\x18\x0c \x01(\tH\x02\x88\x01\x01\x12\x11\n\troot_path\x18\r \x01(\t\x12*\n\x06mounts\x18\x0e \x03(\x0b\x32\x1a.workspace.v1.SandboxMount\x1a*\n\x08\x45nvEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x07\n\x05_nameB\x10\n\x0e_error_messageB\x0f\n\r_namespace_id\"G\n\x0cSandboxMount\x12\x10\n\x08share_id\x18\x01 \x01(\t\x12\x12\n\nmount_path\x18\x02 \x01(\t\x12\x11\n\tread_only\x18\x03 \x01(\x08\"\xe9\x02\n\x14\x43reateSandboxRequest\x12\x14\n\x0cworkspace_id\x18\x01 \x01(\t\x12\x15\n\x08template\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x11\n\x04name\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x38\n\x03\x65nv\x18\x04 \x03(\x0b\x32+.workspace.v1.CreateSandboxRequest.EnvEntry\x12\x42\n\x08metadata\x18\x05 \x03(\x0b\x32\x30.workspace.v1.CreateSandboxRequest.MetadataEntry\x12\x14\n\x07timeout\x18\x06 \x01(\x04H\x02\x88\x01\x01\x1a*\n\x08\x45nvEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0b\n\t_templateB\x07\n\x05_nameB\n\n\x08_timeout\"?\n\x15\x43reateSandboxResponse\x12&\n\x07sandbox\x18\x01 \x01(\x0b\x32\x15.workspace.v1.Sandbox\"\x1f\n\x11GetSandboxRequest\x12\n\n\x02id\x18\x01 \x01(\t\"<\n\x12GetSandboxResponse\x12&\n\x07sandbox\x18\x01 \x01(\x0b\x32\x15.workspace.v1.Sandbox\"\x9e\x01\n\x14ListSandboxesRequest\x12.\n\x05state\x18\x01 \x01(\x0e\x32\x1a.workspace.v1.SandboxStateH\x00\x88\x01\x01\x12\x16\n\tpage_size\x18\x02 \x01(\x05H\x01\x88\x01\x01\x12\x17\n\npage_token\x18\x03 \x01(\tH\x02\x88\x01\x01\x42\x08\n\x06_stateB\x0c\n\n_page_sizeB\r\n\x0b_page_token\"i\n\x15ListSandboxesResponse\x12(\n\tsandboxes\x18\x01 \x03(\x0b\x32\x15.workspace.v1.Sandbox\x12\x17\n\x0fnext_page_token\x18\x02 \x01(\t\x12\r\n\x05total\x18\x03 \x01(\x05\"1\n\x14\x44\x65leteSandboxRequest\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05\x66orce\x18\x02 \x01(\x08\"(\n\x15\x44\x65leteSandboxResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08*\xb4\x01\n\x0cSandboxState\x12\x1d\n\x19SANDBOX_STATE_UNSPECIFIED\x10\x00\x12\x1a\n\x16SANDBOX_STATE_STARTING\x10\x01\x12\x19\n\x15SANDBOX_STATE_RUNNING\x10\x02\x12\x1a\n\x16SANDBOX_STATE_STOPPING\x10\x03\x12\x19\n\x15SANDBOX_STATE_STOPPED\x10\x04\x12\x17\n\x13SANDBOX_STATE_ERROR\x10\x05\x32\xef\x02\n\x0eSandboxService\x12X\n\rCreateSandbox\x12\".workspace.v1.CreateSandboxRequest\x1a#.workspace.v1.CreateSandboxResponse\x12O\n\nGetSandbox\x12\x1f.workspace.v1.GetSandboxRequest\x1a .workspace.v1.GetSandboxResponse\x12X\n\rListSandboxes\x12\".workspace.v1.ListSandboxesRequest\x1a#.workspace.v1.ListSandboxesResponse\x12X\n\rDeleteSandbox\x12\".workspace.v1.DeleteSandboxRequest\x1a#.workspace.v1.DeleteSandboxResponseB8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'workspace.v1.sandbox_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
-  _globals['DESCRIPTOR']._serialized_options = b'Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1'
+  _globals['DESCRIPTOR']._serialized_options = b'Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1'
   _globals['_SANDBOX_ENVENTRY']._loaded_options = None
   _globals['_SANDBOX_ENVENTRY']._serialized_options = b'8\001'
   _globals['_SANDBOX_METADATAENTRY']._loaded_options = None
@@ -41,34 +41,36 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_CREATESANDBOXREQUEST_ENVENTRY']._serialized_options = b'8\001'
   _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._loaded_options = None
   _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._serialized_options = b'8\001'
-  _globals['_SANDBOXSTATE']._serialized_start=1450
-  _globals['_SANDBOXSTATE']._serialized_end=1630
+  _globals['_SANDBOXSTATE']._serialized_start=1630
+  _globals['_SANDBOXSTATE']._serialized_end=1810
   _globals['_SANDBOX']._serialized_start=78
-  _globals['_SANDBOX']._serialized_end=562
-  _globals['_SANDBOX_ENVENTRY']._serialized_start=444
-  _globals['_SANDBOX_ENVENTRY']._serialized_end=486
-  _globals['_SANDBOX_METADATAENTRY']._serialized_start=488
-  _globals['_SANDBOX_METADATAENTRY']._serialized_end=535
-  _globals['_CREATESANDBOXREQUEST']._serialized_start=565
-  _globals['_CREATESANDBOXREQUEST']._serialized_end=926
-  _globals['_CREATESANDBOXREQUEST_ENVENTRY']._serialized_start=444
-  _globals['_CREATESANDBOXREQUEST_ENVENTRY']._serialized_end=486
-  _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._serialized_start=488
-  _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._serialized_end=535
-  _globals['_CREATESANDBOXRESPONSE']._serialized_start=928
-  _globals['_CREATESANDBOXRESPONSE']._serialized_end=991
-  _globals['_GETSANDBOXREQUEST']._serialized_start=993
-  _globals['_GETSANDBOXREQUEST']._serialized_end=1024
-  _globals['_GETSANDBOXRESPONSE']._serialized_start=1026
-  _globals['_GETSANDBOXRESPONSE']._serialized_end=1086
-  _globals['_LISTSANDBOXESREQUEST']._serialized_start=1089
-  _globals['_LISTSANDBOXESREQUEST']._serialized_end=1247
-  _globals['_LISTSANDBOXESRESPONSE']._serialized_start=1249
-  _globals['_LISTSANDBOXESRESPONSE']._serialized_end=1354
-  _globals['_DELETESANDBOXREQUEST']._serialized_start=1356
-  _globals['_DELETESANDBOXREQUEST']._serialized_end=1405
-  _globals['_DELETESANDBOXRESPONSE']._serialized_start=1407
-  _globals['_DELETESANDBOXRESPONSE']._serialized_end=1447
-  _globals['_SANDBOXSERVICE']._serialized_start=1633
-  _globals['_SANDBOXSERVICE']._serialized_end=2000
+  _globals['_SANDBOX']._serialized_end=669
+  _globals['_SANDBOX_ENVENTRY']._serialized_start=534
+  _globals['_SANDBOX_ENVENTRY']._serialized_end=576
+  _globals['_SANDBOX_METADATAENTRY']._serialized_start=578
+  _globals['_SANDBOX_METADATAENTRY']._serialized_end=625
+  _globals['_SANDBOXMOUNT']._serialized_start=671
+  _globals['_SANDBOXMOUNT']._serialized_end=742
+  _globals['_CREATESANDBOXREQUEST']._serialized_start=745
+  _globals['_CREATESANDBOXREQUEST']._serialized_end=1106
+  _globals['_CREATESANDBOXREQUEST_ENVENTRY']._serialized_start=534
+  _globals['_CREATESANDBOXREQUEST_ENVENTRY']._serialized_end=576
+  _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._serialized_start=578
+  _globals['_CREATESANDBOXREQUEST_METADATAENTRY']._serialized_end=625
+  _globals['_CREATESANDBOXRESPONSE']._serialized_start=1108
+  _globals['_CREATESANDBOXRESPONSE']._serialized_end=1171
+  _globals['_GETSANDBOXREQUEST']._serialized_start=1173
+  _globals['_GETSANDBOXREQUEST']._serialized_end=1204
+  _globals['_GETSANDBOXRESPONSE']._serialized_start=1206
+  _globals['_GETSANDBOXRESPONSE']._serialized_end=1266
+  _globals['_LISTSANDBOXESREQUEST']._serialized_start=1269
+  _globals['_LISTSANDBOXESREQUEST']._serialized_end=1427
+  _globals['_LISTSANDBOXESRESPONSE']._serialized_start=1429
+  _globals['_LISTSANDBOXESRESPONSE']._serialized_end=1534
+  _globals['_DELETESANDBOXREQUEST']._serialized_start=1536
+  _globals['_DELETESANDBOXREQUEST']._serialized_end=1585
+  _globals['_DELETESANDBOXRESPONSE']._serialized_start=1587
+  _globals['_DELETESANDBOXRESPONSE']._serialized_end=1627
+  _globals['_SANDBOXSERVICE']._serialized_start=1813
+  _globals['_SANDBOXSERVICE']._serialized_end=2180
 # @@protoc_insertion_point(module_scope)

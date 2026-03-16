@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and push ElevoSandbox Docker images to registry
+# Build and push ElevoWorkspace Docker images to registry
 # Usage: ./build-and-push.sh [version]
 #
 # Prerequisites:
@@ -51,7 +51,7 @@ cd "$PROJECT_ROOT"
 
 echo ""
 echo "=============================================="
-echo "  ElevoSandbox - Build and Push Images"
+echo "  ElevoWorkspace - Build and Push Images"
 echo "=============================================="
 echo ""
 echo "Registry: ${REGISTRY}"

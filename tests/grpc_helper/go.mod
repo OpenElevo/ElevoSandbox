@@ -1,8 +1,8 @@
-module github.com/OpenElevo/ElevoSandbox/tests/grpc_helper
+module github.com/OpenElevo/ElevoWorkspace/tests/grpc_helper
 
 go 1.24.0
 
-require github.com/OpenElevo/ElevoSandbox/sdk-go v0.0.0
+require github.com/OpenElevo/ElevoWorkspace/sdk-go v0.0.0
 
 require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
@@ -14,4 +14,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/OpenElevo/ElevoSandbox/sdk-go => ../../sdk-go
+replace github.com/OpenElevo/ElevoWorkspace/sdk-go => ../../sdk-go

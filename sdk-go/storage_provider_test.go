@@ -11,7 +11,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 	"golang.org/x/sys/unix"
 )
 

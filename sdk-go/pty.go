@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 )
 
 // PtyService provides operations for PTY terminals

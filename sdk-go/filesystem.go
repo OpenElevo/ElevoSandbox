@@ -4,7 +4,7 @@ import (
 	"context"
 	"io"
 
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 )
 
 // FileSystemService provides low-level filesystem operations via gRPC

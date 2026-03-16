@@ -1324,7 +1324,7 @@ const file_workspace_v1_agent_proto_rawDesc = "" +
 	"\x06pty_id\x18\x01 \x01(\tR\x05ptyId\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data2V\n" +
 	"\fAgentService\x12F\n" +
-	"\aConnect\x12\x1a.workspace.v1.AgentMessage\x1a\x1b.workspace.v1.ServerMessage(\x010\x01B6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\aConnect\x12\x1a.workspace.v1.AgentMessage\x1a\x1b.workspace.v1.ServerMessage(\x010\x01B8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_agent_proto_rawDescOnce sync.Once

@@ -1,11 +1,11 @@
-# ElevoSandbox
+# ElevoWorkspace
 
-[![CI](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoSandbox/actions/workflows/ci.yml)
+[![CI](https://github.com/OpenElevo/ElevoWorkspace/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenElevo/ElevoWorkspace/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [中文文档](README_zh.md)
 
-ElevoSandbox is a unified sandbox workspace service that provides secure, isolated code execution environments for AI Agents.
+ElevoWorkspace is a unified sandbox workspace service that provides secure, isolated code execution environments for AI Agents.
 
 ## Features
 
@@ -18,7 +18,7 @@ ElevoSandbox is a unified sandbox workspace service that provides secure, isolat
 ## Project Structure
 
 ```
-ElevoSandbox/
+ElevoWorkspace/
 ├── server/                 # Rust server (HTTP API + MCP)
 ├── agent/                  # Rust Agent (runs inside containers)
 ├── sdk-go/                 # Go SDK
@@ -256,7 +256,7 @@ Edit `~/.config/claude/claude_desktop_config.json`:
 ### Go SDK
 
 ```bash
-go get github.com/OpenElevo/ElevoSandbox/sdk-go
+go get github.com/OpenElevo/ElevoWorkspace/sdk-go
 ```
 
 ```go
@@ -267,7 +267,7 @@ import (
     "fmt"
     "log"
 
-    workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
+    workspace "github.com/OpenElevo/ElevoWorkspace/sdk-go"
 )
 
 func main() {

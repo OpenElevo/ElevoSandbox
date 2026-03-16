@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
+	workspace "github.com/OpenElevo/ElevoWorkspace/sdk-go"
 )
 
 const (

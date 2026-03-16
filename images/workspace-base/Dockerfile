@@ -3,7 +3,7 @@
 FROM ubuntu:24.04
 
 LABEL maintainer="Elevo Team"
-LABEL org.opencontainers.image.source="https://github.com/OpenElevo/ElevoSandbox"
+LABEL org.opencontainers.image.source="https://github.com/OpenElevo/ElevoWorkspace"
 LABEL org.opencontainers.image.description="Elevo Workspace Base Image with Agent"
 
 # Install development tools commonly needed in workspaces

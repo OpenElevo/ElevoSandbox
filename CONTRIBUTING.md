@@ -1,6 +1,6 @@
-# Contributing to ElevoSandbox
+# Contributing to ElevoWorkspace
 
-Thank you for your interest in contributing to ElevoSandbox!
+Thank you for your interest in contributing to ElevoWorkspace!
 
 ## How to Contribute
 
@@ -27,8 +27,8 @@ Thank you for your interest in contributing to ElevoSandbox!
 
 ```bash
 # Clone the repository
-git clone https://github.com/OpenElevo/ElevoSandbox.git
-cd ElevoSandbox
+git clone https://github.com/OpenElevo/ElevoWorkspace.git
+cd ElevoWorkspace
 
 # Build the project
 cargo build
@@ -59,4 +59,4 @@ Please follow the conventions of each language/ecosystem.
 
 ## License
 
-By contributing to ElevoSandbox, you agree that your contributions will be licensed under the MIT License.
+By contributing to ElevoWorkspace, you agree that your contributions will be licensed under the MIT License.

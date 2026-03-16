@@ -22,8 +22,8 @@ from urllib.error import URLError, HTTPError
 
 # Default version and download URL template
 DEFAULT_VERSION = "latest"
-GITHUB_RELEASE_URL = "https://github.com/OpenElevo/ElevoSandbox/releases/download/{version}/workspace-fuse-{platform}-{arch}"
-GITHUB_LATEST_URL = "https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-{platform}-{arch}"
+GITHUB_RELEASE_URL = "https://github.com/OpenElevo/ElevoWorkspace/releases/download/{version}/workspace-fuse-{platform}-{arch}"
+GITHUB_LATEST_URL = "https://github.com/OpenElevo/ElevoWorkspace/releases/latest/download/workspace-fuse-{platform}-{arch}"
 
 
 def get_platform_info() -> tuple[str, str]:

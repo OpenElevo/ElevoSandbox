@@ -16,9 +16,9 @@ import { URL } from 'url';
 // Default version and download URL template
 const DEFAULT_VERSION = 'latest';
 const GITHUB_RELEASE_URL =
-  'https://github.com/OpenElevo/ElevoSandbox/releases/download/{version}/workspace-fuse-{platform}-{arch}';
+  'https://github.com/OpenElevo/ElevoWorkspace/releases/download/{version}/workspace-fuse-{platform}-{arch}';
 const GITHUB_LATEST_URL =
-  'https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-{platform}-{arch}';
+  'https://github.com/OpenElevo/ElevoWorkspace/releases/latest/download/workspace-fuse-{platform}-{arch}';
 
 /**
  * Get current platform and architecture

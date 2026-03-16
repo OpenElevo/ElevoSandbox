@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	workspace "github.com/OpenElevo/ElevoSandbox/sdk-go"
-	pb "github.com/OpenElevo/ElevoSandbox/sdk-go/proto/workspace/v1"
+	workspace "github.com/OpenElevo/ElevoWorkspace/sdk-go"
+	pb "github.com/OpenElevo/ElevoWorkspace/sdk-go/proto/workspace/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )

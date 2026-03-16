@@ -18,8 +18,8 @@ import (
 // Default version and download URL template
 const (
 	DefaultVersion    = "latest"
-	GitHubReleaseURL  = "https://github.com/OpenElevo/ElevoSandbox/releases/download/%s/workspace-fuse-%s-%s"
-	GitHubLatestURL   = "https://github.com/OpenElevo/ElevoSandbox/releases/latest/download/workspace-fuse-%s-%s"
+	GitHubReleaseURL  = "https://github.com/OpenElevo/ElevoWorkspace/releases/download/%s/workspace-fuse-%s-%s"
+	GitHubLatestURL   = "https://github.com/OpenElevo/ElevoWorkspace/releases/latest/download/workspace-fuse-%s-%s"
 )
 
 // getPlatformInfo returns the current platform and architecture

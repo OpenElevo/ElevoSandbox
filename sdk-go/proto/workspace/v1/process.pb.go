@@ -677,7 +677,7 @@ const file_workspace_v1_process_proto_rawDesc = "" +
 	"\n" +
 	"RunCommand\x12\x1f.workspace.v1.RunCommandRequest\x1a .workspace.v1.RunCommandResponse\x12Q\n" +
 	"\x10RunCommandStream\x12\x1f.workspace.v1.RunCommandRequest\x1a\x1a.workspace.v1.ProcessEvent0\x01\x12R\n" +
-	"\vKillProcess\x12 .workspace.v1.KillProcessRequest\x1a!.workspace.v1.KillProcessResponseB6Z4github.com/OpenElevo/ElevoSandbox/proto/workspace/v1b\x06proto3"
+	"\vKillProcess\x12 .workspace.v1.KillProcessRequest\x1a!.workspace.v1.KillProcessResponseB8Z6github.com/OpenElevo/ElevoWorkspace/proto/workspace/v1b\x06proto3"
 
 var (
 	file_workspace_v1_process_proto_rawDescOnce sync.Once
