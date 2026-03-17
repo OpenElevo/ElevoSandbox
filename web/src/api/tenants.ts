@@ -14,7 +14,7 @@ export async function getTenant(id: string) {
 
 export async function createTenant(params: CreateTenantParams) {
   const res = await client.post('/tenants', params);
-  return res.data as { tenant: Tenant; api_key?: { key: ApiKey; token: string } };
+  return res.data as { tenant: Tenant; api_key?: { id: string; name: string; token: string; token_prefix: string; expires_at: string | null } };
 }
 
 export async function updateTenant(id: string, params: UpdateTenantParams) {

@@ -127,7 +127,7 @@ export default function TenantList() {
       message.success('租户已创建');
       if (result.api_key) {
         setTokenAcked(false);
-        setTokenModal({ key: result.api_key.key.name, token: result.api_key.token });
+        setTokenModal({ key: result.api_key.name, token: result.api_key.token });
       }
     },
     onError: () => message.error('创建租户失败'),
