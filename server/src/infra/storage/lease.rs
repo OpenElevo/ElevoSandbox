@@ -384,17 +384,16 @@ mod tests {
     use crate::domain::UuidSimple;
     use uuid::Uuid;
 
-    /// Helper: create a test tenant and return its UUID as namespace_id
-    async fn create_test_tenant(pool: &PgPool) -> Uuid {
+    /// Helper: create a test workspace and return its UUID as namespace_id
+    async fn create_test_workspace(pool: &PgPool) -> Uuid {
         let id = Uuid::now_v7();
         sqlx::query(
-            r#"INSERT INTO tenants (id, name, description, is_active)
-            VALUES ($1, $2, $3, $4)"#,
+            r#"INSERT INTO workspaces (id, name, storage_type)
+            VALUES ($1, $2, $3)"#,
         )
         .bind(id)
-        .bind(format!("test-tenant-{}", id))
-        .bind(format!("Test tenant for {}", id))
-        .bind(true)
+        .bind(format!("test-workspace-{}", id))
+        .bind("managed")
         .execute(pool)
         .await
         .unwrap();
@@ -414,7 +413,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_and_check(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -429,7 +428,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_already_held(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -444,7 +443,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_same_holder_re_acquire(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -456,7 +455,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_acquire_expired_lease(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
         let namespace_id_str = namespace_id.simple_string();
 
@@ -469,7 +468,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_renew(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -482,7 +481,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_renew_wrong_holder(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -494,7 +493,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_release(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -507,7 +506,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_release_wrong_holder(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool);
         let namespace_id_str = namespace_id.simple_string();
 
@@ -523,7 +522,7 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn test_check_nonexistent(pool: PgPool) {
         let mgr = PgLeaseManager::new(pool);
-        // Use a valid UUID that doesn't exist in tenants table
+        // Use a valid UUID that doesn't exist in workspaces table
         // This will return None since no lease exists
         let nonexistent_uuid = Uuid::now_v7();
         let checked = mgr.check(&nonexistent_uuid.simple_string()).await.unwrap();
@@ -532,7 +531,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn test_check_expired_returns_none(pool: PgPool) {
-        let namespace_id = create_test_tenant(&pool).await;
+        let namespace_id = create_test_workspace(&pool).await;
         let mgr = PgLeaseManager::new(pool.clone());
         let namespace_id_str = namespace_id.simple_string();
 

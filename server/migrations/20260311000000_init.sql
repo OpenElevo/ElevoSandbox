@@ -98,7 +98,7 @@ CREATE INDEX idx_ptys_sandbox_id ON ptys(sandbox_id);
 -- Namespace Leases
 -- ============================================================
 CREATE TABLE namespace_leases (
-    namespace_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    namespace_id UUID PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
     holder_id    VARCHAR(255) NOT NULL,
     acquired_at  TIMESTAMPTZ NOT NULL,
     expires_at   TIMESTAMPTZ NOT NULL,
