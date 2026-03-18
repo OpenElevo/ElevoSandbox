@@ -44,21 +44,21 @@ func platformStatMode(stat *unix.Stat_t) uint32 {
 }
 
 // platformStatMtime returns the modification time fields from Stat_t.
-// On darwin, the field is Mtimespec (not Mtim).
+// In golang.org/x/sys v0.38+, darwin Stat_t uses Mtim (same as Linux).
 func platformStatMtime(stat *unix.Stat_t) (sec, nsec int64) {
-	return stat.Mtimespec.Sec, stat.Mtimespec.Nsec
+	return stat.Mtim.Sec, stat.Mtim.Nsec
 }
 
 // platformStatAtime returns the access time fields from Stat_t.
-// On darwin, the field is Atimespec (not Atim).
+// In golang.org/x/sys v0.38+, darwin Stat_t uses Atim (same as Linux).
 func platformStatAtime(stat *unix.Stat_t) (sec, nsec int64) {
-	return stat.Atimespec.Sec, stat.Atimespec.Nsec
+	return stat.Atim.Sec, stat.Atim.Nsec
 }
 
 // platformStatCtime returns the change time fields from Stat_t.
-// On darwin, the field is Ctimespec (not Ctim).
+// In golang.org/x/sys v0.38+, darwin Stat_t uses Ctim (same as Linux).
 func platformStatCtime(stat *unix.Stat_t) (sec, nsec int64) {
-	return stat.Ctimespec.Sec, stat.Ctimespec.Nsec
+	return stat.Ctim.Sec, stat.Ctim.Nsec
 }
 
 // platformStatfsNamelen returns a default max filename length on macOS.
