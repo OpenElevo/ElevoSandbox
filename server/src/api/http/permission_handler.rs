@@ -1,7 +1,7 @@
 //! Share permission management API handlers
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
@@ -28,6 +28,7 @@ pub struct UpdatePermissionRequest {
 pub async fn list_permissions(
     State(state): State<AppState>,
     Path(share_id): Path<String>,
+    Query(pagination): Query<crate::domain::tenant::Pagination>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
     let auth = match request.extensions().get::<AuthContext>() {
@@ -47,12 +48,17 @@ pub async fn list_permissions(
 
     match state
         .share_permission_repository
-        .list_by_share(share_uuid)
+        .list_by_share_paginated(share_uuid, pagination)
         .await
     {
-        Ok(permissions) => (
+        Ok(result) => (
             StatusCode::OK,
-            Json(serde_json::json!({"permissions": permissions})),
+            Json(serde_json::json!({
+                "items": result.items,
+                "total": result.total,
+                "page": result.page,
+                "page_size": result.page_size
+            })),
         )
             .into_response(),
         Err(e) => super::tenant_handler::error_response(e),
@@ -247,6 +253,7 @@ pub async fn revoke_permission(
 pub async fn list_tenant_permissions(
     State(state): State<AppState>,
     Path(tenant_id): Path<String>,
+    Query(pagination): Query<crate::domain::tenant::Pagination>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
     let auth = match request.extensions().get::<AuthContext>() {
@@ -269,12 +276,17 @@ pub async fn list_tenant_permissions(
 
     match state
         .share_permission_repository
-        .list_by_tenant(tenant_uuid)
+        .list_by_tenant_paginated(tenant_uuid, pagination)
         .await
     {
-        Ok(permissions) => (
+        Ok(result) => (
             StatusCode::OK,
-            Json(serde_json::json!({"permissions": permissions})),
+            Json(serde_json::json!({
+                "items": result.items,
+                "total": result.total,
+                "page": result.page,
+                "page_size": result.page_size
+            })),
         )
             .into_response(),
         Err(e) => super::tenant_handler::error_response(e),

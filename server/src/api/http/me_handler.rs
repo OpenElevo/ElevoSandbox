@@ -168,6 +168,7 @@ pub async fn list_my_sandboxes(
 /// GET /api/v1/me/shares — list shares I own
 pub async fn list_my_shares(
     State(state): State<AppState>,
+    Query(pagination): Query<crate::domain::tenant::Pagination>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
     let auth =
@@ -194,13 +195,11 @@ pub async fn list_my_shares(
     };
 
     use crate::domain::share::ShareFilter;
-    use crate::domain::tenant::Pagination;
 
     let filter = ShareFilter {
         owner_tenant_id: Some(tenant_id),
         ..Default::default()
     };
-    let pagination = Pagination::default();
 
     match state.share_repository.list_shares(filter, pagination).await {
         Ok(result) => (
@@ -493,6 +492,7 @@ pub async fn delete_my_file(
 /// GET /api/v1/me/accessible-shares — list shares I have access to
 pub async fn list_my_accessible_shares(
     State(state): State<AppState>,
+    Query(pagination): Query<crate::domain::tenant::Pagination>,
     request: axum::extract::Request,
 ) -> impl IntoResponse {
     let auth =
@@ -520,22 +520,19 @@ pub async fn list_my_accessible_shares(
 
     match state
         .share_repository
-        .list_accessible_shares(tenant_id)
+        .list_accessible_shares_paginated(tenant_id, pagination)
         .await
     {
-        Ok(shares) => {
-            let total = shares.len() as i64;
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({
-                    "items": shares,
-                    "total": total,
-                    "page": 1,
-                    "page_size": total
-                })),
-            )
-                .into_response()
-        }
+        Ok(result) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "items": result.items,
+                "total": result.total,
+                "page": result.page,
+                "page_size": result.page_size
+            })),
+        )
+            .into_response(),
         Err(e) => super::tenant_handler::error_response(e),
     }
 }

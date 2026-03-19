@@ -5,6 +5,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::domain::permission::{PermissionLevel, SharePermission};
+use crate::domain::tenant::{PaginatedResult, Pagination};
 use crate::error::Error;
 
 #[derive(Clone)]
@@ -114,6 +115,45 @@ impl SharePermissionRepository {
         Ok(rows.into_iter().map(SharePermission::from).collect())
     }
 
+    /// List permissions for a share with pagination
+    pub async fn list_by_share_paginated(
+        &self,
+        share_id: Uuid,
+        pagination: Pagination,
+    ) -> Result<PaginatedResult<SharePermission>, Error> {
+        let pagination = pagination.capped();
+        let page = pagination.page;
+        let per_page = pagination.page_size;
+        let offset = ((page - 1) * per_page) as i64;
+        let limit = per_page as i64;
+
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM share_permissions WHERE share_id = $1",
+        )
+        .bind(share_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let rows = sqlx::query_as::<_, PermissionRow>(
+            "SELECT * FROM share_permissions WHERE share_id = $1 ORDER BY created_at LIMIT $2 OFFSET $3",
+        )
+        .bind(share_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let items = rows.into_iter().map(SharePermission::from).collect();
+        Ok(PaginatedResult {
+            items,
+            total,
+            page,
+            page_size: per_page,
+        })
+    }
+
     /// List all permissions for a tenant
     pub async fn list_by_tenant(&self, tenant_id: Uuid) -> Result<Vec<SharePermission>, Error> {
         let rows = sqlx::query_as::<_, PermissionRow>(
@@ -125,6 +165,45 @@ impl SharePermissionRepository {
         .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
 
         Ok(rows.into_iter().map(SharePermission::from).collect())
+    }
+
+    /// List permissions for a tenant with pagination
+    pub async fn list_by_tenant_paginated(
+        &self,
+        tenant_id: Uuid,
+        pagination: Pagination,
+    ) -> Result<PaginatedResult<SharePermission>, Error> {
+        let pagination = pagination.capped();
+        let page = pagination.page;
+        let per_page = pagination.page_size;
+        let offset = ((page - 1) * per_page) as i64;
+        let limit = per_page as i64;
+
+        let total: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM share_permissions WHERE tenant_id = $1",
+        )
+        .bind(tenant_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let rows = sqlx::query_as::<_, PermissionRow>(
+            "SELECT * FROM share_permissions WHERE tenant_id = $1 ORDER BY created_at LIMIT $2 OFFSET $3",
+        )
+        .bind(tenant_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::Internal(format!("DB error: {}", e)))?;
+
+        let items = rows.into_iter().map(SharePermission::from).collect();
+        Ok(PaginatedResult {
+            items,
+            total,
+            page,
+            page_size: per_page,
+        })
     }
 
     /// Update an existing permission (plain UPDATE — returns NOT_FOUND if no rows affected).
