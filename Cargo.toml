@@ -36,7 +36,7 @@ prost = "0.13"
 prost-types = "0.13"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "chrono", "uuid", "json", "ipnetwork"] }
 
 # Docker
 bollard = "0.18"
@@ -67,6 +67,7 @@ governor = { version = "0.8", features = ["dashmap"] }
 sha2 = "0.10"
 rand = "0.8"
 hex = "0.4"
+rsa = { version = "0.9", features = ["sha2"] }
 
 # PTY (for agent)
 portable-pty = "0.8"

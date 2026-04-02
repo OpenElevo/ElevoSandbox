@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use tokio::signal;
 use tonic::transport::Server;
-use tracing::{error, info, Level};
+use tracing::{debug, error, info, warn, Level};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod api;
@@ -45,6 +45,10 @@ use infra::storage::s3fs_mount::{S3Credentials, S3fsMountManager, S3fsMountMonit
 use infra::storage::StorageBackend;
 use infra::tenant_repository::TenantRepository;
 use infra::workspace_repository::WorkspaceRepository;
+use infra::oidc::OidcService;
+use infra::oidc_auth_session_repository::OidcAuthSessionRepository;
+use infra::oidc_token_store_repository::OidcTokenStoreRepository;
+use infra::oidc_config_repository::OidcConfigRepository;
 use proto::client_storage_service_server::ClientStorageServiceServer;
 use proto::file_system_service_server::FileSystemServiceServer;
 use proto::process_service_server::ProcessServiceServer;
@@ -77,6 +81,11 @@ pub struct AppState {
     pub audit_service: service::audit::AuditService,
     pub api_key_usage: Arc<service::api_key_usage::ApiKeyUsageTracker>,
     pub pool: sqlx::PgPool,
+    pub oidc_service: Arc<tokio::sync::RwLock<Option<Arc<OidcService>>>>,
+    pub oidc_auth_session_repo: OidcAuthSessionRepository,
+    pub oidc_token_store_repo: OidcTokenStoreRepository,
+    pub oidc_config_repo: OidcConfigRepository,
+    pub oidc_bg_tasks_started: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Initialize the storage backend based on configuration.
@@ -352,6 +361,34 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    // Initialize OIDC service (loads config from DB)
+    let oidc_auth_session_repo = OidcAuthSessionRepository::new(pool.clone());
+    let oidc_token_store_repo = OidcTokenStoreRepository::new(pool.clone());
+    let oidc_config_repo = OidcConfigRepository::new(pool.clone());
+    let oidc_service = match config.get_oidc_encryption_key() {
+        Some(encryption_key) => {
+            match OidcService::new_from_db(pool.clone(), encryption_key, config.storage.workspace_dir().to_path_buf()).await {
+                Ok(Some(svc)) => {
+                    info!("OIDC service initialized successfully");
+                    Some(svc)
+                }
+                Ok(None) => {
+                    info!("OIDC service not configured (disabled)");
+                    None
+                }
+                Err(e) => {
+                    warn!("OIDC service initialization failed (non-fatal): {}", e);
+                    None
+                }
+            }
+        }
+        None => {
+            info!("OIDC encryption key not available — OIDC disabled");
+            None
+        }
+    };
+    let oidc_service = Arc::new(tokio::sync::RwLock::new(oidc_service));
+
     // Initialize namespace service
     let namespace_service = service::namespace::NamespaceService::new(&config);
     if let Err(e) = namespace_service.init().await {
@@ -378,7 +415,15 @@ async fn main() -> anyhow::Result<()> {
         audit_service,
         api_key_usage,
         pool: pool.clone(),
+        oidc_service,
+        oidc_auth_session_repo,
+        oidc_token_store_repo,
+        oidc_config_repo,
+        oidc_bg_tasks_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
+
+    // Start OIDC background tasks (if service was initialized at startup)
+    state.ensure_oidc_background_tasks().await;
 
     // Check if MCP mode is enabled (stdio mode runs exclusively)
     if config.mcp_mode == "stdio" {
@@ -440,8 +485,9 @@ async fn main() -> anyhow::Result<()> {
         state.tenant_repository.clone(),
         state.auth_config.clone(),
         state.api_key_usage.clone(),
+        state.oidc_service.clone(),  // Arc<RwLock<...>> — cheap clone
     );
-    info!("gRPC auth layer enabled (JWT + API Key)");
+    info!("gRPC auth layer enabled (JWT + API Key + OIDC)");
 
     // Configure tonic server with larger HTTP/2 flow control windows.
     // Default 65KB windows cause stalls for bidirectional streams and
@@ -499,6 +545,80 @@ async fn main() -> anyhow::Result<()> {
 
     info!("Server shutdown complete");
     Ok(())
+}
+
+impl AppState {
+    /// Spawn OIDC background tasks (JWKS refresh, session/token cleanup).
+    /// Safe to call multiple times — tasks are only spawned once.
+    /// If the service is not yet available, the flag is reset so a later call can retry.
+    pub async fn ensure_oidc_background_tasks(&self) {
+        use std::sync::atomic::Ordering;
+
+        if self
+            .oidc_bg_tasks_started
+            .swap(true, Ordering::Relaxed)
+        {
+            return;
+        }
+
+        let oidc_svc = match self.oidc_service.read().await.as_ref() {
+            Some(svc) => svc.clone(),
+            None => {
+                self.oidc_bg_tasks_started
+                    .store(false, Ordering::Relaxed);
+                return;
+            }
+        };
+
+        // JWKS refresh task (periodic)
+        let jwks_svc = oidc_svc.clone();
+        let jwks_interval = jwks_svc.config.read().await.jwks_refresh_interval_secs;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(jwks_interval));
+            loop {
+                interval.tick().await;
+                if let Err(e) = jwks_svc.refresh_jwks().await {
+                    tracing::warn!("Periodic JWKS refresh failed: {}", e);
+                }
+            }
+        });
+
+        // Auth session cleanup (every 5 minutes)
+        let auth_session_repo = self.oidc_auth_session_repo.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+            loop {
+                interval.tick().await;
+                match auth_session_repo.cleanup_expired().await {
+                    Ok(deleted) => {
+                        if deleted > 0 {
+                            debug!("Cleaned up {} expired OIDC auth sessions", deleted);
+                        }
+                    }
+                    Err(e) => warn!("OIDC auth session cleanup failed: {}", e),
+                }
+            }
+        });
+
+        // Token store cleanup (every 1 hour)
+        let token_store_repo = self.oidc_token_store_repo.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+            loop {
+                interval.tick().await;
+                match token_store_repo.cleanup_expired().await {
+                    Ok(deleted) => {
+                        if deleted > 0 {
+                            debug!("Cleaned up {} expired OIDC token store entries", deleted);
+                        }
+                    }
+                    Err(e) => warn!("OIDC token store cleanup failed: {}", e),
+                }
+            }
+        });
+
+        info!("OIDC background tasks started (JWKS refresh, session/token cleanup)");
+    }
 }
 
 async fn shutdown_signal() {

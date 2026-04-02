@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Card, Descriptions, Tag, Button, Space, Tabs, App, Modal,
-  Drawer, Form, Input, Table, Checkbox, DatePicker, Alert, Select,
+  Drawer, Form, Input, Table, Checkbox, DatePicker, Alert, Select, InputNumber,
 } from 'antd';
 import { CopyOutlined, CheckOutlined, EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -221,7 +221,13 @@ export default function TenantDetail() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (params: { name?: string; description?: string }) => updateTenant(id!, params),
+    mutationFn: (params: { name?: string; description?: string; storage_type?: string; elevoone_org_id?: number | null }) => {
+      const clean: Record<string, unknown> = { name: params.name, description: params.description, storage_type: params.storage_type };
+      if (params.elevoone_org_id !== undefined) {
+        clean.elevoone_org_id = params.elevoone_org_id;
+      }
+      return updateTenant(id!, clean);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tenant', id] });
       setEditOpen(false);
@@ -243,7 +249,7 @@ export default function TenantDetail() {
 
   const handleEdit = () => {
     if (!tenant) return;
-    editForm.setFieldsValue({ name: tenant.name, description: tenant.description });
+    editForm.setFieldsValue({ name: tenant.name, description: tenant.description, elevoone_org_id: tenant.elevoone_org_id ?? '' });
     setEditDirty(false);
     setEditOpen(true);
   };
@@ -387,6 +393,7 @@ export default function TenantDetail() {
             <Tag color={tenant.is_active ? 'green' : 'default'}>{tenant.is_active ? '活跃' : '已停用'}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="存储类型">{tenant.storage_type === 'remote' ? '远程' : '托管'}</Descriptions.Item>
+          <Descriptions.Item label="ElevoOne Org ID">{tenant.elevoone_org_id ?? '-'}</Descriptions.Item>
           <Descriptions.Item label="描述" span={2}>{tenant.description || '-'}</Descriptions.Item>
           <Descriptions.Item label="创建时间">{formatTime(tenant.created_at)}</Descriptions.Item>
           <Descriptions.Item label="更新时间">{formatTime(tenant.updated_at)}</Descriptions.Item>
@@ -462,6 +469,13 @@ export default function TenantDetail() {
                 { value: 'remote', label: '远程 (gRPC 存储)' },
               ]}
             />
+          </Form.Item>
+          <Form.Item
+            name="elevoone_org_id"
+            label="ElevoOne Org ID"
+            tooltip="关联的 ElevoOne 组织 ID，用于 SSO 自动映射。清空则解除关联。"
+          >
+            <InputNumber style={{ width: '100%' }} placeholder="可选，如 12345" />
           </Form.Item>
         </Form>
       </Drawer>

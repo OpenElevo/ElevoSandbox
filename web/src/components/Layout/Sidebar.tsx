@@ -5,6 +5,7 @@ import {
   ShareAltOutlined,
   CloudServerOutlined,
   AuditOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 
@@ -20,6 +21,7 @@ const menuItems = [
   { key: '/admin/shares', icon: <ShareAltOutlined />, label: '共享管理' },
   { key: '/admin/sandboxes', icon: <CloudServerOutlined />, label: '沙箱管理' },
   { key: '/admin/audit-logs', icon: <AuditOutlined />, label: '审计日志' },
+  { key: '/admin/settings', icon: <SettingOutlined />, label: '系统设置' },
 ];
 
 export default function Sidebar({ collapsed }: SidebarProps) {

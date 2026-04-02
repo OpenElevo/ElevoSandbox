@@ -41,12 +41,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Default values
-REGISTRY="${REGISTRY:-}"
-SERVER_IMAGE_NAME="${SERVER_IMAGE_NAME:-elevosandbox-server}"
-BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-elevosandbox-base}"
+REGISTRY="${REGISTRY:-docker.easyops.local/elevo}"
+SERVER_IMAGE_NAME="${SERVER_IMAGE_NAME:-workspace-server}"
+BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-workspace-base}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
-RUST_IMAGE_X86="${RUST_IMAGE:-rust:1.92.0}"
-RUST_IMAGE_ARM="${RUST_IMAGE_ARM:-rust:1.92.0}"
+RUST_IMAGE_X86="${RUST_IMAGE:-docker.easyops.local/ci/rust-builder:1.92.0-centos7}"
+RUST_IMAGE_ARM="${RUST_IMAGE_ARM:-docker.easyops.local/ci/rust-builder-aarch64:1.92.0-centos8}"
 CACHE_DIR="${CACHE_DIR:-/data/cache/elevosandbox}"
 CARGO_REGISTRY_MIRROR="${CARGO_REGISTRY_MIRROR:-sparse+https://mirrors.ustc.edu.cn/crates.io-index/}"
 
@@ -140,20 +140,12 @@ build_rust_binaries() {
         -v "${CACHE_DIR}/cargo/git":/usr/local/cargo/git
         -v "${CACHE_DIR}/cargo/registry":/usr/local/cargo/registry
         -v "${CACHE_DIR}/target":/workspace/target
+        -e HTTP_PROXY=http://pac.router.easyops.local:8118
+        -e HTTPS_PROXY=http://pac.router.easyops.local:8118
+        -e http_proxy=http://pac.router.easyops.local:8118
+        -e https_proxy=http://pac.router.easyops.local:8118
         -w /workspace
     )
-
-    # Forward proxy settings from host environment if present
-    for var in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy; do
-        if [ -n "${!var}" ]; then
-            docker_args+=(-e "${var}=${!var}")
-        fi
-    done
-
-    # Forward cargo mirror setting into container
-    if [ -n "${CARGO_REGISTRY_MIRROR}" ]; then
-        docker_args+=(-e "CARGO_REGISTRY_MIRROR=${CARGO_REGISTRY_MIRROR}")
-    fi
 
     docker run "${docker_args[@]}" \
         "$RUST_IMAGE" \

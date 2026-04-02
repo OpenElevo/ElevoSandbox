@@ -16,6 +16,7 @@ impl UuidSimple for Uuid {
 
 pub mod audit;
 pub mod auth;
+pub mod oidc;
 pub mod permission;
 pub mod sandbox;
 pub mod share;

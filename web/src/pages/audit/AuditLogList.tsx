@@ -62,6 +62,7 @@ export default function AuditLogList() {
     { title: '操作者', key: 'actor', width: 160,
       render: (_: unknown, r: AuditLog) => {
         if (r.actor_type === 'admin') return <Tag color="red">管理员</Tag>;
+        if (r.actor_type === 'anonymous') return <Tag color="default">匿名</Tag>;
         const name = r.actor_id ? tenantMap.get(r.actor_id) : null;
         return name || (r.actor_id ? r.actor_id.slice(0, 8) : '-');
       },
@@ -110,6 +111,7 @@ export default function AuditLogList() {
           options={[
             { label: '管理员', value: 'admin' },
             { label: '租户', value: 'tenant' },
+            { label: '匿名', value: 'anonymous' },
           ]}
         />
         <Select

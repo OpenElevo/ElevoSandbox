@@ -18,6 +18,7 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use crate::domain::auth::{AuthContext, AuthError, Identity, JwtClaims};
+use crate::infra::oidc::jwt_utils::extract_jwt_alg;
 use crate::AppState;
 
 /// Auth configuration extracted from AppState
@@ -168,22 +169,43 @@ pub async fn auth_middleware(
             }
             Err(e) => auth_error_response(e),
         }
-    } else {
-        // JWT authentication path
-        match authenticate_jwt(auth_config, token, ip_address) {
-            Ok((ctx, refreshed_token)) => {
-                request.extensions_mut().insert(ctx);
-                let mut response = next.run(request).await;
-                // Sliding window token refresh
-                if let Some(new_token) = refreshed_token {
-                    if let Ok(val) = axum::http::HeaderValue::from_str(&new_token) {
-                        response.headers_mut().insert("X-Refreshed-Token", val);
+    } else if token.starts_with("eyJ") {
+        // JWT path — dispatch by algorithm
+        let alg = extract_jwt_alg(token);
+        match alg.as_deref() {
+            Some("RS256") => {
+                // ElevoOne RS256 token — verify via OidcService
+                match authenticate_elevoone_token(&state, token, ip_address).await {
+                    Ok(ctx) => {
+                        request.extensions_mut().insert(ctx);
+                        next.run(request).await
                     }
+                    Err(_) => auth_error_response(AuthError::InvalidToken(
+                        "invalid or expired token".to_string(),
+                    )),
                 }
-                response
             }
-            Err(e) => auth_error_response(e),
+            _ => {
+                // Default: treat as HS256 (our own admin JWT)
+                match authenticate_jwt(auth_config, token, ip_address) {
+                    Ok((ctx, refreshed_token)) => {
+                        request.extensions_mut().insert(ctx);
+                        let mut response = next.run(request).await;
+                        if let Some(new_token) = refreshed_token {
+                            if let Ok(val) = axum::http::HeaderValue::from_str(&new_token) {
+                                response.headers_mut().insert("X-Refreshed-Token", val);
+                            }
+                        }
+                        response
+                    }
+                    Err(e) => auth_error_response(e),
+                }
+            }
         }
+    } else {
+        return auth_error_response(AuthError::InvalidToken(
+            "invalid token format".to_string(),
+        ));
     }
 }
 
@@ -250,6 +272,30 @@ fn authenticate_jwt(
     };
 
     Ok((ctx, refreshed))
+}
+
+/// Authenticate via ElevoOne RS256 token (OIDC)
+async fn authenticate_elevoone_token(
+    state: &AppState,
+    token: &str,
+    ip_address: Option<std::net::IpAddr>,
+) -> Result<AuthContext, AuthError> {
+    let oidc_guard = state.oidc_service.read().await;
+    let svc = oidc_guard
+        .as_ref()
+        .ok_or_else(|| AuthError::InvalidToken("OIDC not configured".to_string()))?;
+
+    let identity = svc
+        .verify_and_resolve_tenant(token, &state.tenant_repository)
+        .await
+        .map_err(|_| {
+            AuthError::InvalidToken("invalid or expired token".to_string())
+        })?;
+
+    Ok(AuthContext {
+        identity,
+        ip_address,
+    })
 }
 
 /// Extract the direct connection IP from request extensions.

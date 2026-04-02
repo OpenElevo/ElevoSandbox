@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate, Outlet } from 'react-router-dom';
 import { useAuthStore } from '@/stores/authStore';
 import AppLayout from '@/components/Layout/AppLayout';
 import Login from '@/pages/Login';
+import LoginSuccess from '@/pages/LoginSuccess';
 import Dashboard from '@/pages/Dashboard';
 import TenantList from '@/pages/tenants/TenantList';
 import TenantDetail from '@/pages/tenants/TenantDetail';
@@ -9,6 +10,7 @@ import ShareList from '@/pages/shares/ShareList';
 import ShareDetail from '@/pages/shares/ShareDetail';
 import SandboxList from '@/pages/sandboxes/SandboxList';
 import AuditLogList from '@/pages/audit/AuditLogList';
+import SystemSettings from '@/pages/settings/SystemSettings';
 import NotFound from '@/pages/NotFound';
 
 function RequireAuth() {
@@ -26,6 +28,10 @@ export const router = createBrowserRouter([
     element: <Login />,
   },
   {
+    path: '/admin/login/success',
+    element: <LoginSuccess />,
+  },
+  {
     path: '/admin',
     element: <RequireAuth />,
     children: [
@@ -40,6 +46,7 @@ export const router = createBrowserRouter([
           { path: 'shares/:id', element: <ShareDetail /> },
           { path: 'sandboxes', element: <SandboxList /> },
           { path: 'audit-logs', element: <AuditLogList /> },
+          { path: 'settings', element: <SystemSettings /> },
         ],
       },
     ],

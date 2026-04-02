@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef } from 'react';
 import {
   Table, Button, Input, Space, Tag, Typography, Drawer, Form, Select,
-  App, Modal, Checkbox, DatePicker, Radio, Alert,
+  App, Modal, Checkbox, DatePicker, Radio, Alert, InputNumber,
 } from 'antd';
 import { PlusOutlined, SearchOutlined, CopyOutlined, CheckOutlined } from '@ant-design/icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -157,6 +157,10 @@ export default function TenantList() {
         }
       }
 
+      if (values.elevoone_org_id != null) {
+        params.elevoone_org_id = Number(values.elevoone_org_id);
+      }
+
       createMutation.mutate(params);
     });
   };
@@ -303,6 +307,13 @@ export default function TenantList() {
           </Form.Item>
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={3} placeholder="可选描述" />
+          </Form.Item>
+          <Form.Item
+            name="elevoone_org_id"
+            label="ElevoOne Org ID"
+            tooltip="关联的 ElevoOne 组织 ID，用于 SSO 自动映射"
+          >
+            <InputNumber placeholder="可选，如 12345" style={{ width: '100%' }} />
           </Form.Item>
 
           {/* Storage type */}

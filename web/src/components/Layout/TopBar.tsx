@@ -1,6 +1,7 @@
-import { Layout, Button, Space, Typography, App } from 'antd';
-import { MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined } from '@ant-design/icons';
+import { Layout, Button, Space, Typography, App, Avatar } from 'antd';
+import { MenuFoldOutlined, MenuUnfoldOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import { useAuth } from '@/hooks/useAuth';
+import { useAuthStore } from '@/stores/authStore';
 
 const { Header } = Layout;
 
@@ -12,6 +13,7 @@ interface TopBarProps {
 export default function TopBar({ collapsed, onToggle }: TopBarProps) {
   const { logout } = useAuth();
   const { modal } = App.useApp();
+  const user = useAuthStore((s) => s.user);
 
   const handleLogout = () => {
     modal.confirm({
@@ -22,6 +24,8 @@ export default function TopBar({ collapsed, onToggle }: TopBarProps) {
       onOk: logout,
     });
   };
+
+  const displayName = user?.name || '管理员';
 
   return (
     <Header style={{
@@ -42,8 +46,11 @@ export default function TopBar({ collapsed, onToggle }: TopBarProps) {
           Elevo Admin
         </Typography.Text>
       </Space>
-      <Space>
-        <Typography.Text type="secondary">管理员</Typography.Text>
+      <Space align="center" size="middle">
+        <Space size="small">
+          <Avatar size="small" src={user?.picture || undefined} icon={!user?.picture ? <UserOutlined /> : undefined} />
+          <Typography.Text type="secondary">{displayName}</Typography.Text>
+        </Space>
         <Button
           type="text"
           icon={<LogoutOutlined />}

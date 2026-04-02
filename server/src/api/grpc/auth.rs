@@ -18,6 +18,7 @@ use tower::{Layer, Service};
 use uuid::Uuid;
 
 use crate::api::http::auth::AuthConfig;
+use crate::infra::oidc::OidcService;
 use crate::infra::tenant_repository::TenantRepository;
 use crate::service::api_key_usage::ApiKeyUsageTracker;
 
@@ -64,6 +65,7 @@ pub struct GrpcAuthLayer {
     tenant_repository: TenantRepository,
     auth_config: AuthConfig,
     api_key_usage: Arc<ApiKeyUsageTracker>,
+    oidc_service: Arc<tokio::sync::RwLock<Option<Arc<OidcService>>>>,
 }
 
 impl GrpcAuthLayer {
@@ -71,11 +73,13 @@ impl GrpcAuthLayer {
         tenant_repository: TenantRepository,
         auth_config: AuthConfig,
         api_key_usage: Arc<ApiKeyUsageTracker>,
+        oidc_service: Arc<tokio::sync::RwLock<Option<Arc<OidcService>>>>,
     ) -> Self {
         Self {
             tenant_repository,
             auth_config,
             api_key_usage,
+            oidc_service,
         }
     }
 }
@@ -89,6 +93,7 @@ impl<S> Layer<S> for GrpcAuthLayer {
             tenant_repository: self.tenant_repository.clone(),
             auth_config: self.auth_config.clone(),
             api_key_usage: self.api_key_usage.clone(),
+            oidc_service: self.oidc_service.clone(),
         }
     }
 }
@@ -100,6 +105,7 @@ pub struct GrpcAuthService<S> {
     tenant_repository: TenantRepository,
     auth_config: AuthConfig,
     api_key_usage: Arc<ApiKeyUsageTracker>,
+    oidc_service: Arc<tokio::sync::RwLock<Option<Arc<OidcService>>>>,
 }
 
 /// Check if a request path requires authentication.
@@ -143,6 +149,7 @@ where
         let tenant_repo = self.tenant_repository.clone();
         let auth_config = self.auth_config.clone();
         let api_key_usage = self.api_key_usage.clone();
+        let oidc_service = self.oidc_service.clone();
 
         Box::pin(async move {
             // Skip auth for unauthenticated services (AgentService, health, etc.)
@@ -185,13 +192,35 @@ where
                 }
             }
 
-            // Route 2: JWT verification (synchronous)
-            match auth_config.verify_jwt_public(token) {
-                Ok(_claims) => {
-                    req.extensions_mut().insert(GrpcIdentity::Admin);
-                    inner.call(req).await
+            // Route 2: JWT path — dispatch by algorithm
+            if token.starts_with("eyJ") {
+                let alg = crate::infra::oidc::jwt_utils::extract_jwt_alg(token);
+                match alg.as_deref() {
+                    Some("RS256") => {
+                        // ElevoOne RS256 token — verify via OidcService
+                        let oidc_guard = oidc_service.read().await;
+                        match validate_elevoone_token(&oidc_guard, &tenant_repo, token).await {
+                            Ok(tenant_id) => {
+                                req.extensions_mut()
+                                    .insert(GrpcIdentity::Tenant { tenant_id });
+                                return inner.call(req).await;
+                            }
+                            Err(msg) => return Ok(unauthenticated_response(&msg)),
+                        }
+                    }
+                    _ => {
+                        // Default: treat as HS256 (our own admin JWT)
+                        match auth_config.verify_jwt_public(token) {
+                            Ok(_claims) => {
+                                req.extensions_mut().insert(GrpcIdentity::Admin);
+                                inner.call(req).await
+                            }
+                            Err(_) => Ok(unauthenticated_response("invalid or expired token")),
+                        }
+                    }
                 }
-                Err(e) => Ok(unauthenticated_response(&format!("JWT: {}", e))),
+            } else {
+                return Ok(unauthenticated_response("invalid token format"));
             }
         })
     }
@@ -226,6 +255,28 @@ async fn validate_api_key(
     tracker.update(key.id);
 
     Ok(tenant.id)
+}
+
+/// Validate an ElevoOne RS256 token via OidcService.
+/// Returns the tenant_id on success.
+async fn validate_elevoone_token(
+    oidc_service: &Option<Arc<OidcService>>,
+    tenant_repo: &TenantRepository,
+    token: &str,
+) -> Result<Uuid, String> {
+    let svc = oidc_service
+        .as_ref()
+        .ok_or_else(|| "OIDC not configured".to_string())?;
+
+    let identity = svc
+        .verify_and_resolve_tenant(token, tenant_repo)
+        .await
+        .map_err(|_| "invalid or expired token".to_string())?;
+
+    match identity {
+        crate::domain::auth::Identity::Tenant { id, .. } => Ok(id),
+        _ => Err("unexpected identity from OIDC token".to_string()),
+    }
 }
 
 /// Build an HTTP 401 response compatible with tonic's BoxBody.

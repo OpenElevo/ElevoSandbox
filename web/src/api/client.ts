@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { message } from 'antd';
 import { useAuthStore } from '../stores/authStore';
+import { clearOidcRefreshTimer } from '../hooks/useOidcRefresh';
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -36,6 +37,7 @@ client.interceptors.response.use(
     const errorMsg = error.response?.data?.error?.message;
 
     if (status === 401) {
+      clearOidcRefreshTimer();
       useAuthStore.getState().logout();
       if (window.location.pathname !== '/admin/login') {
         message.error('登录已过期，请重新登录');

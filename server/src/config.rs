@@ -178,6 +178,11 @@ pub struct Config {
     /// Namespace trash retention period in days
     #[serde(default = "default_namespace_trash_retention_days")]
     pub namespace_trash_retention_days: u64,
+
+    // ── OIDC Configuration ──
+    /// OIDC secret encryption key (optional; derived from JWT_SECRET if not set)
+    #[serde(default)]
+    pub oidc_secret_encryption_key: Option<String>,
 }
 
 /// Storage backend configuration
@@ -519,6 +524,11 @@ impl Config {
             }
         }
 
+        // OIDC configuration
+        if let Ok(val) = std::env::var("OIDC_SECRET_ENCRYPTION_KEY") {
+            config.oidc_secret_encryption_key = Some(val);
+        }
+
         // Validate auth configuration
         if config.admin_password.is_some() {
             // Production mode: JWT_SECRET is mandatory and must be ≥32 bytes
@@ -661,6 +671,23 @@ impl Config {
     pub fn get_nfs_host(&self) -> &str {
         self.nfs_host.as_deref().unwrap_or("127.0.0.1")
     }
+
+    /// Get the OIDC encryption key.
+    /// Priority: OIDC_SECRET_ENCRYPTION_KEY env var > HKDF-derived from JWT_SECRET.
+    /// Returns None if neither is available (OIDC cannot be used).
+    pub fn get_oidc_encryption_key(&self) -> Option<[u8; 32]> {
+        if let Some(ref key) = self.oidc_secret_encryption_key {
+            if key.len() >= 32 {
+                let mut result = [0u8; 32];
+                result.copy_from_slice(&key.as_bytes()[..32]);
+                return Some(result);
+            }
+        }
+        if let Some(ref jwt_secret) = self.jwt_secret {
+            return Some(crate::infra::oidc::crypto::derive_encryption_key(jwt_secret));
+        }
+        None
+    }
 }
 
 impl Default for Config {
@@ -704,6 +731,7 @@ impl Default for Config {
             rate_limit_rps: default_rate_limit_rps(),
             trusted_proxy_ips: Vec::new(),
             namespace_trash_retention_days: default_namespace_trash_retention_days(),
+            oidc_secret_encryption_key: None,
         }
     }
 }

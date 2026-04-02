@@ -9,6 +9,8 @@ mod downloads;
 mod health;
 pub mod me_handler;
 pub mod namespace_handler;
+pub mod oidc_config_handler;
+pub mod oidc_handler;
 pub mod permission_handler;
 mod process;
 mod pty;
@@ -156,18 +158,21 @@ pub fn create_router(state: AppState) -> Router {
         trusted_proxy_ips: trusted_proxy_ips.clone(),
     };
 
-    // Login route with its own stricter rate limiter
-    let login_route = Router::new()
-        .route("/auth/login", post(auth_handler::login))
-        .route_layer(middleware::from_fn_with_state(
-            login_rate_state,
-            login_rate_limit,
-        ));
-
     // Public routes (no auth required)
     let public_routes = Router::new()
         .route("/health", get(health::health_check))
-        .merge(login_route)
+        // Login and OIDC authorize share a stricter rate limiter
+        .route("/auth/login", post(auth_handler::login))
+        .route("/auth/oidc/authorize", post(oidc_handler::authorize_oidc))
+        .route_layer(middleware::from_fn_with_state(
+            login_rate_state,
+            login_rate_limit,
+        ))
+        // OIDC public endpoints (not rate-limited — callback/session are one-time codes)
+        .route("/auth/oidc/config", get(oidc_handler::get_oidc_config))
+        .route("/auth/oidc/callback", get(oidc_handler::oidc_callback))
+        .route("/auth/oidc/session", get(oidc_handler::exchange_session_code))
+        .route("/auth/logout", post(oidc_handler::oidc_logout))
         .route(
             "/downloads/workspace-fuse/{platform}/{arch}",
             get(downloads::download_workspace_fuse),
@@ -213,6 +218,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/audit-logs", get(audit_handler::list_audit_logs))
         // Dashboard stats
         .route("/dashboard/stats", get(dashboard_handler::get_stats))
+        // OIDC token refresh
+        .route("/auth/oidc/refresh", post(oidc_handler::refresh_oidc_token))
+        // OIDC system configuration
+        .route("/system/oidc-config", get(oidc_config_handler::get_oidc_config))
+        .route("/system/oidc-config", put(oidc_config_handler::update_oidc_config))
+        .route("/system/oidc-config/test", post(oidc_config_handler::test_oidc_config))
         // Layers are applied innermost-first (bottom to top in execution order):
         // 1. auth_middleware runs first to populate AuthContext
         // 2. require_admin_middleware runs after to enforce admin-only access

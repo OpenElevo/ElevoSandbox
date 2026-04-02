@@ -5,6 +5,7 @@ export interface Tenant {
   is_active: boolean;
   storage_type: string;
   storage_config: Record<string, unknown>;
+  elevoone_org_id: number | null;
   created_at: string;
   updated_at: string;
   share_count?: number;
@@ -17,11 +18,13 @@ export interface CreateTenantParams {
   storage_type?: string;
   storage_config?: Record<string, unknown>;
   initial_api_key?: { name: string; expires_at?: string };
+  elevoone_org_id?: number;
 }
 
 export interface UpdateTenantParams {
   name?: string;
   description?: string;
+  elevoone_org_id?: number | null;
 }
 
 export interface ApiKey {
@@ -98,7 +101,7 @@ export interface SandboxMount {
 
 export interface AuditLog {
   id: string;
-  actor_type: 'admin' | 'tenant';
+  actor_type: 'admin' | 'tenant' | 'anonymous';
   actor_id: string | null;
   action: string;
   resource_type: string;
@@ -134,6 +137,15 @@ export interface FileInfo {
   size: number;
   modified: string;
 }
+
+export interface OidcUserInfo {
+  name: string;
+  email: string | null;
+  picture: string | null;
+  is_admin: boolean;
+}
+
+export type LoginMethod = 'password' | 'oidc' | null;
 
 export interface PaginatedResponse<T> {
   data: T[];

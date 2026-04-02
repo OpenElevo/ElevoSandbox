@@ -4,6 +4,7 @@ import { Outlet, useLocation, Link } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
 import { useBreadcrumbStore } from '@/stores/breadcrumbStore';
+import { useOidcRefresh } from '@/hooks/useOidcRefresh';
 
 const { Content } = Layout;
 
@@ -59,6 +60,7 @@ function useBreadcrumbItems() {
 }
 
 export default function AppLayout() {
+  useOidcRefresh();
   const [collapsed, setCollapsed] = useState(() => {
     return localStorage.getItem('sidebar_collapsed') === 'true';
   });

@@ -29,6 +29,7 @@ struct TenantRow {
     is_active: bool,
     storage_type: String,
     storage_config: serde_json::Value,
+    elevoone_org_id: Option<i64>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
 }
@@ -41,6 +42,7 @@ struct TenantListRow {
     is_active: bool,
     storage_type: String,
     storage_config: serde_json::Value,
+    elevoone_org_id: Option<i64>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
     share_count: Option<i64>,
@@ -70,6 +72,7 @@ fn tenant_from_row(row: TenantRow) -> Tenant {
         is_active: row.is_active,
         storage_type: StorageType::from_str(&row.storage_type).unwrap_or(StorageType::Managed),
         storage_config: row.storage_config,
+        elevoone_org_id: row.elevoone_org_id,
         created_at: row.created_at,
         updated_at: row.updated_at,
     }
@@ -134,8 +137,8 @@ impl TenantRepository {
 
         sqlx::query(
             r#"
-            INSERT INTO tenants (id, name, description, is_active, storage_type, storage_config, created_at, updated_at)
-            VALUES ($1, $2, $3, true, $4, $5, $6, $7)
+            INSERT INTO tenants (id, name, description, is_active, storage_type, storage_config, elevoone_org_id, created_at, updated_at)
+            VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8)
             "#,
         )
         .bind(id)
@@ -143,6 +146,7 @@ impl TenantRepository {
         .bind(&description)
         .bind(storage_type)
         .bind(&storage_config)
+        .bind(params.elevoone_org_id)
         .bind(now)
         .bind(now)
         .execute(&mut *tx)
@@ -164,7 +168,7 @@ impl TenantRepository {
     /// Get a tenant by ID
     pub async fn get_tenant(&self, id: Uuid) -> Result<Tenant> {
         let row = sqlx::query_as::<_, TenantRow>(
-            "SELECT id, name, description, is_active, storage_type, storage_config, created_at, updated_at FROM tenants WHERE id = $1",
+            "SELECT id, name, description, is_active, storage_type, storage_config, elevoone_org_id, created_at, updated_at FROM tenants WHERE id = $1",
         )
         .bind(id)
         .fetch_optional(&self.pool)
@@ -197,12 +201,16 @@ impl TenantRepository {
             WHERE ($1::boolean IS NULL OR t.is_active = $1)
               AND ($2::text IS NULL OR t.storage_type = $2)
               AND ($3::text IS NULL OR t.name ILIKE $3 OR t.description ILIKE $3 OR t.id::text = $4)
+              AND ($7::bigint IS NULL OR t.elevoone_org_id = $7)
             "#,
         )
         .bind(filter.is_active)
         .bind(filter.storage_type.as_deref())
         .bind(search_pattern.as_deref())
         .bind(filter.search.as_deref().unwrap_or(""))
+        .bind(limit)
+        .bind(offset)
+        .bind(filter.elevoone_org_id)
         .fetch_one(&self.pool)
         .await?;
 
@@ -210,6 +218,7 @@ impl TenantRepository {
         let rows = sqlx::query_as::<_, TenantListRow>(
             r#"
             SELECT t.id, t.name, t.description, t.is_active, t.storage_type, t.storage_config,
+                   t.elevoone_org_id,
                    t.created_at, t.updated_at,
                    (SELECT COUNT(*) FROM shares s WHERE s.owner_tenant_id = t.id) as share_count,
                    (SELECT COUNT(*) FROM api_keys k WHERE k.tenant_id = t.id AND k.is_active = true AND (k.expires_at IS NULL OR k.expires_at > now())) as active_api_key_count
@@ -217,6 +226,7 @@ impl TenantRepository {
             WHERE ($1::boolean IS NULL OR t.is_active = $1)
               AND ($2::text IS NULL OR t.storage_type = $2)
               AND ($3::text IS NULL OR t.name ILIKE $3 OR t.description ILIKE $3 OR t.id::text = $4)
+              AND ($7::bigint IS NULL OR t.elevoone_org_id = $7)
             ORDER BY t.created_at DESC
             LIMIT $5 OFFSET $6
             "#,
@@ -227,6 +237,7 @@ impl TenantRepository {
         .bind(filter.search.as_deref().unwrap_or(""))
         .bind(limit)
         .bind(offset)
+        .bind(filter.elevoone_org_id)
         .fetch_all(&self.pool)
         .await?;
 
@@ -240,6 +251,7 @@ impl TenantRepository {
                     is_active: row.is_active,
                     storage_type: row.storage_type,
                     storage_config: row.storage_config,
+                    elevoone_org_id: row.elevoone_org_id,
                     created_at: row.created_at,
                     updated_at: row.updated_at,
                 }),
@@ -274,6 +286,10 @@ impl TenantRepository {
             sets.push(format!("storage_type = ${idx}"));
             idx += 1;
         }
+        if params.elevoone_org_id.is_some() {
+            sets.push(format!("elevoone_org_id = ${idx}"));
+            idx += 1;
+        }
         sets.push(format!("updated_at = ${idx}"));
 
         if sets.len() == 1 {
@@ -293,6 +309,9 @@ impl TenantRepository {
         }
         if let Some(ref st) = params.storage_type {
             query = query.bind(st);
+        }
+        if let Some(ref org_id) = params.elevoone_org_id {
+            query = query.bind(org_id);
         }
         query = query.bind(now);
 
@@ -595,5 +614,17 @@ impl TenantRepository {
             .await?;
 
         Ok(())
+    }
+
+    /// Find a tenant by ElevoOne org_id
+    pub async fn find_by_elevoone_org_id(&self, org_id: i64) -> Result<Option<Tenant>> {
+        let row = sqlx::query_as::<_, TenantRow>(
+            "SELECT id, name, description, is_active, storage_type, storage_config, elevoone_org_id, created_at, updated_at FROM tenants WHERE elevoone_org_id = $1",
+        )
+        .bind(org_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(tenant_from_row))
     }
 }

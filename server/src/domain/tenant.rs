@@ -16,6 +16,8 @@ pub struct Tenant {
     pub is_active: bool,
     pub storage_type: StorageType,
     pub storage_config: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elevoone_org_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -57,7 +59,7 @@ impl ApiKey {
 }
 
 /// Parameters for creating a tenant
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Default)]
 pub struct CreateTenantParams {
     pub name: String,
     #[serde(default)]
@@ -68,6 +70,8 @@ pub struct CreateTenantParams {
     pub storage_config: Option<serde_json::Value>,
     #[serde(default)]
     pub initial_api_key: Option<CreateApiKeyParams>,
+    #[serde(default)]
+    pub elevoone_org_id: Option<i64>,
 }
 
 /// Parameters for updating a tenant
@@ -76,6 +80,17 @@ pub struct UpdateTenantParams {
     pub name: Option<String>,
     pub description: Option<String>,
     pub storage_type: Option<String>,
+    /// None = don't change, Some(None) = set to NULL, Some(Some(n)) = set to n
+    #[serde(default, deserialize_with = "deserialize_some")]
+    pub elevoone_org_id: Option<Option<i64>>,
+}
+
+fn deserialize_some<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    serde::Deserialize::deserialize(deserializer).map(Some)
 }
 
 /// Parameters for creating an API key
@@ -101,6 +116,7 @@ pub struct TenantFilter {
     pub search: Option<String>,
     pub is_active: Option<bool>,
     pub storage_type: Option<String>,
+    pub elevoone_org_id: Option<i64>,
 }
 
 /// Pagination parameters
