@@ -121,7 +121,10 @@ pub fn verify_access_token(
     let mut validation = Validation::new(Algorithm::RS256);
     validation.set_required_spec_claims(&["exp", "aud"]);
     validation.set_audience(&[client_id]);
-    validation.set_issuer(&[issuer]);
+    // Normalize issuer: IdPs may or may not include trailing slash, but the JWT
+    // claims typically do not. Trim to avoid InvalidIssuer mismatches.
+    let normalized_issuer = issuer.trim_end_matches('/');
+    validation.set_issuer(&[normalized_issuer]);
 
     let data = decode::<ElevoOneClaims>(token, &decoding_key, &validation)
         .map_err(|e| OidcError::InvalidToken(format!("JWT verification: {}", e)))?;
