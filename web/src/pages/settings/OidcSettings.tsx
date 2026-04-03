@@ -45,7 +45,7 @@ export default function OidcSettings() {
         client_id: values.client_id,
         redirect_uri: values.redirect_uri,
         jwks_refresh_interval_secs: values.jwks_refresh_interval_secs,
-        disable_password_login: values.disable_password_login,
+        disable_password_login: form.getFieldValue('disable_password_login') ?? false,
         auto_create_tenant: values.auto_create_tenant,
       };
       // Only include client_secret if the user changed it (not the masked value)

@@ -188,36 +188,42 @@ pub async fn update_oidc_config(
             .into_response();
     }
 
-    // Reload OIDC service (or lazily initialize if it was None)
-    if let Some(svc) = state.oidc_service.read().await.as_ref() {
-        if let Err(e) = svc.reload_config().await {
-            tracing::error!("Failed to reload OIDC config: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "error": {"code": "RELOAD_ERROR", "message": "Configuration saved but service reload failed"}
-                })),
+    // Reload OIDC service (or lazily initialize if it was None).
+    // IMPORTANT: The read lock from the check must be fully dropped before acquiring
+    // the write lock. Rust's temporary lifetime rules keep the RwLockReadGuard alive
+    // for the entire `if let ... else if` expression, which would deadlock if the
+    // write lock is acquired in the `else if` branch while the read guard is still live.
+    let need_init = state.oidc_service.read().await.as_ref().is_none();
+    let state_for_reload = state.clone();
+    tokio::spawn(async move {
+        if !need_init {
+            if let Some(svc) = state_for_reload.oidc_service.read().await.as_ref() {
+                if let Err(e) = svc.reload_config().await {
+                    tracing::error!("Failed to reload OIDC config: {}", e);
+                }
+            }
+        } else if params.enabled {
+            match OidcService::new_from_db(
+                state_for_reload.pool.clone(),
+                encryption_key,
+                state_for_reload.config.storage.workspace_dir().to_path_buf(),
             )
-                .into_response();
-        }
-    } else if params.enabled {
-        // Service doesn't exist yet but admin wants OIDC enabled — try to initialize
-        match OidcService::new_from_db(state.pool.clone(), encryption_key, state.config.storage.workspace_dir().to_path_buf()).await {
-            Ok(Some(svc)) => {
-                info!("OIDC service lazily initialized after config upsert");
-                *state.oidc_service.write().await = Some(svc);
-                state.ensure_oidc_background_tasks().await;
-            }
-            Ok(None) => {
-                // Config exists but not enabled (shouldn't happen here since params.enabled is true)
-                info!("OIDC config saved but service returned None (not enabled in DB)");
-            }
-            Err(e) => {
-                tracing::error!("OIDC service lazy initialization failed (non-fatal): {}", e);
-                // Config is still saved — admin can retry or check logs
+            .await
+            {
+                Ok(Some(svc)) => {
+                    info!("OIDC service lazily initialized after config upsert");
+                    *state_for_reload.oidc_service.write().await = Some(svc);
+                    state_for_reload.ensure_oidc_background_tasks().await;
+                }
+                Ok(None) => {
+                    info!("OIDC config saved but service returned None (not enabled in DB)");
+                }
+                Err(e) => {
+                    tracing::error!("OIDC service lazy initialization failed (non-fatal): {}", e);
+                }
             }
         }
-    }
+    });
 
     info!("OIDC configuration updated");
     if let Some(ref auth) = auth {
