@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
-use rsa::pkcs8::EncodePublicKey;
+use rsa::pkcs1::EncodeRsaPublicKey;
 use rsa::RsaPublicKey;
 
 use super::types::{ElevoOneClaims, OidcError};
@@ -108,9 +108,12 @@ pub fn verify_access_token(
         .get(&kid)
         .ok_or_else(|| OidcError::InvalidToken(format!("unknown kid: {}", kid)))?;
 
-    // Convert RSA public key to DER bytes for jsonwebtoken
+    // Convert RSA public key to PKCS#1 DER bytes for jsonwebtoken.
+    // NOTE: RsaPublicKey::to_public_key_der() returns SPKI DER (SubjectPublicKeyInfo),
+    // but DecodingKey::from_rsa_der() expects PKCS#1 DER (RSAPublicKey). Using the wrong
+    // format silently parses a garbage key, causing InvalidSignature errors.
     let der_bytes = public_key
-        .to_public_key_der()
+        .to_pkcs1_der()
         .map_err(|e| OidcError::InvalidToken(format!("DER encode: {}", e)))?;
 
     let decoding_key = DecodingKey::from_rsa_der(der_bytes.as_bytes());
