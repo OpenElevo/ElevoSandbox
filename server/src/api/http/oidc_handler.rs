@@ -96,7 +96,22 @@ pub async fn authorize_oidc(
             .into_response();
     }
 
-    match svc.generate_authorize_url(&state_param, &nonce, &code_challenge).await {
+    // Derive redirect_uri from request if not configured
+    let derived_redirect_uri = {
+        let config = svc.get_full_config().await;
+        if config.redirect_uri.is_empty() {
+            // Try to derive from the incoming request's Host header
+            request
+                .headers()
+                .get(axum::http::header::HOST)
+                .and_then(|h| h.to_str().ok())
+                .map(|host| format!("https://{}/api/v1/auth/oidc/callback", host))
+        } else {
+            None
+        }
+    };
+
+    match svc.generate_authorize_url(&state_param, &nonce, &code_challenge, derived_redirect_uri.as_deref()).await {
         Ok(authorize_url) => Json(OidcAuthorizeResponse { authorize_url }).into_response(),
         Err(e) => {
             tracing::error!("Failed to generate authorize URL: {}", e);

@@ -378,12 +378,15 @@ impl OidcService {
         ))
     }
 
-    /// Generate the authorization URL with PKCE
+    /// Generate the authorization URL with PKCE.
+    /// If `redirect_uri_override` is Some, it overrides the config value (useful
+    /// when the admin left redirect_uri empty and we derive it from the request).
     pub async fn generate_authorize_url(
         &self,
         state: &str,
         nonce: &str,
         code_challenge: &str,
+        redirect_uri_override: Option<&str>,
     ) -> Result<String, OidcError> {
         let config = self.config.read().await;
 
@@ -393,11 +396,15 @@ impl OidcService {
             format!("{}/oauth/authorize", config.issuer_url)
         };
 
+        let redirect_uri = redirect_uri_override
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&config.redirect_uri);
+
         Ok(format!(
             "{}?response_type=code&client_id={}&redirect_uri={}&scope=openid+profile+email&state={}&nonce={}&code_challenge={}&code_challenge_method=S256",
             authorize_url,
             urlencoding::encode(&config.client_id),
-            urlencoding::encode(&config.redirect_uri),
+            urlencoding::encode(redirect_uri),
             urlencoding::encode(state),
             urlencoding::encode(nonce),
             urlencoding::encode(code_challenge),
