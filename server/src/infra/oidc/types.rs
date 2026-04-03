@@ -14,7 +14,8 @@ pub struct ElevoOneClaims {
     pub iat: i64,
     #[serde(default)]
     pub iss: Option<String>,
-    #[serde(default)]
+    /// ElevoOne sends org_id as a string (e.g. "1"), but some contexts use i64.
+    #[serde(default, deserialize_with = "deserialize_number_or_string")]
     pub org_id: Option<i64>,
     #[serde(default)]
     pub org_role: Option<String>,
@@ -54,6 +55,48 @@ where
     }
 
     deserializer.deserialize_any(AudVisitor)
+}
+
+/// Deserialize a value that may be a number or a numeric string (e.g. 1 or "1") as i64.
+fn deserialize_number_or_string<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Visitor};
+
+    struct NumOrStrVisitor;
+
+    impl<'de> Visitor<'de> for NumOrStrVisitor {
+        type Value = Option<i64>;
+
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("a number or a numeric string")
+        }
+
+        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Option<i64>, E> {
+            Ok(Some(v))
+        }
+
+        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Option<i64>, E> {
+            Ok(Some(v as i64))
+        }
+
+        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<i64>, E> {
+            v.parse::<i64>().map(Some).map_err(|_| {
+                de::Error::invalid_value(de::Unexpected::Str(v), &"a numeric string")
+            })
+        }
+
+        fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(NumOrStrVisitor)
 }
 
 /// Token response from OIDC token endpoint
