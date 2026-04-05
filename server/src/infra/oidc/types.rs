@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 /// ElevoOne ID Token claims
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElevoOneClaims {
-    pub sub: String,
+    /// `sub` claim — may be absent in client_credentials tokens (M2M flow).
+    #[serde(default)]
+    pub sub: Option<String>,
     /// OIDC `aud` claim — can be a single string or an array of strings.
     /// Always deserialized as a single string (first element if array).
     #[serde(deserialize_with = "deserialize_aud")]
@@ -14,9 +16,11 @@ pub struct ElevoOneClaims {
     pub iat: i64,
     #[serde(default)]
     pub iss: Option<String>,
-    /// ElevoOne sends org_id as a string (e.g. "1"), but some contexts use i64.
+    /// ElevoOne sends organization identifier as a string (e.g. "1"),
+    /// but some contexts use i64. Renamed from `org_id` to `oid` to
+    /// avoid confusion with DB column names.
     #[serde(default, deserialize_with = "deserialize_number_or_string")]
-    pub org_id: Option<i64>,
+    pub oid: Option<i64>,
     #[serde(default)]
     pub org_role: Option<String>,
     #[serde(default)]

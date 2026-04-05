@@ -159,7 +159,7 @@ impl OidcService {
         self.circuit_breaker.record_success();
 
         // Resolve tenant from org_id
-        if let Some(org_id) = claims.org_id {
+        if let Some(org_id) = claims.oid {
             match tenant_repo.find_by_elevoone_org_id(org_id).await {
                 Ok(Some(tenant)) => {
                     if !tenant.is_active {

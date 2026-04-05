@@ -245,7 +245,7 @@ pub async fn oidc_callback(
     if org_role != "admin" {
         info!(
             "OIDC login: non-admin user (sub={}, org_role={})",
-            claims.sub, org_role
+            claims.sub.as_deref().unwrap_or("<none>"), org_role
         );
         return Redirect::to("/admin/login?activated=true").into_response();
     }
@@ -265,14 +265,14 @@ pub async fn oidc_callback(
 
     // 6. Generate session_code and store tokens + user profile
     let session_code = generate_state(); // reuse as random code
-    let user_id = claims.sub.parse::<i64>().unwrap_or(0);
+    let user_id = claims.sub.as_deref().unwrap_or("0").parse::<i64>().unwrap_or(0);
 
     if let Err(e) = state
         .oidc_token_store_repo
         .create(CreateTokenStoreParams {
             local_session_id: session_id,
             user_id,
-            org_id: claims.org_id,
+            org_id: claims.oid,
             org_role: claims.org_role.clone(),
             email: claims.email.clone(),
             name: claims.name.clone(),
@@ -298,7 +298,7 @@ pub async fn oidc_callback(
     let detail = serde_json::json!({
         "login_method": "oidc",
         "email": claims.email,
-        "org_id": claims.org_id,
+        "org_id": claims.oid,
         "org_role": claims.org_role,
     });
     state.audit_service.log(
@@ -306,7 +306,7 @@ pub async fn oidc_callback(
         "oidc_login",
         "session",
         session_id,
-        &format!("oidc:{}", claims.sub),
+        &format!("oidc:{}", claims.sub.as_deref().unwrap_or("<none>")),
         detail,
     );
 
