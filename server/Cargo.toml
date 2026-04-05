@@ -65,7 +65,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 aes-gcm = "0.10"
 hkdf = "0.12"
 base64 = "0.22"
-rsa = { workspace = true }
 urlencoding = "2"
 url = "2"
 

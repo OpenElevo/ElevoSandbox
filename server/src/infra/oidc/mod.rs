@@ -1,7 +1,7 @@
 //! OIDC Service — core OIDC/SSO integration with ElevoOne
 //!
 //! This module provides the main OidcService struct and its methods for:
-//! - Token verification (RS256 + JWKS)
+//! - Token verification (RS256/ES256 + JWKS)
 //! - Authorization code exchange
 //! - ID token verification
 //! - Token refresh
@@ -117,7 +117,7 @@ impl OidcService {
         Ok(())
     }
 
-    /// Verify an ElevoOne RS256 token and resolve the tenant identity.
+    /// Verify an ElevoOne RS256/ES256 token and resolve the tenant identity.
     /// Used by both HTTP and gRPC auth middleware.
     pub async fn verify_and_resolve_tenant(
         &self,
@@ -245,7 +245,7 @@ impl OidcService {
         Ok(token_response)
     }
 
-    /// Verify an ID token (RS256 + claims validation)
+    /// Verify an ID token (RS256/ES256 + claims validation)
     pub async fn verify_id_token(
         &self,
         id_token: &str,
@@ -253,7 +253,7 @@ impl OidcService {
     ) -> Result<ElevoOneClaims, OidcError> {
         let config = self.config.read().await;
 
-        // Verify RS256 signature via JWKS
+        // Verify signature via JWKS (RS256 or ES256)
         let claims = {
             let jwks_guard = self.jwks.read().await;
             match jwks_module::verify_access_token(

@@ -173,8 +173,8 @@ pub async fn auth_middleware(
         // JWT path — dispatch by algorithm
         let alg = extract_jwt_alg(token);
         match alg.as_deref() {
-            Some("RS256") => {
-                // ElevoOne RS256 token — verify via OidcService
+            Some("RS256") | Some("ES256") => {
+                // ElevoOne RS256/ES256 token — verify via OidcService
                 match authenticate_elevoone_token(&state, token, ip_address).await {
                     Ok(ctx) => {
                         request.extensions_mut().insert(ctx);

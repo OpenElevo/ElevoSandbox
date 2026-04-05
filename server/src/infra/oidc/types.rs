@@ -16,12 +16,16 @@ pub struct ElevoOneClaims {
     pub iat: i64,
     #[serde(default)]
     pub iss: Option<String>,
-    /// ElevoOne sends organization identifier as a string (e.g. "1"),
-    /// but some contexts use i64. Renamed from `org_id` to `oid` to
-    /// avoid confusion with DB column names.
-    #[serde(default, deserialize_with = "deserialize_number_or_string")]
+    /// ElevoOne sends organization identifier as `elevo_oid`.
+    /// Renamed from `org_id` to `oid` to avoid confusion with DB column names.
+    #[serde(
+        default,
+        rename = "elevo_oid",
+        deserialize_with = "deserialize_number_or_string"
+    )]
     pub oid: Option<i64>,
-    #[serde(default)]
+    /// ElevoOne sends organization role as `elevo_org_role`.
+    #[serde(default, rename = "elevo_org_role")]
     pub org_role: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
@@ -37,28 +41,21 @@ fn deserialize_aud<'de, D>(deserializer: D) -> Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::{self, Visitor};
-
-    struct AudVisitor;
-
-    impl<'de> Visitor<'de> for AudVisitor {
-        type Value = String;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a string or array of strings")
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<String, E> {
-            Ok(v.to_string())
-        }
-
-        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<String, A::Error> {
-            let first: Option<String> = seq.next_element()?;
-            Ok(first.unwrap_or_default())
-        }
+    /// Helper enum that accepts either a string or an array of strings.
+    /// Uses `#[serde(untagged)]` so serde tries each variant in order,
+    /// avoiding `deserialize_any` which causes "trailing characters" errors
+    /// when `aud` is an array inside a larger JSON object.
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum AudValue {
+        Single(String),
+        Multiple(Vec<String>),
     }
 
-    deserializer.deserialize_any(AudVisitor)
+    match AudValue::deserialize(deserializer)? {
+        AudValue::Single(s) => Ok(s),
+        AudValue::Multiple(v) => Ok(v.first().cloned().unwrap_or_default()),
+    }
 }
 
 /// Deserialize a value that may be a number or a numeric string (e.g. 1 or "1") as i64.
@@ -66,41 +63,25 @@ fn deserialize_number_or_string<'de, D>(deserializer: D) -> Result<Option<i64>, 
 where
     D: serde::Deserializer<'de>,
 {
-    use serde::de::{self, Visitor};
-
-    struct NumOrStrVisitor;
-
-    impl<'de> Visitor<'de> for NumOrStrVisitor {
-        type Value = Option<i64>;
-
-        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str("a number or a numeric string")
-        }
-
-        fn visit_i64<E: de::Error>(self, v: i64) -> Result<Option<i64>, E> {
-            Ok(Some(v))
-        }
-
-        fn visit_u64<E: de::Error>(self, v: u64) -> Result<Option<i64>, E> {
-            Ok(Some(v as i64))
-        }
-
-        fn visit_str<E: de::Error>(self, v: &str) -> Result<Option<i64>, E> {
-            v.parse::<i64>().map(Some).map_err(|_| {
-                de::Error::invalid_value(de::Unexpected::Str(v), &"a numeric string")
-            })
-        }
-
-        fn visit_none<E: de::Error>(self) -> Result<Option<i64>, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: de::Error>(self) -> Result<Option<i64>, E> {
-            Ok(None)
-        }
+    /// Helper enum that accepts either a number or a string.
+    #[derive(serde::Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        Number(i64),
+        Str(String),
+        Null,
     }
 
-    deserializer.deserialize_any(NumOrStrVisitor)
+    match NumOrStr::deserialize(deserializer)? {
+        NumOrStr::Number(n) => Ok(Some(n)),
+        NumOrStr::Str(s) => s.parse::<i64>().map(Some).map_err(|_| {
+            serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(&s),
+                &"a numeric string",
+            )
+        }),
+        NumOrStr::Null => Ok(None),
+    }
 }
 
 /// Token response from OIDC token endpoint

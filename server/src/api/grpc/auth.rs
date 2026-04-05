@@ -196,8 +196,8 @@ where
             if token.starts_with("eyJ") {
                 let alg = crate::infra::oidc::jwt_utils::extract_jwt_alg(token);
                 match alg.as_deref() {
-                    Some("RS256") => {
-                        // ElevoOne RS256 token — verify via OidcService
+                    Some("RS256") | Some("ES256") => {
+                        // ElevoOne RS256/ES256 token — verify via OidcService
                         let oidc_guard = oidc_service.read().await;
                         match validate_elevoone_token(&oidc_guard, &tenant_repo, token).await {
                             Ok(tenant_id) => {
