@@ -20,6 +20,8 @@
 # Environment variables:
 #   REGISTRY              - Docker registry (required, or use --registry)
 #   IMAGE_TAG             - Image tag (default: latest)
+#   DOCKER_MIRROR         - Docker Hub mirror prefix (default: docker.1ms.run/)
+#                          Set to "" for official Docker Hub (e.g. in CI)
 #   RUST_IMAGE            - Rust builder image for x86 (default: rust:1.92.0)
 #   RUST_IMAGE_ARM        - Rust builder image for arm64 (default: rust:1.92.0)
 #   CACHE_DIR             - Cache directory for cargo
@@ -45,6 +47,7 @@ REGISTRY="${REGISTRY:-docker.easyops.local/elevo}"
 SERVER_IMAGE_NAME="${SERVER_IMAGE_NAME:-workspace-server}"
 BASE_IMAGE_NAME="${BASE_IMAGE_NAME:-workspace-base}"
 IMAGE_TAG="${IMAGE_TAG:-latest}"
+DOCKER_MIRROR="${DOCKER_MIRROR:-docker.1ms.run/}"
 RUST_IMAGE_X86="${RUST_IMAGE:-docker.easyops.local/ci/rust-builder:1.92.0-centos7}"
 RUST_IMAGE_ARM="${RUST_IMAGE_ARM:-docker.easyops.local/ci/rust-builder-aarch64:1.92.0-centos8}"
 CACHE_DIR="${CACHE_DIR:-/data/cache/elevosandbox}"
@@ -95,6 +98,8 @@ usage() {
     echo "  --server-image NAME      Server image name (default: elevosandbox-server)"
     echo "  --base-image NAME        Base image name (default: elevosandbox-base)"
     echo "  --rust-image IMAGE       Rust builder image (default: rust:1.92.0)"
+    echo "  --mirror PREFIX          Docker Hub mirror prefix (default: docker.1ms.run/)"
+    echo "                           Set to 'official' to use Docker Hub directly (for CI)"
     echo "  --no-push                Build only, don't push"
     echo ""
     echo "Environment variables:"
@@ -214,9 +219,14 @@ build_docker_images() {
 
     cd "${PROJECT_ROOT}"
 
+    local docker_build_args=(
+        --build-arg DOCKER_MIRROR="${DOCKER_MIRROR}"
+    )
+
     # Build server image
     info "Building server image: ${server_tag}"
     DOCKER_BUILDKIT=0 docker build \
+        ${docker_build_args[@]} \
         -f docker/Dockerfile.server \
         -t "${server_tag}" \
         .
@@ -224,6 +234,7 @@ build_docker_images() {
     # Build base image
     info "Building base image: ${base_tag}"
     DOCKER_BUILDKIT=0 docker build \
+        ${docker_build_args[@]} \
         -f images/workspace-base/Dockerfile \
         -t "${base_tag}" \
         .
@@ -265,6 +276,13 @@ cmd_build() {
             --server-image) SERVER_IMAGE_NAME="$2"; shift 2 ;;
             --base-image) BASE_IMAGE_NAME="$2"; shift 2 ;;
             --rust-image) RUST_IMAGE="$2"; shift 2 ;;
+            --mirror)
+                if [ "$2" = "official" ]; then
+                    DOCKER_MIRROR=""
+                else
+                    DOCKER_MIRROR="$2"
+                fi
+                shift 2 ;;
             --no-push) no_push=true; shift ;;
             *) error "Unknown option: $1"; exit 1 ;;
         esac
@@ -282,6 +300,7 @@ cmd_build() {
     info "  Server image: ${server_full}:${IMAGE_TAG}-${ARCH_SUFFIX}"
     info "  Base image:   ${base_full}:${IMAGE_TAG}-${ARCH_SUFFIX}"
     info "  Rust image:   ${RUST_IMAGE}"
+    info "  Docker mirror: ${DOCKER_MIRROR:-<official Docker Hub>}"
     info "  Push: $([ "$no_push" = true ] && echo 'No' || echo 'Yes')"
     echo ""
 

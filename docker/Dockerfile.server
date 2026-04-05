@@ -1,6 +1,6 @@
 # ── Stage 1: Build frontend ──
-FROM docker.1ms.run/node:22-alpine AS frontend
-RUN npm config set registry https://registry.npmmirror.com
+ARG DOCKER_MIRROR=
+FROM ${DOCKER_MIRROR}node:22-alpine AS frontend
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -9,7 +9,8 @@ RUN npm run build
 
 # ── Stage 2: Production image ──
 # Uses pre-built Rust binary (compiled with docker_compile.sh for glibc compatibility)
-FROM docker.1ms.run/ubuntu:24.04
+ARG DOCKER_MIRROR=
+FROM ${DOCKER_MIRROR}ubuntu:24.04
 
 LABEL maintainer="Elevo Team"
 LABEL org.opencontainers.image.source="https://github.com/OpenElevo/ElevoWorkspace"
@@ -18,9 +19,7 @@ LABEL org.opencontainers.image.description="Elevo Workspace Server"
 WORKDIR /app
 
 # Install runtime dependencies (curl for healthcheck)
-RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true \
-    && sed -i 's|http://security.ubuntu.com|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/ubuntu.sources 2>/dev/null || true \
-    && apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
