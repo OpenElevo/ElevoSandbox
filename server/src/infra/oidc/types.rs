@@ -16,16 +16,18 @@ pub struct ElevoOneClaims {
     pub iat: i64,
     #[serde(default)]
     pub iss: Option<String>,
-    /// ElevoOne sends organization identifier as `elevo_oid`.
-    /// Renamed from `org_id` to `oid` to avoid confusion with DB column names.
+    /// Organization identifier — ElevoOne uses `elevo_oid` in access tokens
+    /// and `org_id` in ID tokens. Accept both via alias.
     #[serde(
         default,
         rename = "elevo_oid",
+        alias = "org_id",
         deserialize_with = "deserialize_number_or_string"
     )]
     pub oid: Option<i64>,
-    /// ElevoOne sends organization role as `elevo_org_role`.
-    #[serde(default, rename = "elevo_org_role")]
+    /// Organization role — ElevoOne uses `elevo_org_role` in access tokens
+    /// and `org_role` in ID tokens. Accept both via alias.
+    #[serde(default, rename = "elevo_org_role", alias = "org_role")]
     pub org_role: Option<String>,
     #[serde(default)]
     pub email: Option<String>,

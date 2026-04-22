@@ -307,10 +307,24 @@ mod tests {
     #[test]
     fn test_deserialize_real_elevoone_claims() {
         use super::super::types::ElevoOneClaims;
+        // Access token uses elevo_oid / elevo_org_role
         let payload = r#"{"iss":"https://sso-dev.elevo.vip","sub":"urn:elevo:user:d670a807-ed8d-45ef-94e7-7ebe856778a1","aud":["https://sso-dev.elevo.vip","pk_302addd7d47b4fbfa649919a32c4768f"],"exp":1775391176,"nbf":1775387576,"iat":1775387576,"jti":"fd507a2f-a4e7-4cf4-a191-d593f593b13a","scope":"openid elevo:org:read","azp":"pk_302addd7d47b4fbfa649919a32c4768f","elevo_oid":1,"elevo_org_role":"admin"}"#;
         let claims: ElevoOneClaims = serde_json::from_str(payload).expect("deserialization should succeed");
         assert_eq!(claims.aud, "https://sso-dev.elevo.vip");
         assert_eq!(claims.oid, Some(1));
+        assert_eq!(claims.org_role.as_deref(), Some("admin"));
+    }
+
+    /// Test that ID token format (org_id / org_role) also deserializes correctly.
+    #[test]
+    fn test_deserialize_id_token_claims() {
+        use super::super::types::ElevoOneClaims;
+        // ID token uses org_id / org_role (unprefixed)
+        let payload = r#"{"iss":"https://sso-dev.elevo.vip","sub":"d670a807-ed8d-45ef-94e7-7ebe856778a1","aud":"pk_302addd7d47b4fbfa649919a32c4768f","exp":1775391176,"iat":1775387576,"nonce":"bf49ea4b","email":"linuschen@easyops.cn","name":"linus","org_id":"1","org_name":"easyops","org_role":"admin"}"#;
+        let claims: ElevoOneClaims = serde_json::from_str(payload).expect("ID token deserialization should succeed");
+        assert_eq!(claims.oid, Some(1));
+        assert_eq!(claims.org_role.as_deref(), Some("admin"));
+        assert_eq!(claims.email.as_deref(), Some("linuschen@easyops.cn"));
     }
 
     /// Test that DecodingKey created from EC components can be used by jsonwebtoken
