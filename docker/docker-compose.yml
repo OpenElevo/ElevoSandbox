@@ -50,6 +50,10 @@ services:
       - WORKSPACE_AGENT_SERVER_ADDR=http://host.docker.internal:${GRPC_PORT:-9090}
       # Extra hosts for sandbox containers to resolve host.docker.internal
       - WORKSPACE_SANDBOX_EXTRA_HOSTS=host.docker.internal:host-gateway
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
     volumes:
       # Mount Docker socket to control host's Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock

@@ -82,6 +82,11 @@ services:
       # MCP
       - WORKSPACE_MCP_MODE=${MCP_MODE:-disabled}
 
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - elevo-workspace-data:/data
