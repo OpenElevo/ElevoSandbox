@@ -58,6 +58,53 @@ impl FuseMountManager {
         }
     }
 
+    /// Remount a FUSE filesystem for a remote workspace.
+    ///
+    /// Unmounts any existing mount first, then creates a fresh one with the
+    /// new backend.  Used when a remote StorageProvider reconnects so that
+    /// the FUSE filesystem talks to the live backend instead of the stale,
+    /// disconnected one.
+    pub async fn remount(
+        &self,
+        workspace_id: &str,
+        backend: Arc<RemoteStorageBackend>,
+    ) -> Result<(), String> {
+        let lock = self.get_mount_lock(workspace_id);
+        let _guard = lock.lock().await;
+
+        // Unmount first if one exists (handles stale mounts from previous
+        // connections).  We inline the removal instead of calling
+        // `self.umount()` to avoid a deadlock on the per-workspace mutex.
+        if let Some((_, entry)) = self.mounts.remove(workspace_id) {
+            let mp_str = entry.mount_point.display().to_string();
+            let ws_id = workspace_id.to_string();
+
+            // Best-effort unmount — ignore errors since the old mount may
+            // already have been torn down by the OS or an earlier restart.
+            let result = tokio::process::Command::new("fusermount")
+                .args(["-u", &mp_str])
+                .output()
+                .await;
+            match result {
+                Ok(output) if output.status.success() => {
+                    info!(workspace_id = %ws_id, "Stale FUSE unmounted for remount");
+                }
+                _ => {
+                    // Fall back to lazy unmount
+                    warn!(workspace_id = %ws_id, "fusermount -u failed during remount, trying lazy unmount");
+                    let _ = tokio::process::Command::new("fusermount")
+                        .args(["-uz", &mp_str])
+                        .output()
+                        .await;
+                }
+            }
+            // Wait for the old mount task to finish (with timeout).
+            let _ = tokio::time::timeout(Duration::from_secs(5), entry.task).await;
+        }
+
+        self.mount_inner(workspace_id, backend).await
+    }
+
     /// Get or create a per-workspace mount mutex.
     fn get_mount_lock(&self, workspace_id: &str) -> Arc<Mutex<()>> {
         self.mount_locks

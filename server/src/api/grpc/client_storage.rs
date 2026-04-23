@@ -308,21 +308,34 @@ impl ClientStorageService for ClientStorageServiceImpl {
             crate::infra::metrics::set_remote_connected_clients(pool.connected_count());
 
             // ── Step 5.5: FUSE mount management ──
-            // If the backend was previously connected (reconnection), purge all caches
             if backend.was_previously_connected() {
-                info!(workspace_id = %workspace_id, "Client reconnected, purging FUSE caches");
-                fuse_manager.purge_all_caches(&workspace_id);
-            }
-            // Mount FUSE if not already mounted
-            if let Err(e) = fuse_manager
-                .mount_if_not_exists(&workspace_id, backend.clone())
-                .await
-            {
-                warn!(
-                    workspace_id = %workspace_id,
-                    error = %e,
-                    "Failed to mount FUSE for remote workspace (non-fatal)"
-                );
+                // Reconnection: the old FUSE mount still references the
+                // disconnected backend.  Unmount it and create a fresh one
+                // backed by the new connection so file operations go through
+                // the live gRPC stream.
+                info!(workspace_id = %workspace_id, "Client reconnected, remounting FUSE with fresh backend");
+                if let Err(e) = fuse_manager
+                    .remount(&workspace_id, backend.clone())
+                    .await
+                {
+                    warn!(
+                        workspace_id = %workspace_id,
+                        error = %e,
+                        "Failed to remount FUSE after Client reconnection (non-fatal)"
+                    );
+                }
+            } else {
+                // First connection: mount FUSE if not already mounted.
+                if let Err(e) = fuse_manager
+                    .mount_if_not_exists(&workspace_id, backend.clone())
+                    .await
+                {
+                    warn!(
+                        workspace_id = %workspace_id,
+                        error = %e,
+                        "Failed to mount FUSE for remote workspace (non-fatal)"
+                    );
+                }
             }
 
             // ── Step 6: Forward control stream messages to the response stream ──

@@ -222,35 +222,67 @@ func (sp *StorageProvider) connectAndServe(ctx context.Context) (time.Time, erro
 	}
 
 	// Main loop: read requests from the server.
+	// A max-idle timer acts as a safety net: if the server stops sending
+	// heartbeats (e.g. crashed without closing the stream) AND the gRPC
+	// keepalive probes somehow fail to detect the dead connection, this
+	// timer will force a reconnect.  The server normally sends pings every
+	// remote_heartbeat_interval_secs, so 5 minutes is a generous upper bound.
+	const maxIdle = 5 * time.Minute
+	idleTimer := time.NewTimer(maxIdle)
+	defer idleTimer.Stop()
+
 	var recvErr error
 	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			recvErr = fmt.Errorf("recv: %w", err)
-			break
-		}
-
-		switch m := msg.Message.(type) {
-		case *pb.ServerStorageMessage_OperationRequest:
-			select {
-			case requestCh <- m.OperationRequest:
-			case <-ctx.Done():
-				recvErr = ctx.Err()
+		// Use a goroutine to make Recv cancellable by the idle timer.
+		msgCh := make(chan *pb.ServerStorageMessage, 1)
+		errCh := make(chan error, 1)
+		go func() {
+			msg, err := stream.Recv()
+			if err != nil {
+				errCh <- err
+				return
 			}
-		case *pb.ServerStorageMessage_Ping:
-			sp.trySendResponse(&pb.ClientMessage{
-				Message: &pb.ClientMessage_Pong{
-					Pong: &pb.StoragePong{Timestamp: m.Ping.Timestamp},
-				},
-			})
-		case *pb.ServerStorageMessage_StartDataTransfer:
-			sp.wg.Add(1)
-			go func() {
-				defer sp.wg.Done()
-				sp.handleDataTransfer(ctx, m.StartDataTransfer)
-			}()
-		default:
-			log.Printf("[StorageProvider] unknown message type: %T", m)
+			msgCh <- msg
+		}()
+
+		select {
+		case msg := <-msgCh:
+			idleTimer.Stop()
+			idleTimer.Reset(maxIdle)
+			switch m := msg.Message.(type) {
+			case *pb.ServerStorageMessage_OperationRequest:
+				select {
+				case requestCh <- m.OperationRequest:
+				case <-ctx.Done():
+					recvErr = ctx.Err()
+				}
+			case *pb.ServerStorageMessage_Ping:
+				sp.trySendResponse(&pb.ClientMessage{
+					Message: &pb.ClientMessage_Pong{
+						Pong: &pb.StoragePong{Timestamp: m.Ping.Timestamp},
+					},
+				})
+			case *pb.ServerStorageMessage_StartDataTransfer:
+				sp.wg.Add(1)
+				go func() {
+					defer sp.wg.Done()
+					sp.handleDataTransfer(ctx, m.StartDataTransfer)
+				}()
+			default:
+				log.Printf("[StorageProvider] unknown message type: %T", m)
+			}
+
+		case err := <-errCh:
+			recvErr = fmt.Errorf("recv: %w", err)
+
+		case <-idleTimer.C:
+			recvErr = fmt.Errorf("no message received from server in %v, assuming dead connection", maxIdle)
+			log.Printf("[StorageProvider] %v", recvErr)
+
+		case <-ctx.Done():
+			recvErr = ctx.Err()
+		case <-sp.ctx.Done():
+			recvErr = sp.ctx.Err()
 		}
 
 		if recvErr != nil {
