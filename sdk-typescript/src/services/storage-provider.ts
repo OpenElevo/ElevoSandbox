@@ -14,6 +14,7 @@ const DEFAULT_MAX_CONCURRENT_DATA_STREAMS = 8;
 const DEFAULT_OPERATION_TIMEOUT_MS = 10000;
 const DATA_STREAM_CHUNK_SIZE = 64 * 1024; // 64KB
 const LIST_DIR_PAGE_SIZE = 200;
+const MAX_IDLE_MS = 5 * 60 * 1000; // 5 minutes — safety net for dead connection detection
 
 /**
  * StorageProvider shares a local directory with the Server via gRPC reverse stream.
@@ -229,11 +230,43 @@ export class StorageProvider {
     }
   }
 
-  /** Main receive loop: dispatch server messages. */
+  /**
+   * Main receive loop: dispatch server messages.
+   *
+   * A max-idle timer acts as a safety net: if the server stops sending
+   * heartbeats (e.g. crashed without closing the stream) AND the gRPC
+   * keepalive probes somehow fail to detect the dead connection, this
+   * timer will force a reconnect. The server normally sends pings every
+   * remote_heartbeat_interval_secs, so 5 minutes is a generous upper bound.
+   */
   private async mainLoop(signal: AbortSignal): Promise<void> {
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const createIdleTimeout = (): Promise<null> =>
+      new Promise<null>(resolve => {
+        idleTimer = setTimeout(() => {
+          idleTimer = null;
+          console.error(
+            `[StorageProvider] no message received from server in ${MAX_IDLE_MS}ms, assuming dead connection`,
+          );
+          resolve(null);
+        }, MAX_IDLE_MS);
+        if (typeof idleTimer === 'object' && 'unref' in idleTimer) {
+          idleTimer.unref();
+        }
+      });
+
     while (!signal.aborted) {
-      const msg = await this.recvMessage(signal);
-      if (!msg) break;
+      // Race the next message against the idle timeout.
+      const msg = await Promise.race([this.recvMessage(signal), createIdleTimeout()]);
+
+      // Cancel the idle timer now that we got a message or timed out.
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+
+      if (!msg) break; // null means stream ended OR idle timeout
 
       if (msg.operationRequest) {
         this.trackInflight(this.handleOperationRequest(msg.operationRequest));
@@ -242,6 +275,11 @@ export class StorageProvider {
       } else if (msg.startDataTransfer) {
         this.trackInflight(this.handleDataTransfer(msg.startDataTransfer, signal));
       }
+    }
+
+    // Clean up idle timer on loop exit (e.g. stop() called).
+    if (idleTimer) {
+      clearTimeout(idleTimer);
     }
   }
 
