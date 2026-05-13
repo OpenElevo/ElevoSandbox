@@ -1,6 +1,6 @@
 {
   "name": "@openelevo/workspace-sdk",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "TypeScript SDK for Elevo Workspace Service",
   "type": "module",
   "main": "dist/cjs/index.js",
