@@ -125,19 +125,32 @@ fn mount(args: MountArgs) -> Result<()> {
     ));
     let fs = FuseFilesystemWrapper::new(fuse);
 
+    // Create FUSE session (this performs the actual mount syscall).
+    // We use Session::new + run instead of mount2 so we can delete the sentinel
+    // file between mount registration and entering the event loop — the parent
+    // process polls for this file to know when the mount is ready.
     info!("Starting FUSE filesystem");
 
-    // Mount the filesystem
-    if args.foreground {
-        // Run in foreground
-        fuser::mount2(fs, &args.target, &mount_options)
-            .with_context(|| format!("Failed to mount at {:?}", args.target))?;
-    } else {
+    if !args.foreground {
         error!("Background mode not implemented. Use --foreground with a process manager.");
         return Err(anyhow::anyhow!(
             "Background mode not implemented. Use --foreground"
         ));
     }
+
+    let mut session = fuser::Session::new(fs, &args.target, &mount_options)
+        .with_context(|| format!("Failed to create FUSE session at {:?}", args.target))?;
+
+    // Delete the sentinel file to signal the parent process that the mount is ready.
+    let sentinel_path = args.target.join(".fuse_mount_sentinel");
+    if sentinel_path.exists() {
+        let _ = std::fs::remove_file(&sentinel_path);
+    }
+
+    // Enter the FUSE event loop (blocks until unmount).
+    session
+        .run()
+        .with_context(|| format!("FUSE session error at {:?}", args.target))?;
 
     info!("FUSE filesystem unmounted");
     Ok(())

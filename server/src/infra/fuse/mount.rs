@@ -165,14 +165,33 @@ impl FuseMountManager {
     ) -> Result<(), String> {
         let mount_point = self.workspace_dir.join(workspace_id);
 
-        // Create mount point directory
-        tokio::fs::create_dir_all(&mount_point).await.map_err(|e| {
-            format!(
-                "failed to create mount point {}: {}",
-                mount_point.display(),
-                e
-            )
-        })?;
+        // Create mount point directory.
+        // A previous server run or disconnected client may leave a stale
+        // FUSE mount behind.  If creation fails, clean up and retry.
+        if let Err(e) = tokio::fs::create_dir_all(&mount_point).await {
+            warn!(
+                workspace_id = %workspace_id,
+                error = %e,
+                "Failed to create mount point, attempting stale mount cleanup"
+            );
+            let mp_str = mount_point.display().to_string();
+            let _ = tokio::process::Command::new("fusermount")
+                .args(["-u", &mp_str])
+                .output()
+                .await;
+            let _ = tokio::process::Command::new("fusermount")
+                .args(["-uz", &mp_str])
+                .output()
+                .await;
+            let _ = tokio::fs::remove_dir(&mount_point).await;
+            tokio::fs::create_dir_all(&mount_point).await.map_err(|e| {
+                format!(
+                    "failed to create mount point {}: {}",
+                    mount_point.display(),
+                    e
+                )
+            })?;
+        }
 
         // Build the FUSE filesystem
         let fuse_backend = ServerFuseBackend::new(workspace_id.to_string(), backend);

@@ -22,6 +22,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     ca-certificates \
+    fuse3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create data directories
