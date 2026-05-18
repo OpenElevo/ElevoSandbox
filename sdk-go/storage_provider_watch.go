@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -73,22 +72,20 @@ func newFileWatcher(rootDir string, responseCh chan<- *pb.ClientMessage) (*fileW
 	// Load .elevoignore rules if present.
 	fw.ignoreRules = loadElevoIgnore(rootDir)
 
-	// Check inotify capacity.
-	if shouldDegrade(rootDir) {
-		fw.degraded.Store(true)
-		log.Printf("[fileWatcher] inotify limit would be exceeded, running in degraded poll mode")
-		go fw.degradedPollLoop()
-		go fw.eventLoop() // still needed for lifecycle
-		return fw, nil
-	}
-
-	// Add watches recursively.
-	if err := fw.addWatchesRecursive(rootDir); err != nil {
-		watcher.Close()
-		return nil, err
-	}
-
+	// Start the event loop immediately.
 	go fw.eventLoop()
+
+	// Add watches recursively in the background.
+	// Fire-and-forget: scanning a large directory tree can take a long time;
+	// the gRPC main loop must start immediately to handle server requests.
+	// If the inotify limit is hit during walk, addWatchesRecursive switches to
+	// degraded poll mode.
+	go func() {
+		if err := fw.addWatchesRecursive(rootDir); err != nil {
+			log.Printf("[fileWatcher] addWatchesRecursive error: %v", err)
+		}
+	}()
+
 	return fw, nil
 }
 
@@ -337,50 +334,6 @@ func loadElevoIgnore(rootDir string) []string {
 		rules = append(rules, line)
 	}
 	return rules
-}
-
-// shouldDegrade checks if the directory tree would exceed 80% of the inotify watch limit.
-func shouldDegrade(rootDir string) bool {
-	maxWatches := readInotifyMaxWatches()
-	if maxWatches <= 0 {
-		return false // can't determine limit, optimistically proceed
-	}
-
-	dirCount := countDirectories(rootDir)
-	return dirCount > (maxWatches * 80 / 100)
-}
-
-// readInotifyMaxWatches reads /proc/sys/fs/inotify/max_user_watches.
-func readInotifyMaxWatches() int {
-	data, err := os.ReadFile("/proc/sys/fs/inotify/max_user_watches")
-	if err != nil {
-		return -1
-	}
-	val, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil {
-		return -1
-	}
-	return val
-}
-
-// countDirectories counts the total number of directories under root,
-// respecting the default ignore list.
-func countDirectories(root string) int {
-	count := 0
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() {
-			return nil
-		}
-		if defaultIgnoreDirs[info.Name()] && path != root {
-			return filepath.SkipDir
-		}
-		count++
-		return nil
-	})
-	return count
 }
 
 // isInotifyLimitError checks if an error is related to inotify watch limits.

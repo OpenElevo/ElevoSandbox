@@ -198,11 +198,18 @@ export class StorageProvider {
       this._connected = true;
 
       // Start file watcher (pushes change notifications to the stream).
+      // Fire-and-forget: the watcher scan can take a long time on large
+      // directory trees (e.g. org workspaces path with 400K+ subdirs).
+      // We must not await it here — mainLoop needs to start immediately
+      // so the server can send file operation requests right after the
+      // handshake completes.
       if (!this.fileWatcher) {
         this.fileWatcher = new FileWatcher(this.config.localDir, (events) => {
           this.sendFileChangedNotification(events);
         });
-        await this.fileWatcher.start();
+        this.fileWatcher.start().catch((err) => {
+          console.error('[StorageProvider] fileWatcher start error:', err);
+        });
       } else {
         // Reconnect: send full_purge so server knows state may have drifted.
         this.enqueueResponse({

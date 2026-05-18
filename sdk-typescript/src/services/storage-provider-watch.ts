@@ -58,14 +58,10 @@ export class FileWatcher {
 
   /**
    * Start watching. Resolves when the watcher is ready.
+   * Does not pre-scan the directory tree — if inotify is exhausted,
+   * chokidar will emit an ENOSPC error which triggers degraded mode.
    */
   async start(): Promise<void> {
-    // Check if directory tree would exceed inotify limits.
-    if (shouldDegrade(this.rootDir)) {
-      this.enterDegradedMode();
-      return;
-    }
-
     const ignoredPaths = buildIgnoredPatterns(this.rootDir);
 
     this.watcher = chokidar.watch(this.rootDir, {
@@ -83,6 +79,10 @@ export class FileWatcher {
       .on('unlinkDir', (p) => this.handleEvent(p, 'FILE_CHANGE_TYPE_DELETED'))
       .on('error', (err: unknown) => {
         const error = err instanceof Error ? err : new Error(String(err));
+        if ((error as NodeJS.ErrnoException).code === 'ENOSPC') {
+          this.enterDegradedMode();
+          return;
+        }
         this.handleWatcherError(error);
       });
 
@@ -265,43 +265,3 @@ function matchGlob(pattern: string, str: string): boolean {
   return new RegExp(regexStr).test(str);
 }
 
-/**
- * Check if the directory tree would exceed 80% of the inotify watch limit.
- */
-function shouldDegrade(rootDir: string): boolean {
-  // Only relevant on Linux.
-  try {
-    const data = fs.readFileSync('/proc/sys/fs/inotify/max_user_watches', 'utf-8');
-    const maxWatches = parseInt(data.trim(), 10);
-    if (isNaN(maxWatches) || maxWatches <= 0) return false;
-
-    const dirCount = countDirectories(rootDir);
-    return dirCount > (maxWatches * 80 / 100);
-  } catch {
-    // Not Linux or can't read — proceed optimistically.
-    return false;
-  }
-}
-
-/**
- * Count directories under root, respecting default ignore list.
- */
-function countDirectories(root: string): number {
-  let count = 0;
-  const walk = (dir: string) => {
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue;
-        if (DEFAULT_IGNORE_DIRS.has(entry.name)) continue;
-        count++;
-        walk(path.join(dir, entry.name));
-      }
-    } catch {
-      // Skip inaccessible directories.
-    }
-  };
-  count++; // Count root itself.
-  walk(root);
-  return count;
-}
