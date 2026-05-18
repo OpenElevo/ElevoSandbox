@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/OpenElevo/ElevoWorkspace/compare/workspace-sdk-v0.3.0...workspace-sdk-v0.4.0) (2026-05-18)
+
+
+### Features
+
+* **server:** JWKS 模块支持 ES256 (ECDSA P-256) 签名算法 ([fb58f62](https://github.com/OpenElevo/ElevoWorkspace/commit/fb58f622678336bf8e783d47733d8ff5650a9fa1))
+
+
+### Bug Fixes
+
+* **sdk-typescript:** add idle-timeout dead-connection detection in StorageProvider ([614426f](https://github.com/OpenElevo/ElevoWorkspace/commit/614426f8bbfcdb0af2e6dc41bda36089029d7047))
+* **sdk:** make fileWatcher.start() fire-and-forget to prevent handshake deadlock ([82c2c57](https://github.com/OpenElevo/ElevoWorkspace/commit/82c2c57e062193627965df25571110da4b4a726f))
+
 ## [0.3.0](https://github.com/OpenElevo/ElevoWorkspace/compare/workspace-sdk-v0.2.0...workspace-sdk-v0.3.0) (2026-05-13)
 
 
