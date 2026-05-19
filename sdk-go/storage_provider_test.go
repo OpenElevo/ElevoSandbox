@@ -15,6 +15,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// testConnDone returns an atomic.Value holding a never-closed channel,
+// suitable for initializing fileWatcher.connDone in tests.
+func testConnDone() *atomic.Value {
+	var v atomic.Value
+	v.Store(make(chan struct{}))
+	return &v
+}
+
 // ============================================================
 // pathGuard tests
 // ============================================================
@@ -306,6 +314,7 @@ func TestEventCoalescing_SamePathDedup(t *testing.T) {
 	fw := &fileWatcher{
 		rootDir:       dir,
 		responseCh:    responseCh,
+		connDone:      testConnDone(),
 		pendingEvents: make(map[string]*pb.FileChangeEvent),
 		done:          make(chan struct{}),
 	}
@@ -346,6 +355,7 @@ func TestEventCoalescing_MultiplePathsPreserved(t *testing.T) {
 	fw := &fileWatcher{
 		rootDir:       dir,
 		responseCh:    responseCh,
+		connDone:      testConnDone(),
 		pendingEvents: make(map[string]*pb.FileChangeEvent),
 		done:          make(chan struct{}),
 	}
@@ -438,8 +448,9 @@ func TestOsErrorResponse_Mapping(t *testing.T) {
 func TestIsIgnored_DefaultDirs(t *testing.T) {
 	dir := t.TempDir()
 	fw := &fileWatcher{
-		rootDir: dir,
-		done:    make(chan struct{}),
+		rootDir:  dir,
+		connDone: testConnDone(),
+		done:     make(chan struct{}),
 	}
 
 	tests := []struct {
@@ -1094,8 +1105,9 @@ func TestOpCopy_Directory(t *testing.T) {
 func TestIsIgnored_AllDefaultDirs(t *testing.T) {
 	dir := t.TempDir()
 	fw := &fileWatcher{
-		rootDir: dir,
-		done:    make(chan struct{}),
+		rootDir:  dir,
+		connDone: testConnDone(),
+		done:     make(chan struct{}),
 	}
 
 	// Test ALL default ignore directories.
@@ -1133,6 +1145,7 @@ func TestIsIgnored_ElevoignoreRules(t *testing.T) {
 	fw := &fileWatcher{
 		rootDir:     dir,
 		ignoreRules: rules,
+		connDone:    testConnDone(),
 		done:        make(chan struct{}),
 	}
 

@@ -39,6 +39,11 @@ type fileWatcher struct {
 	rootDir    string
 	responseCh chan<- *pb.ClientMessage
 
+	// connDone shares the StorageProvider's per-connection done channel.
+	// Closed when the current gRPC connection ends, unblocking trySend
+	// so the fileWatcher does not deadlock on a full responseCh.
+	connDone *atomic.Value
+
 	// .elevoignore rules.
 	ignoreRules []string
 
@@ -55,7 +60,7 @@ type fileWatcher struct {
 	done chan struct{}
 }
 
-func newFileWatcher(rootDir string, responseCh chan<- *pb.ClientMessage) (*fileWatcher, error) {
+func newFileWatcher(rootDir string, responseCh chan<- *pb.ClientMessage, connDone *atomic.Value) (*fileWatcher, error) {
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -65,6 +70,7 @@ func newFileWatcher(rootDir string, responseCh chan<- *pb.ClientMessage) (*fileW
 		watcher:       watcher,
 		rootDir:       rootDir,
 		responseCh:    responseCh,
+		connDone:      connDone,
 		pendingEvents: make(map[string]*pb.FileChangeEvent),
 		done:          make(chan struct{}),
 	}
@@ -211,12 +217,15 @@ func (fw *fileWatcher) flush() {
 	}
 }
 
-// trySend sends a message to responseCh, aborting if the done channel is closed.
-// Prevents goroutine leaks when the gRPC stream has ended.
+// trySend sends a message to responseCh, aborting if the done channel is closed
+// or the current gRPC connection has ended. Prevents goroutine leaks when the
+// gRPC stream has ended.
 func (fw *fileWatcher) trySend(msg *pb.ClientMessage) {
+	ch, _ := fw.connDone.Load().(chan struct{})
 	select {
 	case fw.responseCh <- msg:
 	case <-fw.done:
+	case <-ch:
 	}
 }
 

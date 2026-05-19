@@ -22,15 +22,44 @@ use super::workspace::{
     FileInfoResponse, ListFilesResponse, PathQuery, ReadFileResponse, WriteFileRequest,
 };
 
-/// Resolve the storage ID for a share, accounting for remote tenants.
-/// Remote backends are registered under bare `{tenant_uuid}`, while
-/// local backends use `"namespaces/{tenant_uuid}"`.
-fn resolve_storage_id(share: &crate::domain::share::Share, state: &AppState) -> String {
-    let bare_id = share.owner_tenant_id.simple_string();
-    if state.workspace_service.storage_router().has_override(&bare_id) {
-        bare_id
+/// Resolve the storage backend ID and effective path for a share operation.
+///
+/// Returns `(storage_id, effective_path)` where:
+/// - **Per-workspace StorageProvider**: `storage_id` is the workspace UUID (`source_path`),
+///   and `effective_path` is relative to the workspace root (user-provided path only).
+/// - **Legacy global StorageProvider**: `storage_id` is the tenant UUID, and
+///   `effective_path` includes the `source_path` prefix.
+///
+/// This mirrors the resolution logic in `share_handler::create_share`.
+fn resolve_storage_target(
+    share: &crate::domain::share::Share,
+    state: &AppState,
+    user_path: &str,
+    ns_root: &std::path::Path,
+) -> Result<(String, String), crate::error::Error> {
+    let tenant_id = share.owner_tenant_id.simple_string();
+
+    if state.workspace_service.storage_router().has_override(&share.source_path) {
+        // Per-workspace StorageProvider: source_path IS the workspace root.
+        // The backend is already scoped to the workspace directory, so the
+        // effective path is just the sanitized user path (no source_path prefix).
+        let sanitized = path_security::sanitize_share_path(ns_root, &share.source_path, user_path)?;
+        let relative = sanitized.strip_prefix(ns_root).unwrap_or(&sanitized);
+        let source_prefix = format!("{}/", share.source_path);
+        let effective = relative
+            .to_string_lossy()
+            .strip_prefix(&source_prefix)
+            .unwrap_or("")
+            .to_string();
+        Ok((share.source_path.clone(), effective))
+    } else if state.workspace_service.storage_router().has_override(&tenant_id) {
+        // Legacy global StorageProvider: source_path is a subdirectory within the tenant.
+        let effective = resolve_share_path(ns_root, &share.source_path, user_path)?;
+        Ok((tenant_id, effective))
     } else {
-        format!("namespaces/{}", share.owner_tenant_id.simple_string())
+        // No remote override — use local namespaced storage.
+        let effective = resolve_share_path(ns_root, &share.source_path, user_path)?;
+        Ok((format!("namespaces/{}", tenant_id), effective))
     }
 }
 
@@ -82,12 +111,16 @@ pub async fn read_share_file(
     let ns_root = state
         .namespace_service
         .namespace_path(share.owner_tenant_id);
-    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
-        Ok(p) => p,
+    let (storage_id, effective_path) = match resolve_storage_target(
+        &share,
+        &state,
+        &query.path,
+        &ns_root,
+    ) {
+        Ok(v) => v,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()
@@ -155,12 +188,16 @@ pub async fn write_share_file(
     let ns_root = state
         .namespace_service
         .namespace_path(share.owner_tenant_id);
-    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
-        Ok(p) => p,
+    let (storage_id, effective_path) = match resolve_storage_target(
+        &share,
+        &state,
+        &query.path,
+        &ns_root,
+    ) {
+        Ok(v) => v,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()
@@ -205,13 +242,17 @@ pub async fn delete_share_file(
     let ns_root = state
         .namespace_service
         .namespace_path(share.owner_tenant_id);
-    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
-        Ok(p) => p,
+    let (storage_id, effective_path) = match resolve_storage_target(
+        &share,
+        &state,
+        &query.path,
+        &ns_root,
+    ) {
+        Ok(v) => v,
         Err(e) => return super::tenant_handler::error_response(e),
     };
     let recursive = query.recursive.as_deref() == Some("true");
 
-    let storage_id = resolve_storage_id(&share, &state);
     let storage = state.workspace_service.storage();
 
     let result = match storage.stat(&storage_id, &effective_path).await {
@@ -263,12 +304,16 @@ pub async fn list_share_files(
     let ns_root = state
         .namespace_service
         .namespace_path(share.owner_tenant_id);
-    let effective_path = match resolve_share_path(&ns_root, &share.source_path, &query.path) {
-        Ok(p) => p,
+    let (storage_id, effective_path) = match resolve_storage_target(
+        &share,
+        &state,
+        &query.path,
+        &ns_root,
+    ) {
+        Ok(v) => v,
         Err(e) => return super::tenant_handler::error_response(e),
     };
 
-    let storage_id = resolve_storage_id(&share, &state);
     match state
         .workspace_service
         .storage()

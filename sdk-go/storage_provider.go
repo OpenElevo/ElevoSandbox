@@ -77,6 +77,11 @@ type StorageProvider struct {
 
 	// Connection state for external inspection.
 	connected atomic.Bool
+
+	// Per-connection done signal. Closed when the current gRPC connection ends,
+	// unblocking senders that are waiting on a full responseCh after the
+	// responseWriter has exited.
+	connDone atomic.Value // stores chan struct{}
 }
 
 // NewStorageProvider creates a new StorageProvider.
@@ -84,7 +89,7 @@ type StorageProvider struct {
 func NewStorageProvider(conn *grpc.ClientConn, config StorageProviderConfig) *StorageProvider {
 	config.applyDefaults()
 	ctx, cancel := context.WithCancel(context.Background())
-	return &StorageProvider{
+	sp := &StorageProvider{
 		config:        config,
 		conn:          conn,
 		client:        pb.NewClientStorageServiceClient(conn),
@@ -93,6 +98,10 @@ func NewStorageProvider(conn *grpc.ClientConn, config StorageProviderConfig) *St
 		ctx:           ctx,
 		cancel:        cancel,
 	}
+	// Initialize with a never-closed channel so trySendResponse's select
+	// on connDone is safe even before the first connectAndServe call.
+	sp.connDone.Store(make(chan struct{}))
+	return sp
 }
 
 // IsConnected returns whether the provider is currently connected to the server.
@@ -126,7 +135,7 @@ func (sp *StorageProvider) Share(ctx context.Context) error {
 	defer sp.pathGuard.Close()
 
 	// Start file change watcher.
-	sp.watcher, err = newFileWatcher(sp.config.LocalDir, sp.responseCh)
+	sp.watcher, err = newFileWatcher(sp.config.LocalDir, sp.responseCh, &sp.connDone)
 	if err != nil {
 		return fmt.Errorf("init file watcher: %w", err)
 	}
@@ -173,6 +182,12 @@ func (sp *StorageProvider) Share(ctx context.Context) error {
 // processes requests until the stream ends. Returns the time of successful
 // connection (zero if never connected).
 func (sp *StorageProvider) connectAndServe(ctx context.Context) (time.Time, error) {
+	// Create a per-connection done channel so senders (workers, fileWatcher)
+	// can unblock when this connection ends, even if ctx is still alive.
+	connDone := make(chan struct{})
+	sp.connDone.Store(connDone)
+	defer close(connDone)
+
 	// Establish control stream.
 	stream, err := sp.client.Connect(sp.withAuth(ctx))
 	if err != nil {
@@ -302,13 +317,17 @@ func (sp *StorageProvider) connectAndServe(ctx context.Context) (time.Time, erro
 }
 
 // trySendResponse attempts to send a message to the response channel.
-// Returns false if the provider context is cancelled (avoiding deadlock when
-// the responseWriter has exited and the channel is full).
+// Returns false if the provider context is cancelled or the current
+// connection has ended (avoiding deadlock when the responseWriter has
+// exited and the channel is full).
 func (sp *StorageProvider) trySendResponse(msg *pb.ClientMessage) bool {
+	ch, _ := sp.connDone.Load().(chan struct{})
 	select {
 	case sp.responseCh <- msg:
 		return true
 	case <-sp.ctx.Done():
+		return false
+	case <-ch:
 		return false
 	}
 }
