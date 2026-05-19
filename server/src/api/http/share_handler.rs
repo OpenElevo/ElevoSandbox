@@ -102,23 +102,34 @@ pub async fn create_share(
     };
 
     if tenant.is_remote() {
-        // Remote tenant: StorageProvider must be connected
-        let storage_id = owner_id.simple_string();
-        if !state.workspace_service.storage_router().has_override(&storage_id) {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(serde_json::json!({
-                    "error": {"code": "SERVICE_UNAVAILABLE", "message": "远程存储未连接，StorageProvider 尚未上线"}
-                })),
-            )
-                .into_response();
-        }
+        // Remote tenant: resolve the correct storage backend.
+        // Per-workspace StorageProviders register under the workspace UUID (source_path);
+        // legacy global StorageProviders register under the tenant UUID.
+        let source_id = &params.source_path;
+        let tenant_id = owner_id.simple_string();
+
+        let (storage_id, stat_path): (&str, &str) =
+            if state.workspace_service.storage_router().has_override(source_id) {
+                // Per-workspace StorageProvider: source_path IS the workspace root
+                (source_id, "")
+            } else if state.workspace_service.storage_router().has_override(&tenant_id) {
+                // Legacy global StorageProvider: source_path is a subdirectory
+                (&tenant_id, source_id)
+            } else {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({
+                        "error": {"code": "SERVICE_UNAVAILABLE", "message": "远程存储未连接，StorageProvider 尚未上线"}
+                    })),
+                )
+                    .into_response();
+            };
 
         // Check source_path exists via StorageBackend (gRPC to StorageProvider)
         match state
             .workspace_service
             .storage()
-            .stat(&storage_id, &params.source_path)
+            .stat(storage_id, stat_path)
             .await
         {
             Ok(stat) if stat.file_type == crate::infra::storage::FileType::Directory => {}

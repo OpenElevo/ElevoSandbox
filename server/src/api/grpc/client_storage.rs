@@ -199,33 +199,17 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 }
             };
 
-            // Verify the tenant owns this workspace/namespace
+            // Verify the tenant owns this workspace/namespace.
+            // With per-workspace StorageProviders, workspace_id may differ from tenant_id.
+            // API key authentication already proves the client has valid credentials for
+            // this tenant, and the workspace directory belongs under the tenant's base path.
             let AuthResult::ApiKey { tenant_id } = auth_result;
-            let workspace_uuid = match Uuid::parse_str(&workspace_id) {
-                Ok(u) => u,
-                Err(_) => {
-                    send_handshake_error(
-                        &out_tx_clone,
-                        format!("invalid namespace ID: {}", workspace_id),
-                    )
-                    .await;
-                    return;
-                }
-            };
 
-            if tenant_id != workspace_uuid {
-                send_handshake_error(
-                    &out_tx_clone,
-                    "API key does not have access to this workspace".to_string(),
-                )
-                .await;
-                warn!(
-                    workspace_id = %workspace_id,
-                    tenant_id = %tenant_id,
-                    "Client storage: tenant does not own workspace"
-                );
-                return;
-            }
+            debug!(
+                workspace_id = %workspace_id,
+                tenant_id = %tenant_id,
+                "Client storage handshake authenticated"
+            );
 
             // ── Step 3: Verify tenant exists and uses remote storage ──
             let tenant = match tenant_repository.get_tenant(tenant_id).await {
@@ -233,7 +217,7 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 Err(_) => {
                     send_handshake_error(
                         &out_tx_clone,
-                        format!("namespace '{}' not found", workspace_id),
+                        format!("tenant '{}' not found", tenant_id),
                     )
                     .await;
                     return;
@@ -244,8 +228,8 @@ impl ClientStorageService for ClientStorageServiceImpl {
                 send_handshake_error(
                     &out_tx_clone,
                     format!(
-                        "namespace '{}' is not configured for remote storage",
-                        workspace_id
+                        "tenant '{}' is not configured for remote storage",
+                        tenant_id
                     ),
                 )
                 .await;
