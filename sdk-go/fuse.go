@@ -344,6 +344,11 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 	}
 
 	// Ensure binary is available
+	if m.binaryPath != "" {
+		if _, err := os.Stat(m.binaryPath); err != nil {
+			m.binaryPath = ""
+		}
+	}
 	if m.binaryPath == "" {
 		binPath, err := EnsureBinary(DefaultVersion, false, "", "")
 		if err != nil {
@@ -609,6 +614,11 @@ func (s *FuseService) Mount(workspaceID string, opts ...FuseMountServiceOptions)
 	}
 
 	// Ensure binary
+	if s.binaryPath != "" {
+		if _, err := os.Stat(s.binaryPath); err != nil {
+			s.binaryPath = "" // re-download if cached binary was deleted
+		}
+	}
 	if s.binaryPath == "" {
 		binPath, err := EnsureBinary(s.binaryVersion, false, s.proxy, s.httpServer)
 		if err != nil {
