@@ -512,12 +512,21 @@ impl FileSystemService for FileSystemServiceImpl {
             .await
             .map_err(storage_error_to_status)?;
 
-        // Set permissions if specified
+        // Set permissions if specified (non-fatal — file already created)
         if req.mode != 0 {
-            self.storage
+            if let Err(e) = self
+                .storage
                 .set_permissions(&req.workspace_id, &req.path, req.mode)
                 .await
-                .map_err(storage_error_to_status)?;
+            {
+                tracing::warn!(
+                    workspace_id = %req.workspace_id,
+                    path = %req.path,
+                    mode = req.mode,
+                    error = %e,
+                    "set_permissions failed after create (non-fatal)"
+                );
+            }
         }
 
         // Get the created file's attributes
@@ -671,10 +680,23 @@ impl FileSystemService for FileSystemServiceImpl {
             "write_at"
         );
 
-        self.storage
+        let result = self
+            .storage
             .write_file_at(&req.workspace_id, &req.path, req.offset, &req.data)
-            .await
-            .map_err(storage_error_to_status)?;
+            .await;
+
+        if let Err(ref e) = result {
+            tracing::error!(
+                workspace_id = %req.workspace_id,
+                path = %req.path,
+                offset = req.offset,
+                size = req.data.len(),
+                error = %e,
+                "write_file_at failed"
+            );
+        }
+
+        result.map_err(storage_error_to_status)?;
 
         Ok(Response::new(FsWriteAtResponse {
             bytes_written: req.data.len() as u64,

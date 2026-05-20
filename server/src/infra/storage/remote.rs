@@ -489,6 +489,13 @@ impl RemoteStorageBackend {
                 let code =
                     StorageErrorCode::try_from(e.code).unwrap_or(StorageErrorCode::Unspecified);
                 crate::infra::metrics::increment_remote_op_error(op_name, &format!("{:?}", code));
+                tracing::warn!(
+                    workspace_id = %self.workspace_id,
+                    op = op_name,
+                    error_code = ?code,
+                    error_msg = %e.message,
+                    "remote storage operation returned error"
+                );
             }
         }
 
