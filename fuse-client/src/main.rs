@@ -96,7 +96,7 @@ fn mount(args: MountArgs) -> Result<()> {
 
     // AutoUnmount requires allow_other (fuser adds it automatically)
     // Only use AutoUnmount if allow_other is explicitly enabled or user_allow_other is set
-    if args.allow_other || args.allow_root {
+    if args.allow_other {
         mount_options.push(MountOption::AutoUnmount);
     }
 

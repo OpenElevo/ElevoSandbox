@@ -123,6 +123,22 @@ func tryDownloadFromServer(serverURL string, destPath string, proxy string) bool
 // Download priority:
 // 1. From workspace server (if serverURL provided and binary available)
 // 2. From GitHub Releases (fallback)
+// setcap attempts to set cap_sys_admin+ep on the binary so it can open
+// /dev/fuse when running as a non-root user. Returns nil on success, or
+// an error if setcap is not available or the current user lacks privileges.
+func setcap(binPath string) error {
+	// Try setcap first, then fall back to /sbin/setcap
+	setcapPath, err := exec.LookPath("setcap")
+	if err != nil {
+		if _, err2 := os.Stat("/sbin/setcap"); err2 == nil {
+			setcapPath = "/sbin/setcap"
+		} else {
+			return err
+		}
+	}
+	return exec.Command(setcapPath, "cap_sys_admin+ep", binPath).Run()
+}
+
 func downloadBinary(version string, proxy string, serverURL string) (string, error) {
 	plat, arch, err := getPlatformInfo()
 	if err != nil {
@@ -164,6 +180,13 @@ func downloadBinary(version string, proxy string, serverURL string) (string, err
 		return "", fmt.Errorf("failed to chmod: %w", err)
 	}
 
+	// Try to set cap_sys_admin+ep so workspace-fuse can open /dev/fuse
+	// as a non-root user. Ignore errors — may not have setcap or privileges.
+	if err := setcap(tempPath); err != nil {
+		// Debug-level: not fatal, binary will work if run as root or with ambient caps
+		_ = err
+	}
+
 	// Verify it's a valid executable
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -198,6 +221,8 @@ func EnsureBinary(version string, forceDownload bool, proxy string, serverURL st
 			defer cancel()
 			cmd := exec.CommandContext(ctx, binPath, "--version")
 			if err := cmd.Run(); err == nil {
+				// Ensure capability is set (may have been lost after upgrade)
+				_ = setcap(binPath)
 				return binPath, nil
 			}
 		}
@@ -357,6 +382,11 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 	if m.token != "" {
 		args = append(args, "--token", m.token)
 	}
+
+	// Allow all users to access the mount.
+	// Without this, only the mounting user (elevo) can read/write,
+	// and sandbox processes running as root get Permission denied.
+	args = append(args, "--allow-other")
 
 	if m.debug {
 		args = append(args, "--debug")
