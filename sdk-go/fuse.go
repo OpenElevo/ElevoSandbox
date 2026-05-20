@@ -239,6 +239,21 @@ func mustParseURL(rawURL string) *url.URL {
 	return u
 }
 
+// isFuseMountedAt checks whether a FUSE workspace is mounted at the given path.
+func isFuseMountedAt(mountPoint string) bool {
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[1] == mountPoint && fields[2] == "fuse.workspace" {
+			return true
+		}
+	}
+	return false
+}
+
 // FuseMountOptions contains options for FUSE mount
 type FuseMountOptions struct {
 	// Server is the gRPC server URL
@@ -397,15 +412,6 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		args = append(args, "--debug")
 	}
 
-	// Place a sentinel file in the mount point directory. When the FUSE
-	// filesystem mounts over the directory, the sentinel disappears — this
-	// is a reliable signal that the mount is active.
-	sentinelPath := filepath.Join(m.mountPoint, ".fuse_mount_sentinel")
-	if err := os.WriteFile(sentinelPath, []byte("pending"), 0644); err != nil {
-		m.cleanup()
-		return "", fmt.Errorf("failed to create mount sentinel: %w", err)
-	}
-
 	// Start the FUSE process, capturing stderr for error reporting
 	m.cmd = exec.Command(m.binaryPath, args...)
 	m.cmd.Stdout = nil
@@ -413,7 +419,6 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 	m.cmd.Stderr = &stderrBuf
 
 	if err := m.cmd.Start(); err != nil {
-		os.Remove(sentinelPath)
 		m.cleanup()
 		return "", fmt.Errorf("failed to start workspace-fuse: %w", err)
 	}
@@ -424,7 +429,10 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		procDone <- m.cmd.Wait()
 	}()
 
-	// Wait for mount to be ready
+	// Wait for mount to be ready by polling /proc/mounts.
+	// We can't rely on the sentinel alone — workspace-fuse must delete it
+	// before creating the FUSE session to avoid a deadlock, which creates
+	// a race where the sentinel is gone but the mount isn't active yet.
 	timeout := 30 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		timeout = time.Until(deadline)
@@ -444,8 +452,8 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		default:
 		}
 
-		// Sentinel gone = FUSE filesystem has mounted over the directory
-		if _, err := os.Stat(sentinelPath); os.IsNotExist(err) {
+		// Check /proc/mounts for the actual FUSE mount — authoritative signal.
+		if isFuseMountedAt(m.mountPoint) {
 			m.mounted = true
 			return m.mountPoint, nil
 		}
@@ -458,8 +466,7 @@ func (m *FuseMount) Mount(ctx context.Context) (string, error) {
 		}
 	}
 
-	// Timeout — clean up sentinel and report
-	os.Remove(sentinelPath)
+	// Timeout — clean up and report
 	m.cleanup()
 	errMsg := strings.TrimSpace(stderrBuf.String())
 	if errMsg != "" {
