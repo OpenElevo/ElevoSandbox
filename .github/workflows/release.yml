@@ -56,7 +56,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - target: x86_64-unknown-linux-gnu
+          - target: x86_64-unknown-linux-musl
             arch: amd64
           - target: aarch64-unknown-linux-gnu
             arch: arm64
@@ -71,7 +71,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install musl tools (amd64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get install -y musl-tools
+
       - name: Install cross
+        if: matrix.target != 'x86_64-unknown-linux-musl'
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Cache cargo registry
@@ -83,7 +90,15 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-fuse-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build workspace-fuse with cross
+      - name: Build workspace-fuse (musl, amd64)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: |
+          cargo build --release --package workspace-fuse --target ${{ matrix.target }}
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/workspace-fuse artifacts/workspace-fuse-linux-${{ matrix.arch }}
+
+      - name: Build workspace-fuse with cross (arm64)
+        if: matrix.target != 'x86_64-unknown-linux-musl'
         run: |
           cross build --release --package workspace-fuse --target ${{ matrix.target }}
           mkdir -p artifacts
