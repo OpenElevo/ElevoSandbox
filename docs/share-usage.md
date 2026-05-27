@@ -111,7 +111,7 @@ workspaces, err := client.Workspace.List(ctx)
 
 ### 作为 StorageProvider 共享本地文件（远程租户）
 
-如果你的租户是 `storage_type = remote`，需要在你的机器上运行 StorageProvider，将本地目录暴露给服务端：
+如果你的租户是 `storage_type = remote`，需要先在你的机器上运行 StorageProvider，将本地目录暴露给服务端。`provider.share()` 只负责建立并保持 StorageProvider 到服务端的 gRPC 连接通道；通道建立后，还需要调用 `POST /api/v1/shares` 创建 Share，其他租户才能通过 Share 访问该目录。
 
 **TypeScript：**
 
@@ -122,7 +122,7 @@ const provider = client.newStorageProvider({
   token: 'sk_your_api_key_token',
 });
 
-// 启动 StorageProvider，保持运行
+// 启动 StorageProvider，保持运行。该调用只建立连接通道，不会自动创建 Share。
 await provider.share(AbortSignal.timeout(3600_000));
 ```
 
@@ -135,11 +135,28 @@ provider := client.NewStorageProvider(workspace.StorageProviderConfig{
     Token:       "sk_your_api_key_token",
 })
 
-// 启动并阻塞
+// 启动并阻塞。该调用只建立连接通道，不会自动创建 Share。
 provider.Share(ctx)
 ```
 
-StorageProvider 启动后会通过 gRPC 双向流连接到服务端，完成握手认证后，服务端对该租户的所有文件操作都会通过这个流转发到你的本地 `localDir`。
+StorageProvider 启动后会通过 gRPC 双向流连接到服务端，完成握手认证后，服务端就可以把该租户的文件操作通过这个流转发到你的本地 `localDir`。
+
+连接建立后，使用同一个 API Key 创建 Share：
+
+```http
+POST /api/v1/shares
+Authorization: Bearer sk_your_api_key_token
+Content-Type: application/json
+
+{
+  "name": "my-local-data",
+  "source_path": ".",
+  "description": "本地目录共享",
+  "visibility": "private"
+}
+```
+
+`source_path` 是 StorageProvider 暴露目录内的相对目录，必须已经存在；共享整个 `localDir` 时使用 `"."`。创建成功后，服务端返回 `share.id`，后续文件访问、授权等操作都使用这个 Share ID。
 
 ### 在 StorageProvider 上注册 NFS 传输（可选）
 
