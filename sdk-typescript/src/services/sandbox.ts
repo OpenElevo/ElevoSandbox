@@ -3,9 +3,9 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { Sandbox, CreateSandboxParams, SandboxState } from '../types';
-import { SandboxServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError, isNotFound, WorkspaceError } from '../errors';
+import { Sandbox, CreateSandboxParams, SandboxState } from '../types/index.js';
+import { SandboxServiceClient, createMetadata, promisifyUnary } from '../grpc.js';
+import { convertGrpcError, isNotFound, WorkspaceError } from '../errors/index.js';
 
 // Proto SandboxState enum values
 const SANDBOX_STATE_MAP: Record<string, SandboxState> = {

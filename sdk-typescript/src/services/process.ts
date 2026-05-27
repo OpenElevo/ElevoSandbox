@@ -3,9 +3,9 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { CommandResult, RunCommandOptions, ProcessEvent } from '../types';
-import { ProcessServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError, ProcessError } from '../errors';
+import { CommandResult, RunCommandOptions, ProcessEvent } from '../types/index.js';
+import { ProcessServiceClient, createMetadata, promisifyUnary } from '../grpc.js';
+import { convertGrpcError, ProcessError } from '../errors/index.js';
 
 /**
  * Service for executing commands in sandboxes

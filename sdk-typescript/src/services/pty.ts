@@ -4,9 +4,9 @@
 
 import * as grpc from '@grpc/grpc-js';
 import { EventEmitter } from 'events';
-import { PtyOptions, PtyHandle } from '../types';
-import { PtyServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError } from '../errors';
+import { PtyOptions, PtyHandle } from '../types/index.js';
+import { PtyServiceClient, createMetadata, promisifyUnary } from '../grpc.js';
+import { convertGrpcError } from '../errors/index.js';
 
 /**
  * PTY session with bidirectional gRPC stream

@@ -3,9 +3,9 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { Workspace, CreateWorkspaceParams, FileInfo, StorageType } from '../types';
-import { WorkspaceServiceClient, createMetadata, promisifyUnary } from '../grpc';
-import { convertGrpcError, isNotFound } from '../errors';
+import { Workspace, CreateWorkspaceParams, FileInfo, StorageType } from '../types/index.js';
+import { WorkspaceServiceClient, createMetadata, promisifyUnary } from '../grpc.js';
+import { convertGrpcError, isNotFound } from '../errors/index.js';
 
 /**
  * Service for managing workspaces and file operations

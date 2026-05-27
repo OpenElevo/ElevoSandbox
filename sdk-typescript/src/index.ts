@@ -4,13 +4,13 @@
  * @packageDocumentation
  */
 
-export { WorkspaceClient, type ClientOptions } from './client';
+export { WorkspaceClient, type ClientOptions } from './client.js';
 
 // Services
-export * from './services';
+export * from './services/index.js';
 
 // Types
-export * from './types';
+export * from './types/index.js';
 
 // Errors
-export * from './errors';
+export * from './errors/index.js';

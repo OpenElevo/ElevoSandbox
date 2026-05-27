@@ -4,8 +4,8 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { FileSystemServiceClient, createMetadata } from '../grpc';
-import { convertGrpcError } from '../errors';
+import { FileSystemServiceClient, createMetadata } from '../grpc.js';
+import { convertGrpcError } from '../errors/index.js';
 
 /**
  * Service for low-level filesystem operations (FUSE support)

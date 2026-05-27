@@ -1,8 +1,8 @@
 import * as fs from 'fs/promises';
 import * as fsSync from 'fs';
 import * as path from 'path';
-import { PathGuard } from './storage-provider-path';
-import { FileLockMap } from './storage-provider-lock';
+import { PathGuard } from './storage-provider-path.js';
+import { FileLockMap } from './storage-provider-lock.js';
 
 // ============================================================
 // Types

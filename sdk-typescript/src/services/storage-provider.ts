@@ -1,12 +1,12 @@
 import * as grpc from '@grpc/grpc-js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { ClientStorageServiceClient, createMetadata } from '../grpc';
-import { StorageProviderConfig } from '../types';
-import { PathGuard } from './storage-provider-path';
-import { StorageOps, OperationResponse } from './storage-provider-ops';
-import { FileLockMap, Semaphore } from './storage-provider-lock';
-import { FileWatcher, FileChangeEvent } from './storage-provider-watch';
+import { ClientStorageServiceClient, createMetadata } from '../grpc.js';
+import { StorageProviderConfig } from '../types/index.js';
+import { PathGuard } from './storage-provider-path.js';
+import { StorageOps, OperationResponse } from './storage-provider-ops.js';
+import { FileLockMap, Semaphore } from './storage-provider-lock.js';
+import { FileWatcher, FileChangeEvent } from './storage-provider-watch.js';
 
 const DEFAULT_WORKER_POOL_SIZE = 64;
 const DEFAULT_RESPONSE_BUFFER_SIZE = 256;

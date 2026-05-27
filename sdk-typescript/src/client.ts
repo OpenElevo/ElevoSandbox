@@ -3,14 +3,14 @@
  */
 
 import * as grpc from '@grpc/grpc-js';
-import { createClients } from './grpc';
-import { WorkspaceService } from './services/workspace';
-import { SandboxService } from './services/sandbox';
-import { ProcessService } from './services/process';
-import { PtyService } from './services/pty';
-import { FileSystemService } from './services/filesystem';
-import { StorageProvider } from './services/storage-provider';
-import { StorageProviderConfig } from './types';
+import { createClients } from './grpc.js';
+import { WorkspaceService } from './services/workspace.js';
+import { SandboxService } from './services/sandbox.js';
+import { ProcessService } from './services/process.js';
+import { PtyService } from './services/pty.js';
+import { FileSystemService } from './services/filesystem.js';
+import { StorageProvider } from './services/storage-provider.js';
+import { StorageProviderConfig } from './types/index.js';
 
 /**
  * Client options
@@ -80,6 +80,6 @@ export class WorkspaceClient {
 }
 
 // Re-export types
-export * from './types';
-export * from './errors';
-export { PtySession } from './services/pty';
+export * from './types/index.js';
+export * from './errors/index.js';
+export { PtySession } from './services/pty.js';
