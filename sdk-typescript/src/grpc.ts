@@ -6,6 +6,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import * as path from 'path';
 import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
 
 // Proto loader options
 const PROTO_LOADER_OPTIONS: protoLoader.Options = {
@@ -16,43 +17,39 @@ const PROTO_LOADER_OPTIONS: protoLoader.Options = {
   oneofs: true,
 };
 
-// Try to find proto directory
+function getCurrentModulePath(): string | undefined {
+  if (typeof __filename === 'string') {
+    return __filename;
+  }
+
+  const stack = new Error().stack;
+  const match = stack?.match(/file:\/\/[^)\s]+/);
+  if (!match) {
+    return undefined;
+  }
+
+  return fileURLToPath(match[0].replace(/:\d+:\d+$/, ''));
+}
+
 function getProtoDir(): string {
-  // Strategy 1: Try require.resolve (works in both ESM via createRequire and CJS)
-  try {
-    const modulePath = require.resolve('@openelevo/workspace-sdk');
-    const moduleDir = path.dirname(modulePath);
-    // moduleDir could be dist/cjs or dist, go up to find proto
-    const protoDir1 = path.resolve(moduleDir, '../proto/workspace/v1');
-    if (existsSync(protoDir1)) {
-      return protoDir1;
-    }
-    // Try one more level up (if module is in dist/cjs)
-    const protoDir2 = path.resolve(moduleDir, '../../proto/workspace/v1');
-    if (existsSync(protoDir2)) {
-      return protoDir2;
-    }
-  } catch {
-    // Ignore errors
+  const currentModulePath = getCurrentModulePath();
+  if (!currentModulePath) {
+    throw new Error('Unable to locate @openelevo/workspace-sdk proto files');
   }
 
-  // Strategy 2: Check common locations relative to cwd
-  const cwd = process.cwd();
-  const candidates = [
-    path.resolve(cwd, 'node_modules/@openelevo/workspace-sdk/proto/workspace/v1'),
-    path.resolve(cwd, '../proto/workspace/v1'),
-    path.resolve(cwd, '../../proto/workspace/v1'),
-  ];
+  const moduleDir = path.dirname(currentModulePath);
+  const protoDir = path.resolve(
+    moduleDir,
+    path.basename(moduleDir) === 'cjs'
+      ? '../../proto/workspace/v1'
+      : '../proto/workspace/v1'
+  );
 
-  for (const candidate of candidates) {
-    if (existsSync(candidate)) {
-      return candidate;
-    }
+  if (existsSync(protoDir)) {
+    return protoDir;
   }
 
-  // Final fallback - return the most likely path even if it doesn't exist
-  // This will error with a clear message if it's wrong
-  return path.resolve(cwd, 'node_modules/@openelevo/workspace-sdk/proto/workspace/v1');
+  throw new Error('Unable to locate @openelevo/workspace-sdk proto files');
 }
 
 // Service client types
