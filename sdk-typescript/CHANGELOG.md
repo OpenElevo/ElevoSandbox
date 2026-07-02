@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.1](https://github.com/OpenElevo/ElevoWorkspace/compare/workspace-sdk-v0.4.0...workspace-sdk-v0.4.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* chokidar should be a normal dep instead of dev dep ([f212867](https://github.com/OpenElevo/ElevoWorkspace/commit/f2128674db3b55d9b4b14ec280e86ab94023c164))
+* fix proto dir looking when package is not installed in cwd ([f79a8da](https://github.com/OpenElevo/ElevoWorkspace/commit/f79a8dae3edaa0fd6ff84aa866e1515f5012757f))
+* fix ts-sdk esm ([de97f48](https://github.com/OpenElevo/ElevoWorkspace/commit/de97f48db31f7f33af5a88bb5bbf912546026f5b))
+
 ## [0.4.0](https://github.com/OpenElevo/ElevoWorkspace/compare/workspace-sdk-v0.3.0...workspace-sdk-v0.4.0) (2026-05-18)
 
 
